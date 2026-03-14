@@ -1,4 +1,5 @@
 import { View } from 'react-native';
+import { useSettings } from '@/lib/settings-context';
 
 interface ProgressBarProps {
   step: number;
@@ -6,14 +7,11 @@ interface ProgressBarProps {
 }
 
 export function ProgressBar({ step, total }: ProgressBarProps) {
+  const { theme } = useSettings();
   const progress = (step / total) * 100;
-
   return (
-    <View className="w-full h-1 bg-zinc-100 rounded-full overflow-hidden">
-      <View
-        className="h-full bg-zinc-900 rounded-full"
-        style={{ width: `${progress}%` }}
-      />
+    <View style={{ width: '100%', height: 3, backgroundColor: theme.border, borderRadius: 2, overflow: 'hidden' }}>
+      <View style={{ height: '100%', backgroundColor: theme.text, borderRadius: 2, width: `${progress}%` }} />
     </View>
   );
 }

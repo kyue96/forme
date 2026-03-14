@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -21,6 +21,45 @@ function dateKey(d: Date): string {
 
 function formatDate(d: Date): string {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+}
+
+function parseHeightToCm(height: string): number {
+  const match = height.match(/(\d+)'(\d+)"/);
+  if (!match) return 175;
+  const ft = parseInt(match[1]);
+  const inc = parseInt(match[2]);
+  return Math.round((ft * 12 + inc) * 2.54);
+}
+
+function parseWeightToKg(weight: string): number {
+  const match = weight.match(/(\d+)/);
+  if (!match) return 77;
+  const lbs = parseInt(match[1]);
+  return Math.round(lbs / 2.205);
+}
+
+function calculateTDEE(heightCm: number, weightKg: number, daysPerWeek: number, gender: string): number {
+  const age = 28;
+  let bmr: number;
+  if (gender === 'Female') {
+    bmr = 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
+  } else {
+    bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
+  }
+  const multipliers: Record<number, number> = { 2: 1.375, 3: 1.55, 4: 1.725 };
+  const multiplier = multipliers[daysPerWeek] ?? 1.9;
+  return Math.round(bmr * multiplier);
+}
+
+function getCalorieTarget(tdee: number, goal: string): { calories: number; label: string; rate: string } {
+  if (goal === 'Build muscle' || goal === 'Build strength') {
+    const cal = tdee + (goal === 'Build muscle' ? 400 : 200);
+    return { calories: cal, label: 'Muscle gain surplus', rate: `+${goal === 'Build muscle' ? 400 : 200} cal over maintenance` };
+  }
+  if (goal === 'Lose weight') {
+    return { calories: tdee - 400, label: 'Fat loss deficit', rate: '~0.5–0.8 lbs/week loss' };
+  }
+  return { calories: tdee, label: 'Maintenance', rate: 'Maintain current weight' };
 }
 
 interface MealRow {
@@ -51,6 +90,10 @@ export default function MealsScreen() {
   const [editProt, setEditProt] = useState('');
   const [editCarb, setEditCarb] = useState('');
 
+  const [calorieGoal, setCalorieGoal] = useState<number | null>(null);
+  const [calorieAdjust, setCalorieAdjust] = useState(0);
+  const [tdeeData, setTdeeData] = useState<{ tdee: number; label: string; rate: string } | null>(null);
+
   const dk = dateKey(selectedDate);
   const isToday = dk === dateKey(new Date());
 
@@ -72,6 +115,31 @@ export default function MealsScreen() {
   }, [dk]);
 
   useFocusEffect(useCallback(() => { loadMeals(); }, [loadMeals]));
+
+  useEffect(() => {
+    loadGoal();
+  }, []);
+
+  const loadGoal = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('height, weight, goal, days_per_week, gender')
+        .eq('id', user.id)
+        .single();
+      if (profile?.height && profile?.weight && profile?.days_per_week) {
+        const heightCm = parseHeightToCm(profile.height);
+        const weightKg = parseWeightToKg(profile.weight);
+        const days = parseInt((profile.days_per_week ?? '3').replace('+', ''));
+        const tdee = calculateTDEE(heightCm, weightKg, days, profile.gender ?? 'Male');
+        const target = getCalorieTarget(tdee, profile.goal ?? 'Stay active');
+        setTdeeData({ tdee, label: target.label, rate: target.rate });
+        setCalorieGoal(target.calories);
+      }
+    } catch {}
+  };
 
   const changeDate = (offset: number) => {
     const d = new Date(selectedDate);
@@ -156,6 +224,8 @@ export default function MealsScreen() {
     color: theme.text,
   };
 
+  const effectiveGoal = calorieGoal != null ? calorieGoal + calorieAdjust : null;
+
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
       <AppHeader />
@@ -201,6 +271,51 @@ export default function MealsScreen() {
             </Pressable>
           </View>
         </View>
+
+        {/* Calorie goal card */}
+        {effectiveGoal != null && (
+          <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
+            <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Daily goal</Text>
+                <Text style={{ fontSize: 20, fontWeight: '800', color: theme.text }}>{effectiveGoal} cal</Text>
+              </View>
+              {/* Progress bar */}
+              <View style={{ height: 6, backgroundColor: theme.border, borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
+                <View style={{
+                  height: '100%',
+                  borderRadius: 3,
+                  backgroundColor: totalCal > effectiveGoal ? '#EF4444' : '#22C55E',
+                  width: `${Math.min(100, (totalCal / effectiveGoal) * 100)}%`,
+                }} />
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                <Text style={{ fontSize: 11, color: theme.textSecondary }}>{totalCal} / {effectiveGoal} cal</Text>
+                <Text style={{ fontSize: 11, color: theme.textSecondary }}>{tdeeData?.rate}</Text>
+              </View>
+              {/* Adjust label */}
+              <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                Adjust goal: {calorieAdjust > 0 ? '+' : ''}{calorieAdjust} cal
+              </Text>
+              {/* +/- buttons */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 }}>
+                <Pressable
+                  onPress={() => setCalorieAdjust(a => Math.max(-500, a - 50))}
+                  style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: theme.chromeLight, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Text style={{ color: theme.text, fontWeight: '700' }}>−</Text>
+                </Pressable>
+                <View style={{ flex: 1, height: 2, backgroundColor: theme.border }} />
+                <Pressable
+                  onPress={() => setCalorieAdjust(a => Math.min(500, a + 50))}
+                  style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: theme.chromeLight, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <Text style={{ color: theme.text, fontWeight: '700' }}>+</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        )}
 
         {/* Daily totals */}
         <View style={{ paddingHorizontal: 24, marginBottom: 20 }}>

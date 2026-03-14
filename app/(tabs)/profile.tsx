@@ -223,6 +223,14 @@ export default function ProfileScreen() {
           <Text allowFontScaling style={{ fontSize: 13, color: theme.textSecondary }}>
             {email}
           </Text>
+
+          <Pressable
+            onPress={() => router.push('/settings')}
+            style={{ marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 16, paddingVertical: 8, backgroundColor: theme.surface, borderRadius: 20, borderWidth: 1, borderColor: theme.border }}
+          >
+            <Ionicons name="settings-outline" size={16} color={theme.chrome} />
+            <Text style={{ fontSize: 13, color: theme.textSecondary }}>Settings</Text>
+          </Pressable>
         </View>
 
         {/* Progress dashboard */}

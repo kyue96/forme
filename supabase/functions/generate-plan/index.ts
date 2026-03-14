@@ -33,20 +33,13 @@ Available time: ${session.availableMinutes} minutes
 Target muscle group/focus: ${session.muscleGroup}
 Recently worked muscles (avoid repeating within 48hrs): ${lastWorkedStr || 'None'}
 
-Start with a 5-minute warmup section. Then provide exercises that fit within the available time (minus warmup). Choose exercises appropriate for ${session.location === 'Home' ? 'home with minimal equipment' : 'a fully equipped gym'}.
+Provide exercises that fit within the available time. Choose exercises appropriate for ${session.location === 'Home' ? 'home with minimal equipment' : 'a fully equipped gym'}.
 
 Return ONLY valid JSON with no markdown, no explanation — just the JSON object:
 {
   "dayName": "Today",
   "focus": "${session.muscleGroup}",
   "exercises": [
-    {
-      "name": "Warm-up: Light Cardio + Dynamic Stretching",
-      "sets": 1,
-      "reps": "5 min",
-      "rest": "0 sec",
-      "notes": "Get blood flowing"
-    },
     {
       "name": "Barbell Bench Press",
       "sets": 4,
@@ -79,8 +72,6 @@ Create a structured weekly programme with exactly ${daysCount} workout days. ${
           : ''
       } Include specific exercises appropriate for the equipment and experience level. Avoid exercises that stress the areas listed under "areas to avoid".
 
-Start each day with a warmup exercise entry (5 min warmup as the first exercise).
-
 Return ONLY valid JSON with no markdown, no explanation — just the JSON object:
 {
   "weeklyPlan": [
@@ -88,13 +79,6 @@ Return ONLY valid JSON with no markdown, no explanation — just the JSON object
       "dayName": "Monday",
       "focus": "Push Day (Chest, Shoulders, Triceps)",
       "exercises": [
-        {
-          "name": "Warm-up: Light Cardio + Dynamic Stretching",
-          "sets": 1,
-          "reps": "5 min",
-          "rest": "0 sec",
-          "notes": "Get blood flowing"
-        },
         {
           "name": "Barbell Bench Press",
           "sets": 4,
@@ -115,9 +99,25 @@ Return ONLY valid JSON with no markdown, no explanation — just the JSON object
     });
 
     const raw = message.content[0].type === 'text' ? message.content[0].text : '';
-    // Strip markdown code fences if Claude wraps the JSON
-    const text = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-    const plan = JSON.parse(text);
+    // Strip markdown fences
+    let text = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
+    // Find the outermost JSON object
+    const jsonStart = text.indexOf('{');
+    const jsonEnd = text.lastIndexOf('}');
+    if (jsonStart !== -1 && jsonEnd !== -1) {
+      text = text.slice(jsonStart, jsonEnd + 1);
+    }
+    let plan;
+    try {
+      plan = JSON.parse(text);
+    } catch {
+      // Try to fix common issues: trailing commas before } or ]
+      const fixed = text
+        .replace(/,\s*}/g, '}')
+        .replace(/,\s*]/g, ']')
+        .replace(/[\u0000-\u001F\u007F-\u009F]/g, ' '); // strip control chars
+      plan = JSON.parse(fixed);
+    }
 
     return new Response(JSON.stringify(plan), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },

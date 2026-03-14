@@ -18,6 +18,7 @@ import { ProgressBar } from '@/components/ProgressBar';
 import { QuizTile } from '@/components/QuizTile';
 import { useQuiz } from '@/lib/quiz-store';
 import { QuizAnswers } from '@/lib/types';
+import { useSettings } from '@/lib/settings-context';
 
 const TOTAL_STEPS = 11;
 
@@ -110,6 +111,7 @@ function ScrollWheelPicker({
   selectedIndex: number;
   onSelect: (index: number) => void;
 }) {
+  const { theme } = useSettings();
   const scrollRef = useRef<ScrollView>(null);
   const paddedItems = ['', '', ...items, '', ''];
 
@@ -123,8 +125,7 @@ function ScrollWheelPicker({
   return (
     <View style={{ height: PICKER_HEIGHT, overflow: 'hidden' }}>
       <View
-        className="absolute left-0 right-0 bg-zinc-100 rounded-xl"
-        style={{ top: ITEM_HEIGHT * 2, height: ITEM_HEIGHT } as ViewStyle}
+        style={{ position: 'absolute', left: 0, right: 0, top: ITEM_HEIGHT * 2, height: ITEM_HEIGHT, backgroundColor: theme.surface, borderRadius: 12 } as ViewStyle}
         pointerEvents="none"
       />
       <ScrollView
@@ -143,12 +144,11 @@ function ScrollWheelPicker({
           return (
             <View
               key={index}
-              style={{ height: ITEM_HEIGHT }}
-              className="items-center justify-center"
+              style={{ height: ITEM_HEIGHT, alignItems: 'center', justifyContent: 'center' }}
             >
               <Text
                 allowFontScaling
-                className={`text-lg ${isSelected ? 'font-bold text-zinc-900' : 'text-zinc-300'}`}
+                style={{ fontSize: 18, fontWeight: isSelected ? '700' : '400', color: isSelected ? theme.text : theme.border }}
               >
                 {item}
               </Text>
@@ -187,6 +187,7 @@ export default function QuizStepScreen() {
   const { step } = useLocalSearchParams<{ step: string }>();
   const router = useRouter();
   const { answers, setAnswer, toggleEquipment } = useQuiz();
+  const { theme } = useSettings();
 
   const stepNum = parseInt(step ?? '1', 10);
   const isStatsStep = stepNum === 10;
@@ -250,60 +251,60 @@ export default function QuizStepScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        className="flex-1"
+        style={{ flex: 1 }}
       >
-        <View className="flex-1 px-6 pt-4">
+        <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 16 }}>
           {/* Header */}
-          <View className="flex-row items-center mb-6 gap-4">
+          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 24, gap: 16 }}>
             <Pressable
               onPress={() => stepNum > 1 ? router.back() : router.replace('/(auth)/welcome')}
-              className="w-9 h-9 items-center justify-center"
+              style={{ width: 36, height: 36, alignItems: 'center', justifyContent: 'center' }}
             >
-              <Text className="text-zinc-900 text-xl">←</Text>
+              <Text style={{ color: theme.text, fontSize: 20 }}>←</Text>
             </Pressable>
-            <View className="flex-1">
+            <View style={{ flex: 1 }}>
               <ProgressBar step={stepNum} total={TOTAL_STEPS} />
             </View>
-            <Text allowFontScaling className="text-sm text-zinc-400 w-9 text-right">
+            <Text allowFontScaling style={{ fontSize: 14, color: theme.textSecondary, width: 36, textAlign: 'right' }}>
               {stepNum}/{TOTAL_STEPS}
             </Text>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} className="flex-1">
+          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
             {isStatsStep ? (
               <View>
-                <Text allowFontScaling className="text-2xl font-bold text-zinc-900 mb-1">
+                <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text, marginBottom: 4 }}>
                   Body stats
                 </Text>
-                <Text allowFontScaling className="text-base text-zinc-500 mb-8">
+                <Text allowFontScaling style={{ fontSize: 16, color: theme.textSecondary, marginBottom: 32 }}>
                   Helps us calibrate the right intensity.
                 </Text>
 
-                <Text allowFontScaling className="text-sm font-medium text-zinc-700 mb-2">Height</Text>
+                <Text allowFontScaling style={{ fontSize: 14, fontWeight: '500', color: theme.text, marginBottom: 8 }}>Height</Text>
                 <ScrollWheelPicker items={HEIGHT_OPTIONS} selectedIndex={heightIdx} onSelect={setHeightIdx} />
-                <View className="h-4" />
+                <View style={{ height: 16 }} />
 
-                <Text allowFontScaling className="text-sm font-medium text-zinc-700 mb-2">Current weight</Text>
+                <Text allowFontScaling style={{ fontSize: 14, fontWeight: '500', color: theme.text, marginBottom: 8 }}>Current weight</Text>
                 <ScrollWheelPicker items={WEIGHT_OPTIONS} selectedIndex={weightIdx} onSelect={setWeightIdx} />
-                <View className="h-4" />
+                <View style={{ height: 16 }} />
 
-                <Text allowFontScaling className="text-sm font-medium text-zinc-700 mb-2">Goal weight</Text>
+                <Text allowFontScaling style={{ fontSize: 14, fontWeight: '500', color: theme.text, marginBottom: 8 }}>Goal weight</Text>
                 <ScrollWheelPicker items={WEIGHT_OPTIONS} selectedIndex={goalWeightIdx} onSelect={setGoalWeightIdx} />
               </View>
             ) : tileConfig ? (
               <View>
-                <Text allowFontScaling className="text-2xl font-bold text-zinc-900 mb-1">
+                <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text, marginBottom: 4 }}>
                   {tileConfig.question}
                 </Text>
-                <Text allowFontScaling className="text-base text-zinc-500 mb-8">
+                <Text allowFontScaling style={{ fontSize: 16, color: theme.textSecondary, marginBottom: 32 }}>
                   {tileConfig.subtitle}
                 </Text>
                 <View>
                   {tileConfig.options.map((option) => (
-                    <View key={option} className="flex-row mb-3">
+                    <View key={option} style={{ flexDirection: 'row', marginBottom: 12 }}>
                       <QuizTile
                         label={option}
                         selected={isOptionSelected(option)}
@@ -314,19 +315,24 @@ export default function QuizStepScreen() {
                 </View>
               </View>
             ) : null}
-            <View className="h-6" />
+            <View style={{ height: 24 }} />
           </ScrollView>
 
           {/* CTA */}
-          <View className="pb-4 pt-2">
+          <View style={{ paddingBottom: 16, paddingTop: 8 }}>
             <Pressable
               onPress={handleNext}
               disabled={!canProceed}
-              className={`py-4 rounded-2xl items-center ${canProceed ? 'bg-amber-500' : 'bg-zinc-200'}`}
+              style={{
+                paddingVertical: 16,
+                borderRadius: 16,
+                alignItems: 'center',
+                backgroundColor: canProceed ? theme.text : theme.border,
+              }}
             >
               <Text
                 allowFontScaling
-                className={`text-base font-semibold ${canProceed ? 'text-white' : 'text-zinc-400'}`}
+                style={{ fontSize: 16, fontWeight: '600', color: canProceed ? theme.background : theme.textSecondary }}
               >
                 {isInjuriesStep ? 'Build my plan' : 'Continue'}
               </Text>

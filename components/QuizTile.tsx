@@ -1,4 +1,5 @@
 import { Pressable, Text } from 'react-native';
+import { useSettings } from '@/lib/settings-context';
 
 interface QuizTileProps {
   label: string;
@@ -7,24 +8,26 @@ interface QuizTileProps {
 }
 
 export function QuizTile({ label, selected, onPress }: QuizTileProps) {
+  const { theme } = useSettings();
   return (
     <Pressable
       onPress={onPress}
-      className={`
-        flex-1 min-w-[45%] mx-1 mb-3 py-5 px-4 rounded-2xl
-        border-2 items-center justify-center
-        ${selected
-          ? 'bg-zinc-900 border-zinc-900'
-          : 'bg-white border-zinc-200'
-        }
-      `}
+      style={{
+        flex: 1,
+        minWidth: '45%',
+        marginHorizontal: 4,
+        marginBottom: 12,
+        paddingVertical: 20,
+        paddingHorizontal: 16,
+        borderRadius: 16,
+        borderWidth: 2,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: selected ? theme.text : theme.surface,
+        borderColor: selected ? theme.text : theme.border,
+      }}
     >
-      <Text
-        className={`
-          text-base font-semibold text-center
-          ${selected ? 'text-white' : 'text-zinc-900'}
-        `}
-      >
+      <Text style={{ fontSize: 15, fontWeight: '600', color: selected ? theme.background : theme.text }}>
         {label}
       </Text>
     </Pressable>

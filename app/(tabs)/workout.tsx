@@ -217,7 +217,7 @@ export default function WorkoutScreen() {
                         </Text>
                       </View>
                       <Ionicons
-                        name={isOpen ? 'chevron-up' : 'chevron-down'}
+                        name={isOpen ? 'contract-outline' : 'expand-outline'}
                         size={18}
                         color={theme.chrome}
                       />

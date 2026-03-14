@@ -14,6 +14,7 @@ import { supabase } from '@/lib/supabase';
 import { useQuiz } from '@/lib/quiz-store';
 import { usePlan } from '@/lib/plan-context';
 import { WorkoutDay } from '@/lib/types';
+import { useSettings } from '@/lib/settings-context';
 
 const LOADING_MESSAGES = [
   'Analysing your goals…',
@@ -26,6 +27,7 @@ export default function PlanResultScreen() {
   const router = useRouter();
   const { answers, resetQuiz } = useQuiz();
   const { setPlan } = usePlan();
+  const { theme } = useSettings();
 
   const [loading, setLoading] = useState(true);
   const [loadingMsg, setLoadingMsg] = useState(LOADING_MESSAGES[0]);
@@ -80,6 +82,18 @@ export default function PlanResultScreen() {
             createdAt: saved.created_at,
           });
         }
+
+        // Also save quiz data to profile for TDEE calculation
+        if (answers.height && answers.weight) {
+          await supabase.from('profiles').upsert({
+            id: user.id,
+            height: answers.height,
+            weight: answers.weight,
+            goal: answers.goal,
+            days_per_week: answers.daysPerWeek,
+            gender: answers.gender,
+          });
+        }
       }
 
       resetQuiz();
@@ -96,32 +110,32 @@ export default function PlanResultScreen() {
   };
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       {loading ? (
-        <View className="flex-1 items-center justify-center px-8">
-          <ActivityIndicator size="large" color="#18181B" />
-          <Text className="text-base text-zinc-500 mt-6 text-center">{loadingMsg}</Text>
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 32 }}>
+          <ActivityIndicator size="large" color={theme.text} />
+          <Text style={{ fontSize: 16, color: theme.textSecondary, marginTop: 24, textAlign: 'center' }}>{loadingMsg}</Text>
         </View>
       ) : (
-        <View className="flex-1">
-          <ScrollView className="flex-1" contentContainerClassName="px-6 pt-8 pb-6">
-            <Text className="text-3xl font-bold text-zinc-900 mb-1">Your plan is ready</Text>
-            <Text className="text-base text-zinc-500 mb-8">
+        <View style={{ flex: 1 }}>
+          <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 32, paddingBottom: 24 }}>
+            <Text style={{ fontSize: 28, fontWeight: '700', color: theme.text, marginBottom: 4 }}>Your plan is ready</Text>
+            <Text style={{ fontSize: 16, color: theme.textSecondary, marginBottom: 32 }}>
               Here's your personalised weekly programme.
             </Text>
 
             {weeklyPlan?.map((day, i) => (
-              <View key={i} className="mb-5 bg-zinc-50 rounded-2xl p-4">
-                <Text className="text-xs font-semibold text-zinc-400 uppercase tracking-widest mb-1">
+              <View key={i} style={{ marginBottom: 20, backgroundColor: theme.surface, borderRadius: 16, padding: 16 }}>
+                <Text style={{ fontSize: 11, fontWeight: '600', color: theme.chrome, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
                   {day.dayName}
                 </Text>
-                <Text className="text-base font-bold text-zinc-900 mb-3">{day.focus}</Text>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text, marginBottom: 12 }}>{day.focus}</Text>
                 {day.exercises.map((ex, j) => (
-                  <View key={j} className="flex-row items-start mb-2 last:mb-0">
-                    <View className="w-1.5 h-1.5 rounded-full bg-zinc-400 mt-2 mr-2.5" />
-                    <View className="flex-1">
-                      <Text className="text-sm font-semibold text-zinc-800">{ex.name}</Text>
-                      <Text className="text-xs text-zinc-500">
+                  <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.chrome, marginTop: 8, marginRight: 10 }} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>{ex.name}</Text>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary }}>
                         {ex.sets} sets · {ex.reps} reps · {ex.rest} rest
                       </Text>
                     </View>
@@ -131,12 +145,12 @@ export default function PlanResultScreen() {
             ))}
           </ScrollView>
 
-          <View className="px-6 pb-6 pt-2">
+          <View style={{ paddingHorizontal: 24, paddingBottom: 24, paddingTop: 8 }}>
             <Pressable
               onPress={() => router.replace('/(tabs)')}
-              className="bg-zinc-900 py-4 rounded-2xl items-center"
+              style={{ backgroundColor: theme.text, paddingVertical: 16, borderRadius: 16, alignItems: 'center' }}
             >
-              <Text className="text-white text-base font-semibold">
+              <Text style={{ color: theme.background, fontSize: 16, fontWeight: '600' }}>
                 Let's go →
               </Text>
             </Pressable>

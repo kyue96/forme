@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   Alert,
   Image,
   LayoutAnimation,
+  Modal,
   Pressable,
   ScrollView,
   Text,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 
 import { usePlan } from '@/lib/plan-context';
 import { supabase } from '@/lib/supabase';
@@ -19,6 +21,7 @@ import { useWorkoutStore } from '@/lib/workout-store';
 import { SetRow } from '@/components/SetRow';
 import { RestTimer } from '@/components/RestTimer';
 import { LoggedExercise, LoggedSet } from '@/lib/types';
+import { SemanticColors } from '@/constants/theme';
 
 function parseRestSeconds(rest: string): number {
   const match = rest.match(/(\d+)/);
@@ -39,93 +42,75 @@ function isBodyweightExercise(name: string): boolean {
   return BODYWEIGHT_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
-const FORM_TIPS: Record<string, string[]> = {
-  chest: [
-    'Pull your elbows toward your back pockets as you press.',
-    'Imagine bending the bar into a U-shape to engage your chest.',
-    'Push the floor away from you on push-ups, don\'t push yourself up.',
-    'Think of hugging a big tree on flyes.',
-    'Drive your back into the bench like you\'re leaving an imprint.',
-    'Pretend you\'re pushing a car that won\'t start.',
-    'Squeeze an imaginary pencil between your shoulder blades.',
-    'Lower the weight like you\'re pulling a bowstring back.',
-    'Elbows at 45 degrees — not flared like a chicken wing.',
-    'At the top, imagine pressing through the ceiling.',
-  ],
-  back: [
-    'Pull your elbows toward your back pockets, not your ears.',
-    'Chest to the bar, not chin to the bar.',
-    'Imagine you\'re starting a lawnmower on rows.',
-    'Squeeze a walnut between your shoulder blades at the top.',
-    'Think of your hands as hooks — let your back do the pulling.',
-    'Drive elbows behind you like you\'re elbowing someone.',
-    'Puff your chest out like a gorilla before each pull.',
-    'Imagine pulling the bar apart to activate your lats.',
-    'Lead with your chest on rows, not your lower back.',
-    'Think of rowing a boat — long, controlled strokes.',
-  ],
-  legs: [
-    'Drive through your heels, not your toes.',
-    'Sit back like you\'re aiming for a chair that\'s too far away.',
-    'Spread the floor apart with your feet on squats.',
-    'Push your knees out like you\'re making room for a beach ball.',
-    'Imagine you\'re leg pressing the earth away from you.',
-    'Keep your shins as vertical as possible on lunges.',
-    'Squeeze a coin between your glutes at the top of hip thrusts.',
-    'Think of your legs as pistons — powerful and controlled.',
-    'On RDLs, push your hips back like closing a car door with your butt.',
-    'Drive your knees over your pinky toes on squats.',
-  ],
-  shoulders: [
-    'Press like you\'re putting a box on a high shelf.',
-    'Lead with your elbows, slight bend on laterals.',
-    'Imagine pouring two pitchers of water on lateral raises.',
-    'Think of punching the ceiling on overhead presses.',
-    'Keep your wrists stacked over your elbows.',
-    'Shrug at the top of overhead press to fully engage traps.',
-    'Think of your arms as crane arms — controlled, not swinging.',
-    'Raise to ear height only — no need to go higher on laterals.',
-    'Imagine pushing through a tube that keeps your arms on track.',
-    'Pinch your shoulder blades before pressing.',
-  ],
-  arms: [
-    'Don\'t swing — pretend your elbows are nailed to your sides.',
-    'Squeeze the muscle at the top like wringing a towel.',
-    'On tricep pushdowns, imagine pushing a wall down.',
-    'Curl like you\'re bringing a spoon to your mouth slowly.',
-    'Keep your upper arm completely still — only the forearm moves.',
-    'On skull crushers, lower to your forehead, not your nose.',
-    'Think of your bicep as a hydraulic piston — smooth and controlled.',
-    'Rotate your pinky up at the top of curls for peak contraction.',
-    'On dips, lean slightly forward for chest, upright for triceps.',
-    'Flex your triceps hard at lockout on every pressing movement.',
-  ],
-  core: [
-    'Brace like someone\'s about to punch your stomach.',
-    'Pull your belly button toward your spine.',
-    'Breathe out hard on the crunch — like fogging a mirror.',
-    'Think of your core as a corset wrapping around your torso.',
-    'On planks, squeeze your glutes like you\'re holding a coin.',
-    'Imagine zipping up a tight pair of jeans — that\'s how you brace.',
-    'Roll up vertebra by vertebra, not all at once.',
-    'Keep your ribs down — don\'t let them flare up.',
-    'Think of your abs as a spring coiling and uncoiling.',
-    'Exhale completely at the hardest point of the movement.',
-  ],
+const EXERCISE_FORM_TIPS: Record<string, string> = {
+  // Chest
+  'barbell bench press': 'Arch your back slightly, pull shoulder blades together, and drive through the bar with your chest — not your triceps.',
+  'dumbbell bench press': 'Let the dumbbells touch at the top, lower with elbows at 45°, and feel the stretch at the bottom.',
+  'incline bench press': 'Set the bench to 30-45°. Keep your wrists straight and press toward the ceiling, not your face.',
+  'dumbbell incline press': 'Retract your shoulder blades before pressing. Think of pushing the dumbbells together at the top.',
+  'chest fly': 'Keep a slight bend in the elbows throughout — imagine hugging a large barrel. Never fully straighten the arms.',
+  'push-up': 'Keep your core braced and hips level. Lower until your chest almost touches the floor, then drive back up.',
+  // Back
+  'pull-up': 'Start from a dead hang. Drive your elbows toward your hips — not behind you. Pull chest to bar.',
+  'lat pulldown': 'Lean back slightly, pull the bar to your upper chest. Squeeze shoulder blades at the bottom.',
+  'barbell row': 'Hinge at the hips to 45°, keep back flat. Pull the bar to your lower sternum, lead with elbows.',
+  'dumbbell row': 'Brace your core on the bench. Pull the dumbbell to your hip, not your shoulder. Full range of motion.',
+  'seated cable row': 'Sit tall, pull the handle to your navel. Squeeze shoulder blades at the end of each rep.',
+  'deadlift': 'Bar stays over mid-foot. Push the floor away, keep chest tall, lock hips out at the top.',
+  'romanian deadlift': 'Push hips back, keep bar close to legs. Feel the hamstring stretch — stop before your back rounds.',
+  // Shoulders
+  'overhead press': 'Press straight up, lock out overhead. Keep core tight and avoid excessive lower back arch.',
+  'military press': 'Grip slightly wider than shoulder-width. Bar clears chin on the way up, finish with arms fully locked.',
+  'dumbbell shoulder press': 'Start at ear height, press overhead without flaring ribs. Avoid shrugging at the top.',
+  'lateral raise': 'Lead with your elbows, slight bend in arms. Pour pitchers of water to the side — stop at shoulder height.',
+  'front raise': 'Controlled tempo, raise to shoulder height only. Avoid swinging — use the shoulder, not momentum.',
+  'face pull': 'Pull to your face with hands beside your ears. External rotate at the end to work rear delts.',
+  // Arms
+  'barbell curl': 'Keep elbows pinned to your sides. Squeeze at the top, lower slowly for 2-3 seconds.',
+  'dumbbell curl': 'Rotate your wrist as you curl (supinate). Pause and squeeze at the top of each rep.',
+  'hammer curl': 'Neutral grip throughout. Keep upper arm still — only the forearm moves.',
+  'tricep pushdown': 'Lock elbows at your sides. Push all the way down and squeeze triceps hard at lockout.',
+  'skull crusher': 'Lower the bar to your forehead with elbows pointing up. Press back up in a slight arc.',
+  'tricep dip': 'Lean slightly forward for more chest; stay upright for triceps. Lock out fully at the top.',
+  'close grip bench press': 'Hands shoulder-width apart. Tuck elbows to your sides and feel your triceps working.',
+  // Legs
+  'squat': 'Spread the floor apart with your feet. Break at hips and knees simultaneously, depth to at least parallel.',
+  'barbell squat': 'Bar on upper traps, chest tall. Sit back and down, drive knees out, explode through heels.',
+  'leg press': 'Feet hip-width, push through heels. Never lock out knees fully — keep slight tension throughout.',
+  'lunge': 'Step far enough that front shin stays vertical. Back knee hovers just above the floor.',
+  'leg extension': 'Pause briefly at full extension. Focus on the quad contraction — don\'t just swing the weight.',
+  'leg curl': 'Curl heel to glute, control the descent. Keep hips pressed into the pad throughout.',
+  'hip thrust': 'Upper back on bench, drive hips to ceiling. Squeeze glutes hard at the top, hold 1 second.',
+  'calf raise': 'Full range of motion — all the way up on toes, all the way down past neutral. Pause at top.',
+  // Core
+  'plank': 'Squeeze glutes and abs, breathe normally. Don\'t let hips sag or pike up — one rigid line.',
+  'crunch': 'Curl up vertebra by vertebra. Focus on shortening the distance between ribs and hips.',
+  'sit-up': 'Feet flat, hands at temples. Engage abs to lift, not your neck. Controlled descent.',
+  'russian twist': 'Lean back 45°, feet lifted. Rotate side to side, touch the floor with both hands each rep.',
+  'hanging leg raise': 'Posterior pelvic tilt before raising legs. Control the descent — resist the swing.',
+  'cable crunch': 'Crunch with your abs, not your hips. Keep hips still and pull elbows toward knees.',
 };
 
 function getFormTip(name: string): string {
   const lower = name.toLowerCase();
-  let group = 'core';
-  if (lower.includes('bench') || lower.includes('chest') || lower.includes('fly') || lower.includes('push-up') || lower.includes('pushup')) group = 'chest';
-  else if (lower.includes('row') || lower.includes('pull') || lower.includes('lat') || lower.includes('deadlift') || lower.includes('back')) group = 'back';
-  else if (lower.includes('squat') || lower.includes('leg') || lower.includes('lunge') || lower.includes('calf') || lower.includes('hamstring') || lower.includes('glute') || lower.includes('hip')) group = 'legs';
-  else if (lower.includes('shoulder') || lower.includes('overhead') || lower.includes('lateral') || lower.includes('press') || lower.includes('military')) group = 'shoulders';
-  else if (lower.includes('curl') || lower.includes('bicep') || lower.includes('tricep') || lower.includes('skull') || lower.includes('pushdown') || lower.includes('extension') || lower.includes('dip')) group = 'arms';
-
-  const tips = FORM_TIPS[group];
-  const hash = name.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  return tips[hash % tips.length];
+  // Try exact match first
+  if (EXERCISE_FORM_TIPS[lower]) return EXERCISE_FORM_TIPS[lower];
+  // Try partial match
+  for (const [key, tip] of Object.entries(EXERCISE_FORM_TIPS)) {
+    if (lower.includes(key) || key.includes(lower)) return tip;
+  }
+  // Generic fallback by body part keyword
+  if (lower.includes('bench') || lower.includes('chest') || lower.includes('fly') || lower.includes('push'))
+    return 'Retract shoulder blades before pressing. Feel the muscle stretch at the bottom and squeeze at the top.';
+  if (lower.includes('row') || lower.includes('pull') || lower.includes('lat') || lower.includes('back'))
+    return 'Think of your hands as hooks. Pull with your elbows, not your biceps. Squeeze shoulder blades together.';
+  if (lower.includes('squat') || lower.includes('leg') || lower.includes('lunge'))
+    return 'Drive through your heels, keep your chest tall, and push your knees out in line with your toes.';
+  if (lower.includes('shoulder') || lower.includes('press') || lower.includes('raise'))
+    return 'Keep wrists stacked over elbows. Controlled tempo — 2 seconds up, 2 seconds down.';
+  if (lower.includes('curl') || lower.includes('bicep') || lower.includes('tricep'))
+    return 'Pin your elbows to your sides. Squeeze hard at peak contraction and lower slowly.';
+  return 'Brace your core throughout the movement. Focus on full range of motion and controlled tempo.';
 }
 
 const WARMUP = [
@@ -156,20 +141,25 @@ export default function WorkoutScreen() {
   const dayIdx = parseInt(dayIndex ?? '0', 10);
   const day = plan?.weeklyPlan[dayIdx];
 
+  // Filter out warmup exercises — handled by the dedicated warmup section
+  const exercises = day?.exercises.filter(
+    (ex) => !ex.name.toLowerCase().startsWith('warm-up') && !ex.name.toLowerCase().startsWith('warmup') && !ex.name.toLowerCase().includes('warm up')
+  ) ?? [];
+
   // Initialize exercises from store if resuming, otherwise fresh
   const [loggedExercises, setLoggedExercises] = useState<LoggedExercise[]>(() => {
     const aw = activeWorkout;
     if (aw?.dayIndex === dayIdx && (aw?.loggedExercises?.length ?? 0) > 0) {
       return aw.loggedExercises;
     }
-    return day?.exercises.map((ex) => ({
+    return exercises.map((ex) => ({
       name: ex.name,
       sets: Array.from({ length: ex.sets }, () => ({
         weight: null,
         reps: 0,
         completed: false,
       })),
-    })) ?? [];
+    }));
   });
 
   const [previousSets, setPreviousSets] = useState<Record<string, LoggedSet[]>>({});
@@ -178,8 +168,8 @@ export default function WorkoutScreen() {
   const [activeExercise, setActiveExercise] = useState<number | null>(null);
   const [restTimer, setRestTimer] = useState<{ seconds: number } | null>(null);
   const [saving, setSaving] = useState(false);
-  const [activeGif, setActiveGif] = useState<string | null>(null);
-  const [gifLoading, setGifLoading] = useState(false);
+  const [gifState, setGifState] = useState<Record<number, { loading: boolean; url: string | null }>>({});
+  const [gifModalIdx, setGifModalIdx] = useState<number | null>(null);
 
   const startedRef = useRef(false);
 
@@ -200,7 +190,7 @@ export default function WorkoutScreen() {
     if (!day || startedRef.current) return;
     startedRef.current = true;
     if (activeWorkout?.dayIndex === dayIdx) return; // Already in store
-    const initial: LoggedExercise[] = day.exercises.map((ex) => ({
+    const initial: LoggedExercise[] = exercises.map((ex) => ({
       name: ex.name,
       sets: Array.from({ length: ex.sets }, () => ({
         weight: null,
@@ -219,15 +209,20 @@ export default function WorkoutScreen() {
     }
   }, [loggedExercises]);
 
-  // Fetch GIF/image from Wger when exercise is expanded
-  useEffect(() => {
-    if (activeExercise === null || !day) {
-      setActiveGif(null);
-      setGifLoading(false);
-      return;
-    }
-    fetchGif(day.exercises[activeExercise].name);
-  }, [activeExercise]);
+  // Auto-pause timer on navigate away
+  const activeWorkoutRef = useRef(activeWorkout);
+  useEffect(() => { activeWorkoutRef.current = activeWorkout; }, [activeWorkout]);
+
+  useFocusEffect(useCallback(() => {
+    // Screen gained focus — resume if auto-paused
+    const aw = activeWorkoutRef.current;
+    if (aw?.isPaused) resumeWorkout();
+    return () => {
+      // Screen lost focus — auto-pause
+      const aw = activeWorkoutRef.current;
+      if (aw && !aw.isPaused) pauseWorkout();
+    };
+  }, []));
 
   const loadPreviousSets = async () => {
     try {
@@ -242,8 +237,8 @@ export default function WorkoutScreen() {
       if (!logs) return;
       const prevMap: Record<string, LoggedSet[]> = {};
       for (const log of logs) {
-        const exercises = log.exercises as LoggedExercise[];
-        for (const ex of exercises) {
+        const exs = log.exercises as LoggedExercise[];
+        for (const ex of exs) {
           if (!prevMap[ex.name]) prevMap[ex.name] = ex.sets;
         }
       }
@@ -264,33 +259,21 @@ export default function WorkoutScreen() {
     return lastWeight;
   };
 
-  const fetchGif = async (exerciseName: string) => {
-    setGifLoading(true);
-    setActiveGif(null);
+  const fetchGif = async (exerciseName: string, exIdx: number) => {
+    setGifState(prev => ({ ...prev, [exIdx]: { loading: true, url: null } }));
+    setGifModalIdx(exIdx);
     try {
-      // Search Wger for the exercise
-      const term = encodeURIComponent(exerciseName);
-      const searchRes = await fetch(
-        `https://wger.de/api/v2/exercise/search/?term=${term}&language=english&format=json`,
-        { headers: { Accept: 'application/json' } }
-      );
-      const searchData = await searchRes.json();
-      const baseId = searchData?.suggestions?.[0]?.data?.id;
-      if (!baseId) return;
-
-      // Fetch images for this exercise base
-      const imgRes = await fetch(
-        `https://wger.de/api/v2/exerciseimage/?format=json&exercise_base=${baseId}`,
-        { headers: { Accept: 'application/json' } }
-      );
+      const query = encodeURIComponent(exerciseName);
+      const res = await fetch(`https://wger.de/api/v2/exercise/?format=json&language=2&name=${query}&limit=5`);
+      const data = await res.json();
+      const baseId = data?.results?.[0]?.exercise_base;
+      if (!baseId) { setGifState(prev => ({ ...prev, [exIdx]: { loading: false, url: null } })); return; }
+      const imgRes = await fetch(`https://wger.de/api/v2/exerciseimage/?format=json&exercise_base=${baseId}`);
       const imgData = await imgRes.json();
-      if (imgData?.results?.length > 0) {
-        setActiveGif(imgData.results[0].image);
-      }
+      const url = imgData?.results?.[0]?.image ?? null;
+      setGifState(prev => ({ ...prev, [exIdx]: { loading: false, url } }));
     } catch {
-      // Silently fail — no image shown
-    } finally {
-      setGifLoading(false);
+      setGifState(prev => ({ ...prev, [exIdx]: { loading: false, url: null } }));
     }
   };
 
@@ -336,7 +319,7 @@ export default function WorkoutScreen() {
   const completeSet = (exIdx: number, setIdx: number) => {
     updateSet(exIdx, setIdx, { ...loggedExercises[exIdx].sets[setIdx], completed: true });
     if (restTimerEnabled) {
-      setRestTimer({ seconds: parseRestSeconds(day.exercises[exIdx].rest) });
+      setRestTimer({ seconds: parseRestSeconds(exercises[exIdx].rest) });
     }
   };
 
@@ -414,7 +397,7 @@ export default function WorkoutScreen() {
   const totalSets = loggedExercises.reduce((sum, ex) => sum + ex.sets.length, 0);
   const completedSets = loggedExercises.reduce((sum, ex) => sum + ex.sets.filter((s) => s.completed).length, 0);
   const nextExIdx = loggedExercises.findIndex((ex, i) => i !== activeExercise && ex.sets.some((s) => !s.completed));
-  const nextExercise = nextExIdx >= 0 ? day.exercises[nextExIdx] : null;
+  const nextExercise = nextExIdx >= 0 ? exercises[nextExIdx] : null;
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
   const progressPct = totalSets > 0 ? (completedSets / totalSets) * 100 : 0;
 
@@ -543,7 +526,7 @@ export default function WorkoutScreen() {
         )}
 
         {/* Exercises */}
-        {day.exercises.map((exercise, exIdx) => {
+        {exercises.map((exercise, exIdx) => {
           const logged = loggedExercises[exIdx];
           const isExpanded = activeExercise === exIdx;
           const detailsOpen = expandedDetails[exIdx] ?? false;
@@ -578,7 +561,7 @@ export default function WorkoutScreen() {
                   width: 8,
                   height: 8,
                   borderRadius: 4,
-                  backgroundColor: allSetsComplete ? theme.chrome : theme.border,
+                  backgroundColor: allSetsComplete ? SemanticColors.success : SemanticColors.warning,
                   marginRight: 10,
                   flexShrink: 0,
                 }} />
@@ -595,6 +578,13 @@ export default function WorkoutScreen() {
                     </Text>
                   )}
                 </View>
+                {/* Help button */}
+                <Pressable
+                  onPress={() => fetchGif(exercise.name, exIdx)}
+                  style={{ width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center', justifyContent: 'center', marginLeft: 8 }}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary }}>?</Text>
+                </Pressable>
                 <Ionicons
                   name={isExpanded ? 'chevron-up' : 'chevron-down'}
                   size={18}
@@ -605,31 +595,6 @@ export default function WorkoutScreen() {
 
               {isExpanded && (
                 <>
-                  {/* Exercise image from Wger */}
-                  {(gifLoading || activeGif) && (
-                    <View style={{
-                      marginBottom: 12,
-                      borderRadius: 12,
-                      overflow: 'hidden',
-                      backgroundColor: theme.chromeLight,
-                      height: gifLoading ? 72 : 180,
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}>
-                      {gifLoading ? (
-                        <Text style={{ color: theme.textSecondary, fontSize: 12 }}>
-                          Loading demo…
-                        </Text>
-                      ) : activeGif ? (
-                        <Image
-                          source={{ uri: activeGif }}
-                          style={{ width: '100%', height: 180 }}
-                          resizeMode="contain"
-                        />
-                      ) : null}
-                    </View>
-                  )}
-
                   {/* Set rows */}
                   {logged?.sets.map((set, setIdx) => (
                     <SetRow
@@ -647,27 +612,15 @@ export default function WorkoutScreen() {
                   <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 8 }}>
                     <Pressable
                       onPress={() => addSet(exIdx)}
-                      style={{
-                        flex: 1,
-                        backgroundColor: theme.chromeLight,
-                        paddingVertical: 8,
-                        borderRadius: 12,
-                        alignItems: 'center',
-                      }}
+                      style={{ flex: 1, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 10, borderRadius: 12, alignItems: 'center' }}
                     >
                       <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>+ Add set</Text>
                     </Pressable>
                     <Pressable
                       onPress={() => removeSet(exIdx)}
-                      style={{
-                        flex: 1,
-                        backgroundColor: theme.chromeLight,
-                        paddingVertical: 8,
-                        borderRadius: 12,
-                        alignItems: 'center',
-                      }}
+                      style={{ flex: 1, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 10, borderRadius: 12, alignItems: 'center' }}
                     >
-                      <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textSecondary }}>− Remove set</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>− Remove set</Text>
                     </Pressable>
                   </View>
 
@@ -761,6 +714,24 @@ export default function WorkoutScreen() {
           </Text>
         </Pressable>
       </View>
+
+      {/* GIF Modal */}
+      <Modal visible={gifModalIdx !== null} transparent animationType="fade" onRequestClose={() => setGifModalIdx(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', alignItems: 'center', justifyContent: 'center' }} onPress={() => setGifModalIdx(null)}>
+          <View style={{ backgroundColor: theme.surface, borderRadius: 20, padding: 20, marginHorizontal: 24, alignItems: 'center', minWidth: 280 }}>
+            {gifModalIdx !== null && gifState[gifModalIdx]?.loading ? (
+              <Text style={{ color: theme.textSecondary, padding: 24 }}>Loading…</Text>
+            ) : gifModalIdx !== null && gifState[gifModalIdx]?.url ? (
+              <Image source={{ uri: gifState[gifModalIdx]!.url! }} style={{ width: 280, height: 200 }} resizeMode="contain" />
+            ) : (
+              <Text style={{ color: theme.textSecondary, padding: 24 }}>No demo found for this exercise.</Text>
+            )}
+            {gifModalIdx !== null && (
+              <Text style={{ color: theme.chrome, fontSize: 12, marginTop: 8 }}>{exercises[gifModalIdx]?.name}</Text>
+            )}
+          </View>
+        </Pressable>
+      </Modal>
 
       {/* Rest timer overlay */}
       {restTimer && (

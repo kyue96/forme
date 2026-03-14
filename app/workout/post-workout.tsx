@@ -64,7 +64,6 @@ export default function PostWorkoutScreen() {
   const [carbs, setCarbs] = useState('');
   const [macrosSaved, setMacrosSaved] = useState(false);
   const [savingMacros, setSavingMacros] = useState(false);
-  const [darkCard, setDarkCard] = useState(true);
 
   useEffect(() => {
     if (!notificationSent.current) {
@@ -131,8 +130,6 @@ export default function PostWorkoutScreen() {
     return String(Math.round(v));
   };
 
-  const isDark = darkCard;
-
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
       <AppHeader />
@@ -144,106 +141,116 @@ export default function PostWorkoutScreen() {
         </View>
 
         {/* Summary stats */}
-        <View className="px-6 mb-6">
-          <View className="flex-row gap-3">
-            <View className="flex-1 bg-zinc-50 rounded-2xl p-4 items-center">
-              <Text allowFontScaling className="text-2xl font-bold text-zinc-900">{totalExercises}</Text>
-              <Text allowFontScaling className="text-xs text-zinc-400 mt-1">Exercises</Text>
+        <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
+              <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text }}>{totalExercises}</Text>
+              <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>Exercises</Text>
             </View>
-            <View className="flex-1 bg-zinc-50 rounded-2xl p-4 items-center">
-              <Text allowFontScaling className="text-2xl font-bold text-zinc-900">{totalSets}</Text>
-              <Text allowFontScaling className="text-xs text-zinc-400 mt-1">Sets</Text>
+            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
+              <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text }}>{totalSets}</Text>
+              <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>Sets</Text>
             </View>
           </View>
-          <View className="flex-row gap-3 mt-3">
-            <View className="flex-1 bg-zinc-50 rounded-2xl p-4 items-center">
-              <Text allowFontScaling className="text-2xl font-bold text-zinc-900">{formatVolume(displayVolume)}</Text>
-              <Text allowFontScaling className="text-xs text-zinc-400 mt-1">Volume ({weightUnit})</Text>
+          <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
+              <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text }}>{formatVolume(displayVolume)}</Text>
+              <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>Volume ({weightUnit})</Text>
             </View>
-            <View className="flex-1 bg-zinc-50 rounded-2xl p-4 items-center">
-              <Text allowFontScaling className="text-2xl font-bold text-zinc-900">{durationMinutes}</Text>
-              <Text allowFontScaling className="text-xs text-zinc-400 mt-1">Minutes</Text>
+            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
+              <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text }}>{durationMinutes}</Text>
+              <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>Minutes</Text>
             </View>
           </View>
         </View>
 
-        {/* Shareable workout card */}
-        <View className="px-6 mb-4">
-          <View className="flex-row items-center justify-between mb-3">
-            <Text allowFontScaling className="text-sm font-semibold text-zinc-500">Workout card</Text>
+        {/* Shareable workout card - black bg, receipt style */}
+        <View style={{ paddingHorizontal: 24, marginBottom: 20 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.textSecondary }}>Workout card</Text>
             <Pressable onPress={handleShare}>
-              <Ionicons name="share-outline" size={22} color="#F59E0B" />
+              <Ionicons name="share-outline" size={22} color={theme.text} />
             </Pressable>
           </View>
 
-          <Pressable onPress={() => setDarkCard(!darkCard)}>
-            <View
-              ref={cardRef}
-              collapsable={false}
-              className={`rounded-3xl p-6 ${isDark ? 'bg-zinc-900' : 'bg-white border border-zinc-200'}`}
-            >
-              <Text allowFontScaling className={`text-xl font-bold mb-1 ${isDark ? 'text-white' : 'text-zinc-900'}`}>
-                {params.focus}
+          <View
+            ref={cardRef}
+            collapsable={false}
+            style={{ backgroundColor: '#000000', borderRadius: 20, padding: 24 }}
+          >
+            {/* Header row */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+              <Text style={{ fontSize: 14, fontWeight: '800', color: '#FFFFFF', letterSpacing: 3, textTransform: 'uppercase' }}>
+                FORME
               </Text>
-              <Text allowFontScaling className={`text-sm mb-1 ${isDark ? 'text-white/50' : 'text-zinc-500'}`}>
-                {params.dayName} · {dateStr}
-              </Text>
-
-              <View className="flex-row justify-between mt-5">
-                {[
-                  { val: totalExercises, label: 'exercises' },
-                  { val: totalSets, label: 'sets' },
-                  { val: formatVolume(displayVolume), label: `${weightUnit} vol` },
-                  { val: durationMinutes, label: 'min' },
-                ].map(({ val, label }) => (
-                  <View key={label}>
-                    <Text allowFontScaling className={`text-2xl font-bold ${isDark ? 'text-white' : 'text-zinc-900'}`}>{val}</Text>
-                    <Text allowFontScaling className={`text-xs ${isDark ? 'text-white/40' : 'text-zinc-400'}`}>{label}</Text>
-                  </View>
-                ))}
-              </View>
-
-              <Text allowFontScaling className={`text-xs font-bold uppercase tracking-widest mt-5 ${isDark ? 'text-white/20' : 'text-zinc-300'}`}>
-                Forme
+              <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', letterSpacing: 0.5 }}>
+                {dateStr}
               </Text>
             </View>
-          </Pressable>
-          <Text allowFontScaling className="text-xs text-zinc-400 text-center mt-2">Tap card to switch template</Text>
+
+            {/* Focus + day */}
+            <Text style={{ fontSize: 20, fontWeight: '800', color: '#FFFFFF', marginBottom: 2 }}>
+              {(params.focus ?? '').length > 22 ? (params.focus ?? '').slice(0, 22) + '…' : params.focus}
+            </Text>
+            <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 16 }}>{params.dayName}</Text>
+
+            {/* Divider */}
+            <View style={{ height: 2, backgroundColor: '#FFFFFF', marginBottom: 20 }} />
+
+            {/* Metrics grid */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+              {[
+                { val: String(totalExercises), label: 'EXERCISES' },
+                { val: String(totalSets), label: 'SETS' },
+                { val: formatVolume(displayVolume), label: weightUnit.toUpperCase() + ' VOL' },
+                { val: `${String(Math.floor(durationMinutes / 60)).padStart(2,'0')}:${String(durationMinutes % 60).padStart(2,'0')}`, label: 'DURATION' },
+              ].map(({ val, label }) => (
+                <View key={label} style={{ alignItems: 'center' }}>
+                  <Text style={{ fontSize: 24, fontWeight: '800', color: '#FFFFFF', fontVariant: ['tabular-nums'] }}>{val}</Text>
+                  <Text style={{ fontSize: 8, color: 'rgba(255,255,255,0.35)', letterSpacing: 1, marginTop: 2 }}>{label}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
         </View>
 
         {/* Macro logging */}
-        <View className="px-6 mb-6">
-          <Text allowFontScaling className="text-lg font-bold text-zinc-900 mb-1">Log your meal</Text>
-          <Text allowFontScaling className="text-sm text-zinc-500 mb-4">Quick post-workout nutrition tracking.</Text>
+        <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
+          <Text allowFontScaling style={{ fontSize: 18, fontWeight: '700', color: theme.text, marginBottom: 4 }}>Log your meal</Text>
+          <Text allowFontScaling style={{ fontSize: 14, color: theme.textSecondary, marginBottom: 16 }}>Quick post-workout nutrition tracking.</Text>
 
           {macrosSaved ? (
-            <View className="bg-amber-50 rounded-2xl p-4 items-center">
-              <Ionicons name="checkmark-circle" size={24} color="#F59E0B" />
-              <Text allowFontScaling className="text-amber-700 font-semibold mt-1">Macros saved!</Text>
+            <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#22C55E' }}>
+              <Ionicons name="checkmark-circle" size={24} color="#22C55E" />
+              <Text allowFontScaling style={{ color: '#22C55E', fontWeight: '600', marginTop: 4 }}>Macros saved!</Text>
             </View>
           ) : (
             <>
-              <View className="flex-row gap-3 mb-4">
+              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
                 {[
                   { label: 'Calories', val: calories, set: setCalories },
                   { label: 'Protein (g)', val: protein, set: setProtein },
                   { label: 'Carbs (g)', val: carbs, set: setCarbs },
                 ].map(({ label, val, set }) => (
-                  <View key={label} className="flex-1">
-                    <Text allowFontScaling className="text-xs text-zinc-400 mb-1.5">{label}</Text>
+                  <View key={label} style={{ flex: 1 }}>
+                    <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 6 }}>{label}</Text>
                     <TextInput
-                      className="bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3 text-base text-zinc-900"
+                      style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: theme.text }}
                       keyboardType="number-pad"
                       placeholder="—"
-                      placeholderTextColor="#A1A1AA"
+                      placeholderTextColor={theme.textSecondary}
                       value={val}
                       onChangeText={set}
                     />
                   </View>
                 ))}
               </View>
-              <Pressable onPress={saveMacros} disabled={savingMacros} className="bg-zinc-100 py-3 rounded-xl items-center">
-                <Text allowFontScaling className="text-zinc-900 font-semibold text-sm">
+              <Pressable
+                onPress={saveMacros}
+                disabled={savingMacros}
+                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 12, borderRadius: 12, alignItems: 'center' }}
+              >
+                <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
                   {savingMacros ? 'Saving…' : 'Save macros'}
                 </Text>
               </Pressable>
@@ -253,9 +260,12 @@ export default function PostWorkoutScreen() {
       </ScrollView>
 
       {/* Done button */}
-      <View className="px-6 pb-6 pt-3 bg-white border-t border-zinc-100">
-        <Pressable onPress={() => router.replace('/(tabs)')} className="bg-amber-500 py-4 rounded-2xl items-center">
-          <Text allowFontScaling className="text-white font-semibold text-base">Done</Text>
+      <View style={{ paddingHorizontal: 24, paddingBottom: 32, paddingTop: 12, backgroundColor: theme.background }}>
+        <Pressable
+          onPress={() => router.replace('/(tabs)')}
+          style={{ backgroundColor: theme.text, paddingVertical: 16, borderRadius: 16, alignItems: 'center' }}
+        >
+          <Text allowFontScaling style={{ color: theme.background, fontWeight: '600', fontSize: 16 }}>Done</Text>
         </Pressable>
       </View>
     </SafeAreaView>

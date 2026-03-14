@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { useRouter } from 'expo-router';
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Modal, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
@@ -54,6 +54,12 @@ export default function HomeScreen() {
   const [completedDays, setCompletedDays] = useState<Set<string>>(new Set());
   const [todayCompleted, setTodayCompleted] = useState(false);
   const [todayCalories, setTodayCalories] = useState<number | null>(null);
+  const [todayMeals, setTodayMeals] = useState<any[]>([]);
+  const [nutritionExpanded, setNutritionExpanded] = useState(false);
+
+  const [selectedDay, setSelectedDay] = useState<{ date: Date; dayIdx: number } | null>(null);
+  const [dayLog, setDayLog] = useState<any>(null);
+  const [dayLogLoading, setDayLogLoading] = useState(false);
 
   const weekDates = getWeekDates();
   const now = new Date();
@@ -102,10 +108,40 @@ export default function HomeScreen() {
       } else {
         setTodayCalories(null);
       }
+
+      const { data: mealsData } = await supabase
+        .from('meals')
+        .select('id, name, calories, protein, carbs')
+        .eq('user_id', user.id)
+        .eq('date', todayStr);
+      setTodayMeals(mealsData ?? []);
     } catch {}
   }, [todayStr]);
 
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
+
+  const handleDayPress = async (date: Date, i: number) => {
+    setSelectedDay({ date, dayIdx: i });
+    setDayLog(null);
+    const dk = dateKey(date);
+    const dayName = DAY_NAMES_FULL[i];
+    const plannedDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === dayName.toLowerCase());
+    setDayLogLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data: logs } = await supabase
+        .from('workout_logs')
+        .select('day_name, exercises, duration_minutes, completed_at')
+        .eq('user_id', user.id)
+        .gte('completed_at', dk + 'T00:00:00')
+        .lte('completed_at', dk + 'T23:59:59')
+        .limit(1);
+      setDayLog({ log: logs?.[0] ?? null, planned: plannedDay });
+    } catch {} finally {
+      setDayLogLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -156,7 +192,7 @@ export default function HomeScreen() {
                 else if (isPast) { circleBg = theme.surface; }
 
                 return (
-                  <View key={i} style={{ alignItems: 'center' }}>
+                  <Pressable key={i} style={{ alignItems: 'center' }} onPress={() => handleDayPress(date, i)}>
                     <Text allowFontScaling style={{
                       fontSize: 11,
                       marginBottom: 6,
@@ -186,7 +222,7 @@ export default function HomeScreen() {
                         </Text>
                       )}
                     </View>
-                  </View>
+                  </Pressable>
                 );
               })}
             </View>
@@ -285,25 +321,101 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {/* Meal summary */}
+          {/* Nutrition card */}
           {plan && (
-            <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginTop: 8, borderWidth: 1, borderColor: theme.border }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>
-                  Today's nutrition
-                </Text>
-                <Pressable onPress={() => router.push('/(tabs)/meals')}>
-                  <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.chrome }}>+ Add meal</Text>
-                </Pressable>
+            <Pressable
+              onPress={() => setNutritionExpanded(!nutritionExpanded)}
+              style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginTop: 8, borderWidth: 1, borderColor: theme.border }}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Today's nutrition</Text>
+                <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                  <Pressable onPress={(e) => { e.stopPropagation(); router.push('/(tabs)/meals'); }}>
+                    <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.chrome }}>+ Add</Text>
+                  </Pressable>
+                  <Ionicons name={nutritionExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={theme.chrome} />
+                </View>
               </View>
               <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>
                 {todayCalories != null ? `${todayCalories} cal` : '—'}
               </Text>
               <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>logged today</Text>
-            </View>
+
+              {nutritionExpanded && todayMeals.length > 0 && (
+                <View style={{ marginTop: 12, borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 12 }}>
+                  {todayMeals.map((meal, i) => (
+                    <View key={meal.id} style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 6 }}>
+                      <Text allowFontScaling style={{ fontSize: 13, color: theme.text }}>{meal.name || `Meal ${i + 1}`}</Text>
+                      <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary }}>{meal.calories ?? 0} cal</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+              {nutritionExpanded && todayMeals.length === 0 && (
+                <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 8 }}>No meals logged yet.</Text>
+              )}
+            </Pressable>
           )}
         </View>
       </ScrollView>
+
+      {/* Day detail modal */}
+      <Modal visible={!!selectedDay} transparent animationType="slide" onRequestClose={() => setSelectedDay(null)}>
+        <Pressable style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)' }} onPress={() => setSelectedDay(null)} />
+        <View style={{ backgroundColor: theme.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 48, maxHeight: '70%' }}>
+          <View style={{ width: 36, height: 4, borderRadius: 2, backgroundColor: theme.border, alignSelf: 'center', marginBottom: 16 }} />
+          {dayLogLoading ? (
+            <ActivityIndicator color={theme.chrome} />
+          ) : selectedDay && (
+            <>
+              <Text style={{ fontSize: 11, color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+                {selectedDay.date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+              </Text>
+              {dayLog?.log ? (
+                // Completed workout
+                <View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E' }} />
+                    <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text }}>{dayLog.log.day_name}</Text>
+                  </View>
+                  <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>
+                    {dayLog.log.exercises?.length ?? 0} exercises · {dayLog.log.duration_minutes} min
+                  </Text>
+                  <ScrollView style={{ maxHeight: 200 }} showsVerticalScrollIndicator={false}>
+                    {(dayLog.log.exercises ?? []).map((ex: any, i: number) => (
+                      <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
+                        <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: '#22C55E', marginRight: 8 }} />
+                        <Text style={{ fontSize: 13, color: theme.text, flex: 1 }}>{ex.name}</Text>
+                        <Text style={{ fontSize: 11, color: theme.textSecondary }}>{ex.sets?.filter((s: any) => s.completed).length ?? 0} sets</Text>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : dayLog?.planned ? (
+                // Planned workout
+                <View>
+                  <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text, marginBottom: 4 }}>{dayLog.planned.focus}</Text>
+                  <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>{dayLog.planned.exercises.length} exercises planned</Text>
+                  {dateKey(selectedDay.date) === todayStr && (
+                    <Pressable
+                      onPress={() => {
+                        setSelectedDay(null);
+                        const idx = plan?.weeklyPlan.indexOf(dayLog.planned);
+                        if (idx != null && idx >= 0) router.push(`/workout/${idx}`);
+                      }}
+                      style={{ backgroundColor: theme.text, paddingVertical: 14, borderRadius: 14, alignItems: 'center', marginTop: 8 }}
+                    >
+                      <Text style={{ color: theme.background, fontWeight: '700' }}>Start workout →</Text>
+                    </Pressable>
+                  )}
+                </View>
+              ) : (
+                <Text style={{ color: theme.textSecondary, marginTop: 8 }}>No workout logged or planned for this day.</Text>
+              )}
+            </>
+          )}
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
