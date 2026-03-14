@@ -132,7 +132,7 @@ export default function HomeScreen() {
       if (!user) return;
       const { data: logs } = await supabase
         .from('workout_logs')
-        .select('day_name, exercises, duration_minutes, completed_at')
+        .select('id, day_name, exercises, duration_minutes, completed_at')
         .eq('user_id', user.id)
         .gte('completed_at', dk + 'T00:00:00')
         .lte('completed_at', dk + 'T23:59:59')
@@ -372,27 +372,34 @@ export default function HomeScreen() {
                 {selectedDay.date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
               </Text>
               {dayLog?.log ? (
-                // Completed workout
                 <View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
                     <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E' }} />
                     <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text }}>{dayLog.log.day_name}</Text>
                   </View>
-                  <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>
+                  <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 16 }}>
                     {dayLog.log.exercises?.length ?? 0} exercises · {dayLog.log.duration_minutes} min
                   </Text>
-                  <ScrollView style={{ maxHeight: 200 }} showsVerticalScrollIndicator={false}>
-                    {(dayLog.log.exercises ?? []).map((ex: any, i: number) => (
-                      <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 6 }}>
-                        <View style={{ width: 5, height: 5, borderRadius: 3, backgroundColor: '#22C55E', marginRight: 8 }} />
-                        <Text style={{ fontSize: 13, color: theme.text, flex: 1 }}>{ex.name}</Text>
-                        <Text style={{ fontSize: 11, color: theme.textSecondary }}>{ex.sets?.filter((s: any) => s.completed).length ?? 0} sets</Text>
-                      </View>
-                    ))}
-                  </ScrollView>
+                  <Pressable
+                    onPress={() => {
+                      setSelectedDay(null);
+                      router.push(`/(tabs)/workout?logId=${dayLog.log.id}`);
+                    }}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 6,
+                      backgroundColor: theme.text,
+                      paddingVertical: 14,
+                      borderRadius: 14,
+                    }}
+                  >
+                    <Text style={{ color: theme.background, fontWeight: '700', fontSize: 14 }}>See Details</Text>
+                    <Ionicons name="arrow-forward" size={14} color={theme.background} />
+                  </Pressable>
                 </View>
               ) : dayLog?.planned ? (
-                // Planned workout
                 <View>
                   <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text, marginBottom: 4 }}>{dayLog.planned.focus}</Text>
                   <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>{dayLog.planned.exercises.length} exercises planned</Text>

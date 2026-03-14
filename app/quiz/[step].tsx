@@ -58,7 +58,7 @@ const TILE_STEPS: TileStep[] = [
   },
   {
     key: 'daysPerWeek',
-    question: "How many days a week?",
+    question: "How many days a week do you want to train?",
     subtitle: "Quality beats quantity.",
     options: ['2', '3', '4', '5+'],
   },
@@ -72,7 +72,7 @@ const TILE_STEPS: TileStep[] = [
     key: 'preferredSplit',
     question: "Preferred split?",
     subtitle: "How do you like to organise your training?",
-    options: ['Push/Pull/Legs', 'Bro split', 'Full body', 'Upper/Lower'],
+    options: ['Push/Pull/Legs', 'Full body', 'Upper/Lower'],
   },
   {
     key: 'routineChoice',

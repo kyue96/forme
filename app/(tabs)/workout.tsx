@@ -1,5 +1,5 @@
-import { useCallback, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   LayoutAnimation,
@@ -31,12 +31,27 @@ export default function WorkoutScreen() {
   const router = useRouter();
   const { plan, loading } = usePlan();
   const { theme, weightUnit } = useSettings();
+  const { logId } = useLocalSearchParams<{ logId?: string }>();
 
   const [showHistory, setShowHistory] = useState(false);
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   const [selectedLog, setSelectedLog] = useState<WorkoutLog | null>(null);
   const [expandedDay, setExpandedDay] = useState<number | null>(null);
+
+  // Open a specific log when navigated from the home screen calendar.
+  // consumedLogId prevents re-opening when the tab re-focuses and reloads history.
+  const consumedLogId = useRef<string | null>(null);
+  useEffect(() => {
+    if (logId && logs.length > 0 && consumedLogId.current !== logId) {
+      const match = logs.find((l) => l.id === logId);
+      if (match) {
+        consumedLogId.current = logId;
+        setShowHistory(true);
+        setSelectedLog(match);
+      }
+    }
+  }, [logId, logs]);
 
   const loadHistory = useCallback(async () => {
     setLogsLoading(true);
