@@ -186,7 +186,7 @@ export default function HomeScreen() {
 
                 let circleBg = theme.surface;
                 let borderStyle: object = { borderWidth: 1, borderColor: theme.border };
-                if (done) { circleBg = theme.chrome; borderStyle = {}; }
+                if (done) { circleBg = '#22C55E'; borderStyle = {}; }
                 else if (isToday) { circleBg = theme.text; borderStyle = {}; }
                 else if (!isWorkDay) { circleBg = theme.surface; borderStyle = {}; }
                 else if (isPast) { circleBg = theme.surface; }
@@ -246,7 +246,7 @@ export default function HomeScreen() {
           ) : todayCompleted ? (
             <View>
               <View style={{ backgroundColor: theme.surface, borderRadius: 24, padding: 24, alignItems: 'center', marginBottom: 20, borderWidth: 1, borderColor: theme.border }}>
-                <Ionicons name="checkmark-circle" size={48} color={theme.chrome} />
+                <Ionicons name="checkmark-circle" size={48} color="#22C55E" />
                 <Text allowFontScaling style={{ fontSize: 20, fontWeight: '800', color: theme.text, marginTop: 12, marginBottom: 4 }}>
                   Workout complete
                 </Text>
