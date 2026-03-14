@@ -9,6 +9,7 @@ import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { QuizProvider } from '@/lib/quiz-store';
 import { PlanProvider } from '@/lib/plan-context';
+import { SettingsProvider } from '@/lib/settings-context';
 
 SplashScreen.preventAutoHideAsync();
 
@@ -60,11 +61,13 @@ export default function RootLayout() {
   if (!loaded) return null;
 
   return (
-    <QuizProvider>
-      <PlanProvider>
-        <RootLayoutNav session={session} />
-        <StatusBar style="dark" />
-      </PlanProvider>
-    </QuizProvider>
+    <SettingsProvider>
+      <QuizProvider>
+        <PlanProvider>
+          <RootLayoutNav session={session} />
+          <StatusBar style="dark" />
+        </PlanProvider>
+      </QuizProvider>
+    </SettingsProvider>
   );
 }

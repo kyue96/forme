@@ -1,78 +1,68 @@
 import { Tabs } from 'expo-router';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSettings } from '@/lib/settings-context';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
-function TabIcon({
-  icon,
-  label,
-  focused,
-}: {
-  icon: IoniconName;
-  label: string;
-  focused: boolean;
-}) {
-  const color = focused ? '#18181B' : '#C4C4C4';
+function TabIcon({ icon, focused, activeColor, inactiveColor }: { icon: IoniconName; focused: boolean; activeColor: string; inactiveColor: string }) {
   return (
-    <View style={{ alignItems: 'center', gap: 3, paddingTop: 4 }}>
-      <Ionicons name={focused ? icon : (`${icon}-outline` as IoniconName)} size={22} color={color} />
-      <Text
-        style={{
-          fontSize: 10,
-          fontWeight: focused ? '600' : '400',
-          color,
-          letterSpacing: 0.3,
-        }}
-      >
-        {label}
-      </Text>
+    <View style={{ alignItems: 'center', paddingTop: 6 }}>
+      <Ionicons
+        name={focused ? icon : (`${icon}-outline` as IoniconName)}
+        size={24}
+        color={focused ? activeColor : inactiveColor}
+      />
     </View>
   );
 }
 
 export default function TabsLayout() {
+  const { theme } = useSettings();
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
         tabBarShowLabel: false,
         tabBarStyle: {
-          height: 74,
+          height: 70,
           paddingTop: 0,
           paddingBottom: 10,
-          backgroundColor: '#FFFFFF',
-          borderTopWidth: 0,
+          backgroundColor: theme.background,
+          borderTopWidth: 1,
+          borderTopColor: theme.border,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: 0.05,
-          shadowRadius: 16,
-          elevation: 16,
+          shadowOpacity: 0.04,
+          shadowRadius: 12,
+          elevation: 12,
         },
+        animation: 'fade',
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon icon="calendar" label="Today" focused={focused} />
-          ),
+          tabBarIcon: ({ focused }) => <TabIcon icon="home" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
         }}
       />
       <Tabs.Screen
-        name="plan"
+        name="workout"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon icon="barbell" label="My Plan" focused={focused} />
-          ),
+          tabBarIcon: ({ focused }) => <TabIcon icon="barbell" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
+        }}
+      />
+      <Tabs.Screen
+        name="meals"
+        options={{
+          tabBarIcon: ({ focused }) => <TabIcon icon="restaurant" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
         }}
       />
       <Tabs.Screen
         name="profile"
         options={{
-          tabBarIcon: ({ focused }) => (
-            <TabIcon icon="person" label="Profile" focused={focused} />
-          ),
+          tabBarIcon: ({ focused }) => <TabIcon icon="person" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
         }}
       />
     </Tabs>

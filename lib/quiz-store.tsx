@@ -4,6 +4,7 @@ import { QuizAnswers } from './types';
 interface QuizContextType {
   answers: QuizAnswers;
   setAnswer: <K extends keyof QuizAnswers>(key: K, value: QuizAnswers[K]) => void;
+  toggleEquipment: (item: string) => void;
   resetQuiz: () => void;
 }
 
@@ -16,10 +17,21 @@ export function QuizProvider({ children }: { children: React.ReactNode }) {
     setAnswers((prev) => ({ ...prev, [key]: value }));
   };
 
+  const toggleEquipment = (item: string) => {
+    setAnswers((prev) => {
+      const current = prev.equipment ?? [];
+      const exists = current.includes(item as never);
+      const updated = exists
+        ? current.filter((e) => e !== item)
+        : [...current, item as never];
+      return { ...prev, equipment: updated };
+    });
+  };
+
   const resetQuiz = () => setAnswers({});
 
   return (
-    <QuizContext.Provider value={{ answers, setAnswer, resetQuiz }}>
+    <QuizContext.Provider value={{ answers, setAnswer, toggleEquipment, resetQuiz }}>
       {children}
     </QuizContext.Provider>
   );

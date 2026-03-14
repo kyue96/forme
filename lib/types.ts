@@ -1,27 +1,36 @@
 // Quiz answers
-export type Goal = 'Build muscle' | 'Lose fat' | 'Build strength' | 'Stay active';
-export type Experience = 'Brand new' | 'Some experience' | 'Intermediate' | 'Advanced';
-export type Equipment = 'Full gym' | 'Dumbbells only' | 'Bodyweight only' | 'Resistance bands';
+export type Gender = 'Male' | 'Female';
+export type Goal = 'Build muscle' | 'Build strength' | 'Lose weight' | 'Stay active';
+export type Experience = 'Beginner' | 'Some experience' | 'Intermediate' | 'Advanced';
+export type Equipment = 'Full gym' | 'Dumbbells' | 'Resistance bands' | 'Bodyweight';
 export type DaysPerWeek = '2' | '3' | '4' | '5+';
+export type WorkoutDuration = '30 min' | '45 min' | '60 min' | '90 min';
+export type PreferredSplit = 'Push/Pull/Legs' | 'Bro split' | 'Full body' | 'Upper/Lower';
+export type RoutineChoice = 'Generate my plan' | "I'll build my own";
+export type MealsPerDay = '2' | '3' | '4' | '5+';
 export type Injury = 'None' | 'Lower back' | 'Knees' | 'Shoulders';
-export type PreferredSplit = 'Push/Pull/Legs' | 'Arnold split' | 'Full body' | 'Upper/Lower';
 
 export interface QuizAnswers {
+  gender?: Gender;
   goal?: Goal;
   experience?: Experience;
-  equipment?: Equipment;
+  equipment?: Equipment[];
   daysPerWeek?: DaysPerWeek;
+  workoutDuration?: WorkoutDuration;
   preferredSplit?: PreferredSplit;
-  injuries?: Injury;
+  routineChoice?: RoutineChoice;
+  mealsPerDay?: MealsPerDay;
   height?: string;
   weight?: string;
+  goalWeight?: string;
+  injuries?: Injury;
 }
 
 // Pre-workout micro-quiz
 export interface PreWorkoutAnswers {
   location: 'Home' | 'Gym';
   availableMinutes: 30 | 45 | 60 | 90;
-  muscleGroup: string; // AI-decided based on split + recovery
+  muscleGroup: string;
 }
 
 // Workout plan (from Claude)

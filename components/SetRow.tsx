@@ -1,4 +1,5 @@
 import { Pressable, Text, TextInput, View } from 'react-native';
+import { useSettings } from '@/lib/settings-context';
 import { LoggedSet } from '@/lib/types';
 
 interface SetRowProps {
@@ -6,63 +7,101 @@ interface SetRowProps {
   data: LoggedSet;
   onChange: (data: LoggedSet) => void;
   onComplete: () => void;
+  isBodyweight?: boolean;
+  weightLabel?: string;
 }
 
-export function SetRow({ setNumber, data, onChange, onComplete }: SetRowProps) {
+export function SetRow({
+  setNumber,
+  data,
+  onChange,
+  onComplete,
+  isBodyweight,
+  weightLabel = 'Weight',
+}: SetRowProps) {
+  const { theme } = useSettings();
+
+  const handleToggle = () => {
+    if (data.completed) {
+      onChange({ ...data, completed: false });
+    } else {
+      onComplete();
+    }
+  };
+
   return (
     <View
-      className={`
-        flex-row items-center mb-2 p-3 rounded-xl
-        ${data.completed ? 'bg-zinc-100' : 'bg-white border border-zinc-200'}
-      `}
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 8,
+        padding: 12,
+        borderRadius: 12,
+        backgroundColor: data.completed ? theme.surface : theme.background,
+        borderWidth: 1,
+        borderColor: data.completed ? theme.chrome : theme.border,
+      }}
     >
-      <Text className="w-8 text-sm font-semibold text-zinc-400">{setNumber}</Text>
+      <Text style={{ width: 28, fontSize: 13, fontWeight: '600', color: theme.textSecondary }}>
+        {setNumber}
+      </Text>
 
-      <View className="flex-1 flex-row items-center gap-3">
-        <View className="flex-1">
-          <Text className="text-xs text-zinc-400 mb-0.5">Weight (kg)</Text>
+      <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+        {!isBodyweight && (
+          <>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                {weightLabel}
+              </Text>
+              <TextInput
+                style={{ fontSize: 16, fontWeight: '600', color: theme.text, padding: 0 }}
+                keyboardType="decimal-pad"
+                placeholder="—"
+                placeholderTextColor={theme.textSecondary}
+                underlineColorAndroid="transparent"
+                value={data.weight != null ? String(data.weight) : ''}
+                onChangeText={(v) => onChange({ ...data, weight: v === '' ? null : parseFloat(v) })}
+                editable={!data.completed}
+              />
+            </View>
+            <View style={{ width: 1, height: 32, backgroundColor: theme.border }} />
+          </>
+        )}
+
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 3, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+            Reps
+          </Text>
           <TextInput
-            className="text-base font-semibold text-zinc-900"
-            keyboardType="decimal-pad"
-            placeholder="—"
-            placeholderTextColor="#A1A1AA"
-            value={data.weight != null ? String(data.weight) : ''}
-            onChangeText={(v) =>
-              onChange({ ...data, weight: v === '' ? null : parseFloat(v) })
-            }
-            editable={!data.completed}
-          />
-        </View>
-
-        <View className="w-px h-8 bg-zinc-200" />
-
-        <View className="flex-1">
-          <Text className="text-xs text-zinc-400 mb-0.5">Reps</Text>
-          <TextInput
-            className="text-base font-semibold text-zinc-900"
+            style={{ fontSize: 16, fontWeight: '600', color: theme.text, padding: 0 }}
             keyboardType="number-pad"
             placeholder="—"
-            placeholderTextColor="#A1A1AA"
+            placeholderTextColor={theme.textSecondary}
+            underlineColorAndroid="transparent"
             value={data.reps > 0 ? String(data.reps) : ''}
-            onChangeText={(v) =>
-              onChange({ ...data, reps: parseInt(v) || 0 })
-            }
+            onChangeText={(v) => onChange({ ...data, reps: parseInt(v) || 0 })}
             editable={!data.completed}
           />
         </View>
       </View>
 
       <Pressable
-        onPress={onComplete}
-        disabled={data.completed}
-        className={`
-          ml-3 w-9 h-9 rounded-full items-center justify-center
-          ${data.completed ? 'bg-zinc-900' : 'border-2 border-zinc-300'}
-        `}
+        onPress={handleToggle}
+        style={{
+          marginLeft: 12,
+          width: 36,
+          height: 36,
+          borderRadius: 18,
+          alignItems: 'center',
+          justifyContent: 'center',
+          backgroundColor: data.completed ? theme.text : 'transparent',
+          borderWidth: data.completed ? 0 : 2,
+          borderColor: theme.border,
+        }}
       >
-        {data.completed ? (
-          <Text className="text-white text-sm">✓</Text>
-        ) : null}
+        {data.completed && (
+          <Text style={{ color: theme.background, fontSize: 14, fontWeight: '700' }}>✓</Text>
+        )}
       </Pressable>
     </View>
   );

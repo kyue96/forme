@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   KeyboardAvoidingView,
+  LayoutAnimation,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -18,31 +19,41 @@ import { QuizTile } from '@/components/QuizTile';
 import { useQuiz } from '@/lib/quiz-store';
 import { QuizAnswers } from '@/lib/types';
 
-const TOTAL_STEPS = 7;
+const TOTAL_STEPS = 11;
 
-const TILE_STEPS: Array<{
+type TileStep = {
   key: keyof QuizAnswers;
   question: string;
   subtitle: string;
   options: string[];
-}> = [
+  multiSelect?: boolean;
+};
+
+const TILE_STEPS: TileStep[] = [
+  {
+    key: 'gender',
+    question: "What's your gender?",
+    subtitle: "Helps us personalize your plan.",
+    options: ['Male', 'Female'],
+  },
   {
     key: 'goal',
     question: "What's your goal?",
     subtitle: "We'll build your plan around this.",
-    options: ['Build muscle', 'Lose fat', 'Build strength', 'Stay active'],
+    options: ['Build muscle', 'Build strength', 'Lose weight', 'Stay active'],
   },
   {
     key: 'experience',
     question: "What's your experience level?",
     subtitle: "Be honest — this helps us get it right.",
-    options: ['Brand new', 'Some experience', 'Intermediate', 'Advanced'],
+    options: ['Beginner', 'Some experience', 'Intermediate', 'Advanced'],
   },
   {
     key: 'equipment',
     question: "What equipment do you have?",
-    subtitle: "We'll only include what you can actually use.",
-    options: ['Full gym', 'Dumbbells only', 'Bodyweight only', 'Resistance bands'],
+    subtitle: "Select all that apply.",
+    options: ['Full gym', 'Dumbbells', 'Resistance bands', 'Bodyweight'],
+    multiSelect: true,
   },
   {
     key: 'daysPerWeek',
@@ -51,21 +62,41 @@ const TILE_STEPS: Array<{
     options: ['2', '3', '4', '5+'],
   },
   {
+    key: 'workoutDuration',
+    question: "How long per workout?",
+    subtitle: "We'll fit everything into your window.",
+    options: ['30 min', '45 min', '60 min', '90 min'],
+  },
+  {
     key: 'preferredSplit',
     question: "Preferred split?",
     subtitle: "How do you like to organise your training?",
-    options: ['Push/Pull/Legs', 'Full body', 'Upper/Lower', 'Arnold split'],
+    options: ['Push/Pull/Legs', 'Bro split', 'Full body', 'Upper/Lower'],
   },
   {
-    key: 'injuries',
-    question: "Any areas to avoid?",
-    subtitle: "Your safety matters most.",
-    options: ['None', 'Lower back', 'Knees', 'Shoulders'],
+    key: 'routineChoice',
+    question: "Custom or AI routine?",
+    subtitle: "Let us build it, or do it yourself.",
+    options: ['Generate my plan', "I'll build my own"],
+  },
+  {
+    key: 'mealsPerDay',
+    question: "How many meals per day?",
+    subtitle: "Helps us plan your nutrition.",
+    options: ['2', '3', '4', '5+'],
   },
 ];
 
-// --- Scroll wheel picker ---
+// Step 10 = body stats (height, current weight, goal weight)
+// Step 11 = injuries
+const INJURIES_STEP: TileStep = {
+  key: 'injuries',
+  question: "Any areas to avoid?",
+  subtitle: "Your safety matters most.",
+  options: ['None', 'Lower back', 'Knees', 'Shoulders'],
+};
 
+// --- Scroll wheel picker ---
 const ITEM_HEIGHT = 48;
 const VISIBLE_ITEMS = 5;
 const PICKER_HEIGHT = ITEM_HEIGHT * VISIBLE_ITEMS;
@@ -91,7 +122,6 @@ function ScrollWheelPicker({
 
   return (
     <View style={{ height: PICKER_HEIGHT, overflow: 'hidden' }}>
-      {/* Selection highlight */}
       <View
         className="absolute left-0 right-0 bg-zinc-100 rounded-xl"
         style={{ top: ITEM_HEIGHT * 2, height: ITEM_HEIGHT } as ViewStyle}
@@ -117,9 +147,8 @@ function ScrollWheelPicker({
               className="items-center justify-center"
             >
               <Text
-                className={`text-lg ${
-                  isSelected ? 'font-bold text-zinc-900' : 'text-zinc-300'
-                }`}
+                allowFontScaling
+                className={`text-lg ${isSelected ? 'font-bold text-zinc-900' : 'text-zinc-300'}`}
               >
                 {item}
               </Text>
@@ -131,7 +160,6 @@ function ScrollWheelPicker({
   );
 }
 
-// Build height options: 4'8" to 6'10"
 function buildHeightOptions(): string[] {
   const options: string[] = [];
   for (let ft = 4; ft <= 6; ft++) {
@@ -144,7 +172,6 @@ function buildHeightOptions(): string[] {
   return options;
 }
 
-// Build weight options: 90–350 lbs
 function buildWeightOptions(): string[] {
   const options: string[] = [];
   for (let w = 90; w <= 350; w += 5) {
@@ -159,34 +186,66 @@ const WEIGHT_OPTIONS = buildWeightOptions();
 export default function QuizStepScreen() {
   const { step } = useLocalSearchParams<{ step: string }>();
   const router = useRouter();
-  const { answers, setAnswer } = useQuiz();
+  const { answers, setAnswer, toggleEquipment } = useQuiz();
 
   const stepNum = parseInt(step ?? '1', 10);
-  const isStatsStep = stepNum === TOTAL_STEPS;
-  const tileConfig = TILE_STEPS[stepNum - 1];
+  const isStatsStep = stepNum === 10;
+  const isInjuriesStep = stepNum === 11;
+  const tileConfig = stepNum <= 9 ? TILE_STEPS[stepNum - 1] : isInjuriesStep ? INJURIES_STEP : null;
 
-  // Find initial indices for height/weight scroll wheels
   const initHeightIdx = answers.height
     ? HEIGHT_OPTIONS.indexOf(answers.height)
-    : HEIGHT_OPTIONS.indexOf("5'9\""); // sensible default
+    : HEIGHT_OPTIONS.indexOf("5'9\"");
   const initWeightIdx = answers.weight
     ? WEIGHT_OPTIONS.indexOf(answers.weight)
     : WEIGHT_OPTIONS.indexOf('170 lbs');
+  const initGoalWeightIdx = answers.goalWeight
+    ? WEIGHT_OPTIONS.indexOf(answers.goalWeight)
+    : WEIGHT_OPTIONS.indexOf('160 lbs');
 
   const [heightIdx, setHeightIdx] = useState(Math.max(0, initHeightIdx));
   const [weightIdx, setWeightIdx] = useState(Math.max(0, initWeightIdx));
+  const [goalWeightIdx, setGoalWeightIdx] = useState(Math.max(0, initGoalWeightIdx));
 
-  const canProceed = isStatsStep
-    ? true // scroll wheels always have a value
-    : !!answers[tileConfig?.key];
+  const canProceed = (() => {
+    if (isStatsStep) return true;
+    if (!tileConfig) return false;
+    if (tileConfig.multiSelect) {
+      const arr = answers[tileConfig.key] as unknown[];
+      return arr && arr.length > 0;
+    }
+    return !!answers[tileConfig.key];
+  })();
 
   const handleNext = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
     if (isStatsStep) {
       setAnswer('height', HEIGHT_OPTIONS[heightIdx]);
       setAnswer('weight', WEIGHT_OPTIONS[weightIdx]);
+      setAnswer('goalWeight', WEIGHT_OPTIONS[goalWeightIdx]);
+      router.push(`/quiz/${stepNum + 1}`);
+    } else if (isInjuriesStep) {
       router.push('/plan-result');
     } else if (stepNum < TOTAL_STEPS) {
       router.push(`/quiz/${stepNum + 1}`);
+    }
+  };
+
+  const isOptionSelected = (option: string): boolean => {
+    if (!tileConfig) return false;
+    if (tileConfig.multiSelect) {
+      const arr = (answers[tileConfig.key] as unknown as string[] | undefined) ?? [];
+      return arr.includes(option);
+    }
+    return answers[tileConfig.key] === option;
+  };
+
+  const handleTilePress = (option: string) => {
+    if (!tileConfig) return;
+    if (tileConfig.multiSelect) {
+      toggleEquipment(option);
+    } else {
+      setAnswer(tileConfig.key, option as never);
     }
   };
 
@@ -208,66 +267,53 @@ export default function QuizStepScreen() {
             <View className="flex-1">
               <ProgressBar step={stepNum} total={TOTAL_STEPS} />
             </View>
-            <Text className="text-sm text-zinc-400 w-9 text-right">
+            <Text allowFontScaling className="text-sm text-zinc-400 w-9 text-right">
               {stepNum}/{TOTAL_STEPS}
             </Text>
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} className="flex-1">
             {isStatsStep ? (
-              /* Stats step — scroll wheel pickers */
               <View>
-                <Text className="text-2xl font-bold text-zinc-900 mb-1">
-                  A little about you
+                <Text allowFontScaling className="text-2xl font-bold text-zinc-900 mb-1">
+                  Body stats
                 </Text>
-                <Text className="text-base text-zinc-500 mb-8">
+                <Text allowFontScaling className="text-base text-zinc-500 mb-8">
                   Helps us calibrate the right intensity.
                 </Text>
 
-                <Text className="text-sm font-medium text-zinc-700 mb-2">
-                  Height
-                </Text>
-                <ScrollWheelPicker
-                  items={HEIGHT_OPTIONS}
-                  selectedIndex={heightIdx}
-                  onSelect={setHeightIdx}
-                />
+                <Text allowFontScaling className="text-sm font-medium text-zinc-700 mb-2">Height</Text>
+                <ScrollWheelPicker items={HEIGHT_OPTIONS} selectedIndex={heightIdx} onSelect={setHeightIdx} />
+                <View className="h-4" />
 
-                <View className="h-6" />
+                <Text allowFontScaling className="text-sm font-medium text-zinc-700 mb-2">Current weight</Text>
+                <ScrollWheelPicker items={WEIGHT_OPTIONS} selectedIndex={weightIdx} onSelect={setWeightIdx} />
+                <View className="h-4" />
 
-                <Text className="text-sm font-medium text-zinc-700 mb-2">
-                  Weight
-                </Text>
-                <ScrollWheelPicker
-                  items={WEIGHT_OPTIONS}
-                  selectedIndex={weightIdx}
-                  onSelect={setWeightIdx}
-                />
+                <Text allowFontScaling className="text-sm font-medium text-zinc-700 mb-2">Goal weight</Text>
+                <ScrollWheelPicker items={WEIGHT_OPTIONS} selectedIndex={goalWeightIdx} onSelect={setGoalWeightIdx} />
               </View>
-            ) : (
-              /* Tile step */
+            ) : tileConfig ? (
               <View>
-                <Text className="text-2xl font-bold text-zinc-900 mb-1">
+                <Text allowFontScaling className="text-2xl font-bold text-zinc-900 mb-1">
                   {tileConfig.question}
                 </Text>
-                <Text className="text-base text-zinc-500 mb-8">
+                <Text allowFontScaling className="text-base text-zinc-500 mb-8">
                   {tileConfig.subtitle}
                 </Text>
-
                 <View>
                   {tileConfig.options.map((option) => (
                     <View key={option} className="flex-row mb-3">
                       <QuizTile
                         label={option}
-                        selected={answers[tileConfig.key] === option}
-                        onPress={() => setAnswer(tileConfig.key, option as never)}
+                        selected={isOptionSelected(option)}
+                        onPress={() => handleTilePress(option)}
                       />
                     </View>
                   ))}
                 </View>
               </View>
-            )}
-
+            ) : null}
             <View className="h-6" />
           </ScrollView>
 
@@ -276,15 +322,13 @@ export default function QuizStepScreen() {
             <Pressable
               onPress={handleNext}
               disabled={!canProceed}
-              className={`
-                py-4 rounded-2xl items-center
-                ${canProceed ? 'bg-zinc-900' : 'bg-zinc-200'}
-              `}
+              className={`py-4 rounded-2xl items-center ${canProceed ? 'bg-amber-500' : 'bg-zinc-200'}`}
             >
               <Text
+                allowFontScaling
                 className={`text-base font-semibold ${canProceed ? 'text-white' : 'text-zinc-400'}`}
               >
-                {isStatsStep ? 'Build my plan' : 'Continue'}
+                {isInjuriesStep ? 'Build my plan' : 'Continue'}
               </Text>
             </Pressable>
           </View>

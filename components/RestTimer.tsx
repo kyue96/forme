@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { useSettings } from '@/lib/settings-context';
 
 interface RestTimerProps {
   seconds: number;
@@ -7,6 +8,7 @@ interface RestTimerProps {
 }
 
 export function RestTimer({ seconds, onDismiss }: RestTimerProps) {
+  const { theme } = useSettings();
   const [remaining, setRemaining] = useState(seconds);
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -33,15 +35,43 @@ export function RestTimer({ seconds, onDismiss }: RestTimerProps) {
     ? `${mins}:${String(secs).padStart(2, '0')}`
     : `${secs}s`;
 
+  const progress = 1 - remaining / seconds;
+
   return (
-    <View className="absolute bottom-0 left-0 right-0 bg-zinc-900 rounded-t-3xl p-6 items-center">
-      <Text className="text-zinc-400 text-sm font-medium mb-2">Rest timer</Text>
-      <Text className="text-white text-6xl font-bold tracking-tight mb-6">{label}</Text>
+    <View style={{
+      position: 'absolute',
+      bottom: 0,
+      left: 0,
+      right: 0,
+      backgroundColor: theme.surface,
+      borderTopLeftRadius: 24,
+      borderTopRightRadius: 24,
+      padding: 28,
+      alignItems: 'center',
+      borderTopWidth: 1,
+      borderColor: theme.border,
+    }}>
+      {/* Progress bar */}
+      <View style={{ width: '100%', height: 3, backgroundColor: theme.border, borderRadius: 2, marginBottom: 20, overflow: 'hidden' }}>
+        <View style={{ height: '100%', width: `${progress * 100}%`, backgroundColor: theme.chrome, borderRadius: 2 }} />
+      </View>
+
+      <Text style={{ color: theme.textSecondary, fontSize: 11, fontWeight: '600', letterSpacing: 1.5, textTransform: 'uppercase', marginBottom: 8 }}>
+        Rest timer
+      </Text>
+      <Text style={{ color: theme.text, fontSize: 64, fontWeight: '800', letterSpacing: -2, marginBottom: 20, fontVariant: ['tabular-nums'] }}>
+        {label}
+      </Text>
       <Pressable
         onPress={onDismiss}
-        className="bg-white/10 px-8 py-3 rounded-full"
+        style={{
+          backgroundColor: theme.chromeLight,
+          paddingHorizontal: 32,
+          paddingVertical: 12,
+          borderRadius: 24,
+        }}
       >
-        <Text className="text-white font-semibold">Skip</Text>
+        <Text style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>Skip</Text>
       </Pressable>
     </View>
   );
