@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 
 import { supabase } from '@/lib/supabase';
 import { usePlan } from '@/lib/plan-context';
@@ -26,6 +27,9 @@ export default function ProfileScreen() {
   const [totalVolume, setTotalVolume] = useState(0);
   const [avgCalories, setAvgCalories] = useState<number | null>(null);
 
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+
   // Pro card collapsed
   const [proExpanded, setProExpanded] = useState(false);
 
@@ -40,6 +44,42 @@ export default function ProfileScreen() {
       const name = user.user_metadata?.full_name ?? user.email?.split('@')[0] ?? '';
       setDisplayName(name);
       setNameInput(name);
+      const { data: profile } = await supabase.from('profiles').select('avatar_url').eq('id', user.id).single();
+      if (profile?.avatar_url) setAvatarUrl(profile.avatar_url);
+    }
+  };
+
+  const pickAvatar = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Please allow photo access to upload an avatar.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    setAvatarUploading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const ext = asset.uri.split('.').pop() ?? 'jpg';
+      const path = `${user.id}.${ext}`;
+      const response = await fetch(asset.uri);
+      const blob = await response.blob();
+      const { error: uploadError } = await supabase.storage.from('avatars').upload(path, blob, { upsert: true, contentType: `image/${ext}` });
+      if (uploadError) throw uploadError;
+      const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(path);
+      await supabase.from('profiles').upsert({ id: user.id, avatar_url: publicUrl });
+      setAvatarUrl(publicUrl);
+    } catch (e) {
+      Alert.alert('Upload failed', 'Could not upload photo. Try again.');
+    } finally {
+      setAvatarUploading(false);
     }
   };
 
@@ -171,19 +211,30 @@ export default function ProfileScreen() {
       >
         {/* User info */}
         <View style={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: 20, alignItems: 'center' }}>
-          <View style={{
-            width: 72,
-            height: 72,
-            borderRadius: 36,
-            backgroundColor: theme.surface,
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: 12,
-            borderWidth: 1,
-            borderColor: theme.border,
-          }}>
-            <Ionicons name="person" size={32} color={theme.chrome} />
-          </View>
+          <Pressable
+            onPress={pickAvatar}
+            style={{
+              width: 72,
+              height: 72,
+              borderRadius: 36,
+              backgroundColor: theme.surface,
+              alignItems: 'center',
+              justifyContent: 'center',
+              marginBottom: 12,
+              borderWidth: 1,
+              borderColor: theme.border,
+              overflow: 'hidden',
+            }}
+          >
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={{ width: 72, height: 72, borderRadius: 36 }} />
+            ) : (
+              <Ionicons name={avatarUploading ? 'cloud-upload-outline' : 'person'} size={32} color={theme.chrome} />
+            )}
+            <View style={{ position: 'absolute', bottom: 0, right: 0, width: 22, height: 22, borderRadius: 11, backgroundColor: theme.text, alignItems: 'center', justifyContent: 'center' }}>
+              <Ionicons name="camera" size={12} color={theme.background} />
+            </View>
+          </Pressable>
 
           {editingName ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
