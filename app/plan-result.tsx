@@ -48,8 +48,10 @@ export default function PlanResultScreen() {
 
   const generatePlan = async () => {
     try {
+      const { data: { session } } = await supabase.auth.getSession();
       const { data, error } = await supabase.functions.invoke('generate-plan', {
         body: { mode: 'plan', answers },
+        headers: session ? { Authorization: `Bearer ${session.access_token}` } : {},
       });
 
       if (error) {
