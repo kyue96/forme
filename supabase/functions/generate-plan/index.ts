@@ -72,7 +72,7 @@ Create a structured weekly programme with exactly ${daysCount} workout days. ${
           : ''
       } Include specific exercises appropriate for the equipment and experience level. Avoid exercises that stress the areas listed under "areas to avoid".
 
-Return ONLY valid JSON with no markdown, no explanation — just the JSON object:
+Keep exercise notes to 5 words or fewer. Return ONLY valid JSON with no markdown, no explanation — just the JSON object:
 {
   "weeklyPlan": [
     {
@@ -94,7 +94,7 @@ Return ONLY valid JSON with no markdown, no explanation — just the JSON object
 
     const message = await client.messages.create({
       model: 'claude-haiku-4-5-20251001',
-      max_tokens: 2048,
+      max_tokens: mode === 'session' ? 1024 : 4096,
       messages: [{ role: 'user', content: prompt }],
     });
 
@@ -107,6 +107,11 @@ Return ONLY valid JSON with no markdown, no explanation — just the JSON object
     if (jsonStart !== -1 && jsonEnd !== -1) {
       text = text.slice(jsonStart, jsonEnd + 1);
     }
+    // Detect truncated response (stop_reason = max_tokens means output was cut off)
+    if (message.stop_reason === 'max_tokens') {
+      throw new Error('Plan generation was cut off — response too long. Please try again.');
+    }
+
     let plan;
     try {
       plan = JSON.parse(text);
