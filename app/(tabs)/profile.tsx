@@ -212,30 +212,31 @@ export default function ProfileScreen() {
       >
         {/* User info */}
         <View style={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: 20, alignItems: 'center' }}>
-          <Pressable
-            onPress={pickAvatar}
-            style={{
-              width: 72,
-              height: 72,
-              borderRadius: 36,
-              backgroundColor: theme.surface,
-              alignItems: 'center',
-              justifyContent: 'center',
-              marginBottom: 12,
-              borderWidth: 1,
-              borderColor: theme.border,
-              overflow: 'hidden',
-            }}
-          >
-            {avatarUrl ? (
-              <Image source={{ uri: avatarUrl }} style={{ width: 72, height: 72, borderRadius: 36 }} />
-            ) : (
-              <Ionicons name={avatarUploading ? 'cloud-upload-outline' : 'person'} size={32} color={theme.chrome} />
-            )}
-            <View style={{ position: 'absolute', bottom: 0, right: 0, width: 22, height: 22, borderRadius: 11, backgroundColor: theme.text, alignItems: 'center', justifyContent: 'center' }}>
+          <View style={{ marginBottom: 12 }}>
+            <Pressable
+              onPress={pickAvatar}
+              style={{
+                width: 72,
+                height: 72,
+                borderRadius: 36,
+                backgroundColor: theme.surface,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 1,
+                borderColor: theme.border,
+                overflow: 'hidden',
+              }}
+            >
+              {avatarUrl ? (
+                <Image source={{ uri: avatarUrl }} style={{ width: 72, height: 72, borderRadius: 36 }} />
+              ) : (
+                <Ionicons name={avatarUploading ? 'cloud-upload-outline' : 'person'} size={32} color={theme.chrome} />
+              )}
+            </Pressable>
+            <View style={{ position: 'absolute', bottom: -4, right: -4, width: 24, height: 24, borderRadius: 12, backgroundColor: theme.text, alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: theme.background }}>
               <Ionicons name="camera" size={12} color={theme.background} />
             </View>
-          </Pressable>
+          </View>
 
           {editingName ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
