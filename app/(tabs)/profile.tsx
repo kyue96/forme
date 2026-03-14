@@ -67,7 +67,8 @@ export default function ProfileScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const ext = asset.uri.split('.').pop() ?? 'jpg';
+      const rawExt = (asset.uri.split('.').pop() ?? 'jpg').toLowerCase();
+      const ext = ['jpg', 'jpeg', 'png', 'webp'].includes(rawExt) ? rawExt : 'jpg';
       const path = `${user.id}.${ext}`;
       const response = await fetch(asset.uri);
       const blob = await response.blob();
