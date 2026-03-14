@@ -1,4 +1,4 @@
-import { Pressable, ScrollView, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -61,7 +61,19 @@ export default function SettingsScreen() {
           />
           <RowItem
             label="Rest timer"
-            right={<Switch value={restTimerEnabled} onValueChange={setRestTimerEnabled} trackColor={{ false: theme.border, true: '#22C55E' }} thumbColor={theme.white} />}
+            right={
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {([true, false] as const).map(v => (
+                  <Pressable
+                    key={String(v)}
+                    onPress={() => setRestTimerEnabled(v)}
+                    style={{ paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: restTimerEnabled === v ? theme.text : theme.chromeLight }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: restTimerEnabled === v ? theme.background : theme.textSecondary }}>{v ? 'On' : 'Off'}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            }
           />
           {restTimerEnabled && (
             <View style={{ paddingHorizontal: 20, paddingVertical: 12, backgroundColor: theme.surface, borderBottomWidth: 1, borderBottomColor: theme.border }}>
