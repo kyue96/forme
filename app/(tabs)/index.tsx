@@ -16,10 +16,12 @@ import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
 
+import { LinearGradient } from 'expo-linear-gradient';
 import { usePlan } from '@/lib/plan-context';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { useWorkoutStore } from '@/lib/workout-store';
+import { useUserStore } from '@/lib/user-store';
 import { AppHeader } from '@/components/AppHeader';
 import { BottomSheet } from '@/components/BottomSheet';
 import { WeeklyCalendar, getWeekDates, dateKey, DAY_NAMES_FULL } from '@/components/WeeklyCalendar';
@@ -97,6 +99,8 @@ export default function HomeScreen() {
   // Active workout indicator
   const activeWorkout = useWorkoutStore((s) => s.activeWorkout);
   const clearWorkout = useWorkoutStore((s) => s.clearWorkout);
+  const avatarColor = useUserStore((s) => s.avatarColor);
+  const focusCardColor = avatarColor || '#F59E0B';
 
   // Theme switcher removed — use Settings screen instead
 
@@ -436,29 +440,124 @@ export default function HomeScreen() {
 
           ) : (
             <View>
-              <Pressable
-                onPress={() => {
-                  const idx = plan.weeklyPlan.indexOf(todayWorkout);
-                  router.push(`/workout/${idx}`);
-                }}
-                style={{ backgroundColor: theme.text, borderRadius: 24, paddingHorizontal: 20, paddingVertical: 20, marginBottom: 12, flexDirection: 'row', alignItems: 'center' }}
-              >
-                <View style={{ flex: 1 }}>
-                  <Text allowFontScaling style={{ fontSize: 10, fontWeight: '600', color: theme.background + '66', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
-                    Focus
-                  </Text>
-                  <Text allowFontScaling style={{ fontSize: 24, fontWeight: '800', color: theme.background, lineHeight: 30 }}>
-                    {todayWorkout.focus}
-                  </Text>
-                  <Text allowFontScaling style={{ fontSize: 13, color: theme.background + '66', marginTop: 6 }}>
-                    {todayWorkout.exercises.length} exercises
-                  </Text>
-                </View>
-                <Ionicons name="play-circle" size={44} color={theme.background + 'CC'} />
-              </Pressable>
+              {/* Focus card — shows resume state when workout is active */}
+              {activeWorkout && !todayCompleted ? (() => {
+                const completedSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.filter((s) => s.completed).length, 0);
+                const totalSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.length, 0);
+                return (
+                  <Pressable
+                    onPress={() => {
+                      if (activeWorkout.dayIndex === -1) {
+                        router.push('/workout/quick');
+                      } else {
+                        router.push(`/workout/${activeWorkout.dayIndex}`);
+                      }
+                    }}
+                    style={{ borderRadius: 24, overflow: 'hidden', marginBottom: 12, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
+                  >
+                    <LinearGradient
+                      colors={[focusCardColor, focusCardColor + 'CC']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 0, y: 1 }}
+                      style={{ paddingHorizontal: 20, paddingVertical: 24 }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <View style={{ flex: 1 }}>
+                          <Text allowFontScaling style={{ fontSize: 10, fontWeight: '600', color: '#FFFFFF80', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+                            In Progress
+                          </Text>
+                          <Text allowFontScaling style={{ fontSize: 26, fontWeight: '800', color: '#FFFFFF', lineHeight: 32 }}>
+                            Resume Workout
+                          </Text>
+                          <Text allowFontScaling style={{ fontSize: 14, color: '#FFFFFFAA', marginTop: 6 }}>
+                            {activeWorkout.dayName} · {completedSets}/{totalSets} sets
+                          </Text>
+                        </View>
+                        <Ionicons name="play-circle" size={48} color="#FFFFFFCC" />
+                      </View>
+                      {/* Exercise progress */}
+                      <View style={{ marginTop: 16, gap: 6 }}>
+                        {activeWorkout.loggedExercises.slice(0, 5).map((ex, i) => {
+                          const done = ex.sets.filter((s) => s.completed).length;
+                          return (
+                            <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Ionicons name={done === ex.sets.length ? 'checkmark-circle' : 'ellipse-outline'} size={14} color={done === ex.sets.length ? '#FFFFFF' : '#FFFFFF66'} style={{ marginRight: 8 }} />
+                              <Text style={{ fontSize: 13, color: done === ex.sets.length ? '#FFFFFF' : '#FFFFFFAA', fontWeight: done === ex.sets.length ? '600' : '400' }}>
+                                {ex.name}
+                              </Text>
+                              <Text style={{ fontSize: 11, color: '#FFFFFF66', marginLeft: 'auto' }}>{done}/{ex.sets.length}</Text>
+                            </View>
+                          );
+                        })}
+                        {activeWorkout.loggedExercises.length > 5 && (
+                          <Text style={{ fontSize: 12, color: '#FFFFFF66', marginTop: 2 }}>+{activeWorkout.loggedExercises.length - 5} more</Text>
+                        )}
+                      </View>
+                      {/* Discard button */}
+                      <Pressable
+                        onPress={(e) => {
+                          e.stopPropagation();
+                          Alert.alert('Discard workout?', 'Your progress will be lost.', [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Discard', style: 'destructive', onPress: () => clearWorkout() },
+                          ]);
+                        }}
+                        hitSlop={8}
+                        style={{ position: 'absolute', top: 16, right: 16 }}
+                      >
+                        <Ionicons name="close-circle-outline" size={22} color="#FFFFFF66" />
+                      </Pressable>
+                    </LinearGradient>
+                  </Pressable>
+                );
+              })() : (
+                <Pressable
+                  onPress={() => {
+                    const idx = plan.weeklyPlan.indexOf(todayWorkout);
+                    router.push(`/workout/${idx}`);
+                  }}
+                  style={{ borderRadius: 24, overflow: 'hidden', marginBottom: 12, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
+                >
+                  <LinearGradient
+                    colors={[focusCardColor, focusCardColor + 'CC']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 0, y: 1 }}
+                    style={{ paddingHorizontal: 20, paddingVertical: 24 }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <View style={{ flex: 1 }}>
+                        <Text allowFontScaling style={{ fontSize: 10, fontWeight: '600', color: '#FFFFFF80', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+                          Focus
+                        </Text>
+                        <Text allowFontScaling style={{ fontSize: 26, fontWeight: '800', color: '#FFFFFF', lineHeight: 32 }}>
+                          {todayWorkout.focus}
+                        </Text>
+                        <Text allowFontScaling style={{ fontSize: 14, color: '#FFFFFFAA', marginTop: 6 }}>
+                          {todayWorkout.exercises.length} exercises
+                        </Text>
+                      </View>
+                      <Ionicons name="play-circle" size={48} color="#FFFFFFCC" />
+                    </View>
+                    {/* Exercise list preview */}
+                    <View style={{ marginTop: 16, gap: 6 }}>
+                      {todayWorkout.exercises.slice(0, 5).map((ex, i) => (
+                        <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 13, color: '#FFFFFFAA', fontWeight: '400' }}>
+                            {i + 1}. {ex.name}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#FFFFFF66', marginLeft: 'auto' }}>{ex.sets} × {ex.reps}</Text>
+                        </View>
+                      ))}
+                      {todayWorkout.exercises.length > 5 && (
+                        <Text style={{ fontSize: 12, color: '#FFFFFF66', marginTop: 2 }}>+{todayWorkout.exercises.length - 5} more</Text>
+                      )}
+                    </View>
+                  </LinearGradient>
+                </Pressable>
+              )}
               <Pressable
                 onPress={() => router.push('/workout/quick')}
-                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center', marginBottom: 16 }}
+                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center', marginBottom: 12 }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
                   Create your own workout
@@ -466,57 +565,6 @@ export default function HomeScreen() {
               </Pressable>
             </View>
           )}
-
-          {/* In-progress workout banner */}
-          {activeWorkout && !todayCompleted && (() => {
-            const completedSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.filter((s) => s.completed).length, 0);
-            const totalSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.length, 0);
-            return (
-              <View
-                style={{
-                  backgroundColor: '#EAB308',
-                  borderRadius: 16,
-                  padding: 16,
-                  marginBottom: 12,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 12,
-                }}
-              >
-                <Pressable
-                  onPress={() => {
-                    if (activeWorkout.dayIndex === -1) {
-                      router.push('/workout/quick');
-                    } else {
-                      router.push(`/workout/${activeWorkout.dayIndex}`);
-                    }
-                  }}
-                  style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 }}
-                >
-                  <Ionicons name="fitness" size={24} color="#000" />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 15, fontWeight: '700', color: '#000' }}>Resume workout</Text>
-                    <Text style={{ fontSize: 12, color: 'rgba(0,0,0,0.6)', marginTop: 2 }}>
-                      {activeWorkout.dayName} · {completedSets}/{totalSets} sets
-                    </Text>
-                  </View>
-                  <Ionicons name="chevron-forward" size={20} color="#000" />
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    Alert.alert('Discard workout?', 'Your progress will be lost.', [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Discard', style: 'destructive', onPress: () => clearWorkout() },
-                    ]);
-                  }}
-                  hitSlop={8}
-                  style={{ padding: 4 }}
-                >
-                  <Ionicons name="close-circle-outline" size={22} color="rgba(0,0,0,0.5)" />
-                </Pressable>
-              </View>
-            );
-          })()}
 
           {/* Today's Session card (post-workout share) */}
           {todaySession && (
@@ -561,7 +609,7 @@ export default function HomeScreen() {
           )}
 
           {/* Today's meals + Add meal (side by side) */}
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
             <Pressable
               onPress={() => router.push('/(tabs)/meals')}
               style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: theme.border }}
