@@ -17,10 +17,9 @@ import { usePlan } from '@/lib/plan-context';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { AppHeader } from '@/components/AppHeader';
+import { WeeklyCalendar, getWeekDates, dateKey, DAY_NAMES_FULL } from '@/components/WeeklyCalendar';
 import { LoggedExercise } from '@/lib/types';
 import { animateLayout } from '@/lib/utils';
-
-const DAY_NAMES_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 interface WorkoutLog {
   id: string;
@@ -28,10 +27,6 @@ interface WorkoutLog {
   exercises: LoggedExercise[];
   duration_minutes: number;
   completed_at: string;
-}
-
-function dateKey(d: Date): string {
-  return d.toISOString().split('T')[0];
 }
 
 function formatDayDate(dayName: string): string {
@@ -55,8 +50,10 @@ function formatDayDate(dayName: string): string {
   const dayIdx = DAY_NAMES_FULL.findIndex(d => d.toLowerCase() === dayName.toLowerCase());
   if (dayIdx < 0) return dayName;
 
+  // DAY_NAMES_FULL is Sun-Sat (0-6), convert to Mon-based offset (Mon=0)
+  const monBasedIdx = dayIdx === 0 ? 6 : dayIdx - 1;
   const dayDate = new Date(monday);
-  dayDate.setDate(monday.getDate() + dayIdx);
+  dayDate.setDate(monday.getDate() + monBasedIdx);
   const month = dayDate.getMonth() + 1;
   const day = dayDate.getDate();
   return `${dayName} ${month}/${day}`;
@@ -74,6 +71,7 @@ export default function WorkoutScreen() {
   // selectedLog state removed — now navigates to session-view
   const [expandedDay, setExpandedDay] = useState<number | null>(null);
   const [todayLoggedDays, setTodayLoggedDays] = useState<Set<string>>(new Set());
+  const [completedDays, setCompletedDays] = useState<Set<string>>(new Set());
 
   // Open a specific log when navigated from the home screen calendar.
   const consumedLogId = useRef<string | null>(null);
@@ -115,6 +113,16 @@ export default function WorkoutScreen() {
       const todayStr = dateKey(new Date());
       const todayLogs = (data ?? []).filter((l: any) => l.completed_at?.startsWith(todayStr));
       setTodayLoggedDays(new Set(todayLogs.map((l: any) => l.day_name?.toLowerCase())));
+
+      // Build completedDays for the weekly calendar
+      const weekDates = getWeekDates();
+      const weekStart = dateKey(weekDates[0]);
+      const weekEnd = dateKey(weekDates[6]);
+      const weekLogs = (data ?? []).filter((l: any) => {
+        const dk = l.completed_at?.split('T')[0];
+        return dk >= weekStart && dk <= weekEnd;
+      });
+      setCompletedDays(new Set(weekLogs.map((l: any) => l.completed_at?.split('T')[0])));
     } catch {} finally {
       setLogsLoading(false);
     }
@@ -145,6 +153,23 @@ export default function WorkoutScreen() {
   }
 
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
+
+  // Build planDayNames set for the calendar
+  const planDayNames = new Set(
+    (plan?.weeklyPlan ?? []).map((d) => d.dayName.toLowerCase())
+  );
+
+  const handleCalendarDayPress = (date: Date, dayIndex: number) => {
+    if (!plan) return;
+    // Find the plan day matching this calendar day
+    const dayName = DAY_NAMES_FULL[dayIndex].toLowerCase();
+    const planIdx = plan.weeklyPlan.findIndex((d) => d.dayName.toLowerCase() === dayName);
+    if (planIdx >= 0) {
+      animateLayout();
+      setShowHistory(false);
+      setExpandedDay(expandedDay === planIdx ? null : planIdx);
+    }
+  };
 
   const swipeDelete = (logId: string) => {
     Alert.alert('Delete workout?', 'This cannot be undone.', [
@@ -182,13 +207,22 @@ export default function WorkoutScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
       <AppHeader />
 
+      {/* Weekly calendar strip — outside ScrollView padding */}
+      {plan && (
+        <WeeklyCalendar
+          completedDays={completedDays}
+          onDayPress={handleCalendarDayPress}
+          planDayNames={planDayNames}
+        />
+      )}
+
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: 32 }}
+        contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 32 }}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
           <View>
             <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text, marginBottom: 2 }}>
               My Plan

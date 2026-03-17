@@ -480,6 +480,7 @@ export default function SessionViewScreen() {
             ? editableExercises[plateCalcTarget.exIdx]?.sets[plateCalcTarget.setIdx]?.weight
             : null
         }
+        exerciseName={plateCalcTarget ? editableExercises[plateCalcTarget.exIdx]?.name : undefined}
       />
     </SafeAreaView>
   );

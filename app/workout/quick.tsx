@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   Alert,
-  Animated,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -37,40 +36,6 @@ import { formatTimeMs, formatTime, animateLayout } from '@/lib/utils';
 
 type Phase = 'pick' | 'workout';
 
-function ShakeWrapper({ isActive, children }: { isActive: boolean; children: React.ReactNode }) {
-  const rotation = useRef(new Animated.Value(0)).current;
-  const animRef = useRef<Animated.CompositeAnimation | null>(null);
-
-  useEffect(() => {
-    if (isActive) {
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-      animRef.current = Animated.loop(
-        Animated.sequence([
-          Animated.timing(rotation, { toValue: 1, duration: 80, useNativeDriver: true }),
-          Animated.timing(rotation, { toValue: -1, duration: 80, useNativeDriver: true }),
-          Animated.timing(rotation, { toValue: 1, duration: 80, useNativeDriver: true }),
-          Animated.timing(rotation, { toValue: 0, duration: 80, useNativeDriver: true }),
-        ])
-      );
-      animRef.current.start();
-    } else {
-      animRef.current?.stop();
-      rotation.setValue(0);
-    }
-    return () => { animRef.current?.stop(); };
-  }, [isActive]);
-
-  const rotate = rotation.interpolate({
-    inputRange: [-1, 1],
-    outputRange: ['-1.5deg', '1.5deg'],
-  });
-
-  return (
-    <Animated.View style={{ transform: [{ rotate }], opacity: isActive ? 0.9 : 1 }}>
-      {children}
-    </Animated.View>
-  );
-}
 
 export default function QuickWorkoutScreen() {
   const router = useRouter();
@@ -112,11 +77,12 @@ export default function QuickWorkoutScreen() {
   const [saving, setSaving] = useState(false);
   const [addExerciseOpen, setAddExerciseOpen] = useState(false);
   const [exerciseSearch, setExerciseSearch] = useState('');
-  const [selectionMode, setSelectionMode] = useState(false);
-  const [selectedForSuperset, setSelectedForSuperset] = useState<number[]>([]);
   const [workoutStarted, setWorkoutStarted] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [confirmFinish, setConfirmFinish] = useState(false);
+  const [reorderMode, setReorderMode] = useState(false);
+  const [supersetMode, setSupersetMode] = useState(false);
+  const [selectedForSuperset, setSelectedForSuperset] = useState<number[]>([]);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { exercises: customExercises, loaded: customLoaded, load: loadCustomExercises, create: createCustomExercise } = useCustomExerciseStore();
@@ -275,17 +241,54 @@ export default function QuickWorkoutScreen() {
     if (nextSet && nextSet.weight == null && currentSet.weight != null) {
       updateSet(exIdx, setIdx + 1, { ...nextSet, weight: currentSet.weight });
     }
-    startRestTimer();
     // Auto-advance to next exercise when all sets complete
     const updatedSets = loggedExercises[exIdx].sets.map((s, i) =>
       i === setIdx ? { ...s, completed: true } : s
     );
     const allDone = updatedSets.every((s) => s.completed);
-    if (allDone && exIdx + 1 < loggedExercises.length) {
-      setTimeout(() => {
-        animateLayout();
-        setActiveExercise(exIdx + 1);
-      }, 300);
+    const currentGroupId = loggedExercises[exIdx].supersetGroupId;
+
+    // Superset alternating focus: A1 → B1 → A2 → B2 → ...
+    if (currentGroupId && !allDone) {
+      const partnerIdx = loggedExercises.findIndex((ex, i) =>
+        i !== exIdx && ex.supersetGroupId === currentGroupId
+      );
+      if (partnerIdx !== -1) {
+        const isFirstOfPair = exIdx < partnerIdx;
+        const targetExIdx = isFirstOfPair ? partnerIdx : partnerIdx;
+        const targetSetIdx = isFirstOfPair ? setIdx : setIdx + 1;
+        const targetSet = loggedExercises[targetExIdx]?.sets[targetSetIdx];
+
+        if (targetSet && !targetSet.completed) {
+          animateLayout();
+          setActiveExercise(targetExIdx);
+          setTimeout(() => {
+            const hasWeight = targetSet.weight != null && targetSet.weight > 0;
+            const ref = hasWeight
+              ? inputRefs.current[`${targetExIdx}-${targetSetIdx}-r`]
+              : inputRefs.current[`${targetExIdx}-${targetSetIdx}-w`];
+            ref?.focus();
+          }, 300);
+          return;
+        }
+      }
+    }
+
+    const nextEx = loggedExercises[exIdx + 1];
+    const isSupersetTransition = allDone && currentGroupId && nextEx?.supersetGroupId === currentGroupId;
+
+    if (isSupersetTransition) {
+      // Skip rest timer, advance to superset partner immediately
+      animateLayout();
+      setActiveExercise(exIdx + 1);
+    } else {
+      startRestTimer();
+      if (allDone && exIdx + 1 < loggedExercises.length) {
+        setTimeout(() => {
+          animateLayout();
+          setActiveExercise(exIdx + 1);
+        }, 300);
+      }
     }
   };
 
@@ -342,6 +345,19 @@ export default function QuickWorkoutScreen() {
     });
   };
 
+  const removeSetAt = (exIdx: number, setIdx: number) => {
+    if (loggedExercises[exIdx].sets.length <= 1) return;
+    animateLayout();
+    setLoggedExercises((prev) => {
+      const updated = [...prev];
+      updated[exIdx] = {
+        ...updated[exIdx],
+        sets: updated[exIdx].sets.filter((_, i) => i !== setIdx),
+      };
+      return updated;
+    });
+  };
+
   const removeExercise = (exIdx: number) => {
     if (loggedExercises.length <= 1) return;
     animateLayout();
@@ -350,25 +366,29 @@ export default function QuickWorkoutScreen() {
     else if (activeExercise !== null && activeExercise > exIdx) setActiveExercise(activeExercise - 1);
   };
 
-  const toggleSuperset = (exIdx: number) => {
+  const toggleSupersetSelection = (exIdx: number) => {
     setSelectedForSuperset((prev) =>
-      prev.includes(exIdx) ? prev.filter((i) => i !== exIdx) : [...prev, exIdx]
+      prev.includes(exIdx) ? prev.filter((i) => i !== exIdx) : prev.length < 2 ? [...prev, exIdx] : prev
     );
   };
 
-  const linkAsSuperset = () => {
+  const confirmSuperset = () => {
     if (selectedForSuperset.length !== 2) return;
     const groupId = String(Date.now());
+    const [first, second] = [...selectedForSuperset].sort((a, b) => a - b);
     animateLayout();
     setLoggedExercises((prev) => {
-      const updated = [...prev];
-      for (const idx of selectedForSuperset) {
-        updated[idx] = { ...updated[idx], supersetGroupId: groupId };
-      }
-      return updated;
+      const tagged = prev.map((ex, i) =>
+        i === first || i === second ? { ...ex, supersetGroupId: groupId } : ex
+      );
+      if (second === first + 1) return tagged;
+      const secondEx = tagged[second];
+      const without = tagged.filter((_, i) => i !== second);
+      without.splice(first + 1, 0, secondEx);
+      return without;
     });
     setSelectedForSuperset([]);
-    setSelectionMode(false);
+    setSupersetMode(false);
   };
 
   const unlinkSuperset = (exIdx: number) => {
@@ -891,12 +911,44 @@ export default function QuickWorkoutScreen() {
             </Text>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            <Pressable onPress={() => setAddExerciseOpen(true)} hitSlop={12} style={{ padding: 4 }}>
-              <Ionicons name="add-outline" size={24} color={theme.chrome} />
-            </Pressable>
-            <Pressable onPress={handleExit} hitSlop={12} style={{ padding: 4 }}>
-              <Ionicons name="close-outline" size={26} color={theme.chrome} />
-            </Pressable>
+            {reorderMode ? (
+              <Pressable
+                onPress={() => { setReorderMode(false); animateLayout(); }}
+                hitSlop={12}
+                style={{ padding: 4 }}
+              >
+                <Ionicons name="checkmark-circle" size={26} color={SemanticColors.success} />
+              </Pressable>
+            ) : supersetMode ? (
+              <>
+                <Pressable
+                  onPress={() => { setSupersetMode(false); setSelectedForSuperset([]); }}
+                  hitSlop={12}
+                  style={{ padding: 4 }}
+                >
+                  <Ionicons name="close-outline" size={26} color={theme.chrome} />
+                </Pressable>
+                {selectedForSuperset.length === 2 && (
+                  <Pressable onPress={confirmSuperset} hitSlop={12} style={{ padding: 4 }}>
+                    <Ionicons name="checkmark-circle" size={26} color={SemanticColors.success} />
+                  </Pressable>
+                )}
+              </>
+            ) : (
+              <>
+                {/* Link superset */}
+                <Pressable onPress={() => { setSupersetMode(true); animateLayout(); }} hitSlop={12} style={{ padding: 4 }}>
+                  <Ionicons name="link-outline" size={22} color={theme.chrome} />
+                </Pressable>
+                {/* Add exercise */}
+                <Pressable onPress={() => setAddExerciseOpen(true)} hitSlop={12} style={{ padding: 4 }}>
+                  <Ionicons name="add-outline" size={24} color={theme.chrome} />
+                </Pressable>
+                <Pressable onPress={handleExit} hitSlop={12} style={{ padding: 4 }}>
+                  <Ionicons name="close-outline" size={26} color={theme.chrome} />
+                </Pressable>
+              </>
+            )}
           </View>
         </View>
 
@@ -904,21 +956,39 @@ export default function QuickWorkoutScreen() {
         <DraggableFlatList
           data={loggedExercises}
           keyExtractor={(_, i) => String(i)}
-          onDragEnd={({ data }) => { setLoggedExercises(data); animateLayout(); }}
+          onDragEnd={({ data }) => { setLoggedExercises(data); animateLayout(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
           contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 120 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           renderItem={({ item: logged, getIndex, drag, isActive }: RenderItemParams<LoggedExercise>) => {
             const exIdx = getIndex()!;
-            const isExpanded = activeExercise === exIdx;
+            const isExpanded = reorderMode ? false : activeExercise === exIdx;
             const detailsOpen = expandedDetails[exIdx] ?? false;
             const suggested = getSuggestedWeight(logged.name);
             const instructions = getInstructions(logged.name);
             const isBW = isBodyweightExercise(logged.name);
             const allSetsComplete = logged.sets.every((s) => s.completed);
+            const isFirstOfSuperset = logged.supersetGroupId && (exIdx === 0 || loggedExercises[exIdx - 1]?.supersetGroupId !== logged.supersetGroupId);
+            const isLastOfSuperset = logged.supersetGroupId && (exIdx === loggedExercises.length - 1 || loggedExercises[exIdx + 1]?.supersetGroupId !== logged.supersetGroupId);
+            const isInSuperset = !!logged.supersetGroupId;
 
             return (
-              <ShakeWrapper isActive={isActive}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {reorderMode && (
+                  <Pressable
+                    onPressIn={drag}
+                    style={{ paddingRight: 8, paddingVertical: 12 }}
+                  >
+                    <Ionicons name="menu" size={22} color={theme.chrome} />
+                  </Pressable>
+                )}
+                <View style={{ flex: 1, opacity: isActive ? 0.85 : 1 }}>
+                {/* Superset vertical connector between exercises */}
+                {!isFirstOfSuperset && isInSuperset && !reorderMode && (
+                  <View style={{ alignItems: 'center', marginBottom: 4 }}>
+                    <View style={{ width: 2, height: 16, backgroundColor: theme.chrome, borderRadius: 1 }} />
+                  </View>
+                )}
                 <Swipeable
                   ref={(ref) => { swipeableRefs.current[exIdx] = ref; }}
                   renderRightActions={renderRightActions(exIdx)}
@@ -927,30 +997,30 @@ export default function QuickWorkoutScreen() {
                   enabled={loggedExercises.length > 1}
                 >
                   <View style={{
-                    marginBottom: 12, borderRadius: 16,
+                    marginBottom: isInSuperset && !isLastOfSuperset ? 0 : 12,
+                    borderRadius: 16,
                     backgroundColor: isExpanded ? theme.surface : 'transparent',
                     borderWidth: isExpanded ? 1 : 0, borderColor: theme.border,
-                    padding: isExpanded ? 12 : 0,
-                    paddingVertical: isExpanded ? 12 : 4,
-                    paddingHorizontal: isExpanded ? 12 : 4,
-                    opacity: isActive ? 0.9 : 1,
-                    ...(logged.supersetGroupId ? { borderLeftWidth: 3, borderLeftColor: theme.chrome } : {}),
+                    paddingVertical: 12,
+                    paddingHorizontal: 12,
                   }}>
-                    {logged.supersetGroupId && (exIdx === 0 || loggedExercises[exIdx - 1]?.supersetGroupId !== logged.supersetGroupId) && (
-                      <View style={{ position: 'absolute', top: -10, left: 8, backgroundColor: theme.chrome, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 }}>
-                        <Text style={{ fontSize: 9, fontWeight: '800', color: theme.background, letterSpacing: 1 }}>SUPERSET</Text>
-                      </View>
-                    )}
                     <Pressable
                       onPress={() => {
                         animateLayout();
                         setActiveExercise(isExpanded ? null : exIdx);
                       }}
-                      onLongPress={drag}
+                      onLongPress={() => {
+                        if (!reorderMode) {
+                          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+                          setReorderMode(true);
+                          animateLayout();
+                        }
+                      }}
+                      disabled={isActive}
                       style={{ flexDirection: 'row', alignItems: 'center', marginBottom: isExpanded ? 12 : 0 }}
                     >
-                      {selectionMode && (
-                        <Pressable onPress={() => toggleSuperset(exIdx)} style={{ marginRight: 8 }}>
+                      {supersetMode && (
+                        <Pressable onPress={() => toggleSupersetSelection(exIdx)} style={{ marginRight: 8 }}>
                           <Ionicons
                             name={selectedForSuperset.includes(exIdx) ? 'checkbox' : 'square-outline'}
                             size={20}
@@ -999,7 +1069,7 @@ export default function QuickWorkoutScreen() {
                             animateLayout();
                             setExpandedDetails((prev) => ({ ...prev, [exIdx]: !prev[exIdx] }));
                           }}
-                          style={{ paddingVertical: 8 }}
+                          style={{ paddingTop: 2, paddingBottom: 8 }}
                         >
                           <Text style={{ fontSize: 13, fontWeight: '500', color: theme.textSecondary }}>
                             {detailsOpen ? 'Hide tips ↑' : 'Form tips ↓'}
@@ -1020,10 +1090,12 @@ export default function QuickWorkoutScreen() {
                               data={set}
                               onChange={(d) => updateSet(exIdx, setIdx, d)}
                               onComplete={() => completeSet(exIdx, setIdx)}
+                              onDelete={logged.sets.length > 1 ? () => removeSetAt(exIdx, setIdx) : undefined}
                               isBodyweight={isBW}
                               weightLabel={`Weight (${unitLabel})`}
                               exerciseName={logged.name}
                               isLastSet={isLast}
+                              isSuperset={!!logged.supersetGroupId}
                               isDropSet={set.isDropSet}
                               showLabels={setIdx === 0}
                               weightInputRef={(el) => { inputRefs.current[`${exIdx}-${setIdx}-w`] = el; }}
@@ -1041,42 +1113,25 @@ export default function QuickWorkoutScreen() {
                             onPress={() => addSet(exIdx)}
                             style={{ flex: 1, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 10, borderRadius: 12, alignItems: 'center' }}
                           >
-                            <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>+ Set</Text>
+                            <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Add Set</Text>
                           </Pressable>
                           <Pressable
                             onPress={() => addDropSet(exIdx)}
                             style={{ flex: 1, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 10, borderRadius: 12, alignItems: 'center' }}
                           >
-                            <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>+ Drop</Text>
-                          </Pressable>
-                          <Pressable
-                            onPress={() => removeSet(exIdx)}
-                            style={{ flex: 1, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 10, borderRadius: 12, alignItems: 'center' }}
-                          >
-                            <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>− Remove</Text>
+                            <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Add Dropset</Text>
                           </Pressable>
                         </View>
                       </>
                     )}
                   </View>
                 </Swipeable>
-              </ShakeWrapper>
+                </View>
+              </View>
             );
           }}
         />
         </KeyboardAvoidingView>
-
-        {selectionMode && selectedForSuperset.length === 2 && (
-          <Pressable
-            onPress={linkAsSuperset}
-            style={{
-              backgroundColor: theme.chrome, marginHorizontal: 20, marginBottom: 8,
-              paddingVertical: 14, borderRadius: 14, alignItems: 'center',
-            }}
-          >
-            <Text style={{ fontSize: 15, fontWeight: '700', color: '#000' }}>Link as Superset</Text>
-          </Pressable>
-        )}
 
         {/* Bottom bar: Timer + Finish */}
         <View style={{ backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border }}>
@@ -1126,8 +1181,28 @@ export default function QuickWorkoutScreen() {
                 />
               </Pressable>
 
-              {/* Timer */}
-              <View style={{ flex: 1, alignItems: 'center' }}>
+              {/* Timer — tappable for START */}
+              <Pressable
+                onPress={() => {
+                  if (!workoutStarted && countdown === null) {
+                    setCountdown(3);
+                    let c = 3;
+                    const id = setInterval(() => {
+                      c -= 1;
+                      if (c > 0) {
+                        setCountdown(c);
+                      } else {
+                        clearInterval(id);
+                        setCountdown(null);
+                        setWorkoutStarted(true);
+                        resumeWorkout();
+                      }
+                    }, 1000);
+                  }
+                }}
+                disabled={workoutStarted || countdown !== null}
+                style={{ flex: 1, alignItems: 'center' }}
+              >
                 <Text style={{
                   fontSize: 24, fontWeight: '700',
                   color: countdown !== null ? SemanticColors.warning : isPaused ? theme.chrome : theme.text,
@@ -1139,7 +1214,7 @@ export default function QuickWorkoutScreen() {
                     ? String(countdown)
                     : formatTimeMs(displayMs)}
                 </Text>
-              </View>
+              </Pressable>
 
               {/* Finish (two-tap) */}
               <Pressable

@@ -16,19 +16,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { AppHeader } from '@/components/AppHeader';
+import { WeeklyCalendar, getWeekDates, dateKey } from '@/components/WeeklyCalendar';
 import { formatNumber } from '@/lib/utils';
-
-function dateKey(d: Date): string {
-  return d.toISOString().split('T')[0];
-}
-
-function formatDate(d: Date): string {
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-}
-
-function daysInMonth(year: number, month: number): number {
-  return new Date(year, month + 1, 0).getDate();
-}
 
 interface MealRow {
   id: string;
@@ -57,14 +46,11 @@ export default function MealsScreen() {
   const [editProt, setEditProt] = useState('');
   const [editCarb, setEditCarb] = useState('');
 
-  // Calendar view
-  const [showCalendar, setShowCalendar] = useState(false);
-  const [calMonth, setCalMonth] = useState(new Date().getMonth());
-  const [calYear, setCalYear] = useState(new Date().getFullYear());
-  const [mealDates, setMealDates] = useState<Set<string>>(new Set());
+  // Weekly calendar — days with meals logged
+  const [mealDays, setMealDays] = useState<Set<string>>(new Set());
 
   const dk = dateKey(selectedDate);
-  const isToday = dk === dateKey(new Date());
+
 
   const loadMeals = useCallback(async () => {
     setLoading(true);
@@ -83,13 +69,13 @@ export default function MealsScreen() {
     }
   }, [dk]);
 
-  const loadMealDates = useCallback(async () => {
+  const loadMealDays = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const startDate = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-01`;
-      const endDay = daysInMonth(calYear, calMonth);
-      const endDate = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`;
+      const weekDates = getWeekDates();
+      const startDate = dateKey(weekDates[0]);
+      const endDate = dateKey(weekDates[6]);
       const { data } = await supabase
         .from('meals')
         .select('date')
@@ -97,18 +83,13 @@ export default function MealsScreen() {
         .gte('date', startDate)
         .lte('date', endDate);
       if (data) {
-        setMealDates(new Set(data.map((m: { date: string }) => m.date)));
+        setMealDays(new Set(data.map((m: { date: string }) => m.date)));
       }
     } catch {}
-  }, [calMonth, calYear]);
+  }, []);
 
-  useFocusEffect(useCallback(() => { loadMeals(); loadMealDates(); }, [loadMeals, loadMealDates]));
+  useFocusEffect(useCallback(() => { loadMeals(); loadMealDays(); }, [loadMeals, loadMealDays]));
 
-  const changeDate = (offset: number) => {
-    const d = new Date(selectedDate);
-    d.setDate(d.getDate() + offset);
-    setSelectedDate(d);
-  };
 
   const addMeal = async () => {
     const c = parseInt(cal) || null;
@@ -130,6 +111,7 @@ export default function MealsScreen() {
       });
       setMealName(''); setCal(''); setProt(''); setCarb('');
       loadMeals();
+      loadMealDays();
     } catch {} finally {
       setSaving(false);
     }
@@ -186,75 +168,6 @@ export default function MealsScreen() {
     color: theme.text,
   };
 
-  // Calendar grid
-  const renderCalendar = () => {
-    const firstDay = new Date(calYear, calMonth, 1).getDay();
-    const totalDays = daysInMonth(calYear, calMonth);
-    const offset = firstDay === 0 ? 6 : firstDay - 1; // Monday start
-    const cells: (number | null)[] = [];
-    for (let i = 0; i < offset; i++) cells.push(null);
-    for (let d = 1; d <= totalDays; d++) cells.push(d);
-    while (cells.length % 7 !== 0) cells.push(null);
-
-    const monthLabel = new Date(calYear, calMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
-
-    return (
-      <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-          <Pressable onPress={() => {
-            if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); }
-            else setCalMonth(m => m - 1);
-          }}>
-            <Ionicons name="chevron-back" size={20} color={theme.chrome} />
-          </Pressable>
-          <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>{monthLabel}</Text>
-          <Pressable onPress={() => {
-            if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); }
-            else setCalMonth(m => m + 1);
-          }}>
-            <Ionicons name="chevron-forward" size={20} color={theme.chrome} />
-          </Pressable>
-        </View>
-        <View style={{ flexDirection: 'row', marginBottom: 8 }}>
-          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
-            <View key={i} style={{ flex: 1, alignItems: 'center' }}>
-              <Text style={{ fontSize: 11, color: theme.textSecondary, fontWeight: '600' }}>{d}</Text>
-            </View>
-          ))}
-        </View>
-        {Array.from({ length: cells.length / 7 }, (_, row) => (
-          <View key={row} style={{ flexDirection: 'row', marginBottom: 4 }}>
-            {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
-              if (day == null) return <View key={col} style={{ flex: 1, height: 36 }} />;
-              const dayStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-              const hasMeal = mealDates.has(dayStr);
-              const isSelected = dayStr === dk;
-              return (
-                <Pressable
-                  key={col}
-                  onPress={() => {
-                    setSelectedDate(new Date(calYear, calMonth, day));
-                    setShowCalendar(false);
-                  }}
-                  style={{ flex: 1, height: 36, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <View style={{
-                    width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
-                    backgroundColor: isSelected ? theme.text : 'transparent',
-                  }}>
-                    <Text style={{ fontSize: 13, color: isSelected ? theme.background : theme.text, fontWeight: isSelected ? '700' : '400' }}>{day}</Text>
-                  </View>
-                  {hasMeal && (
-                    <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: theme.chrome, position: 'absolute', bottom: 0 }} />
-                  )}
-                </Pressable>
-              );
-            })}
-          </View>
-        ))}
-      </View>
-    );
-  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
@@ -272,45 +185,12 @@ export default function MealsScreen() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="interactive"
         >
-          {/* Date picker: [←] [Date (tappable)] [→] */}
-          <View style={{ paddingHorizontal: 24, paddingTop: 20, paddingBottom: 16 }}>
-            <View style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              backgroundColor: theme.surface,
-              borderRadius: 16,
-              paddingHorizontal: 4,
-              paddingVertical: 4,
-              borderWidth: 1,
-              borderColor: theme.border,
-            }}>
-              <Pressable
-                onPress={() => changeDate(-1)}
-                style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}
-              >
-                <Ionicons name="chevron-back" size={20} color={theme.chrome} />
-              </Pressable>
-              <Pressable onPress={() => { setShowCalendar(!showCalendar); loadMealDates(); }}>
-                <Text allowFontScaling style={{
-                  fontSize: 15,
-                  fontWeight: '700',
-                  color: isToday ? theme.text : theme.textSecondary,
-                }}>
-                  {isToday ? 'Today' : formatDate(selectedDate)}
-                </Text>
-              </Pressable>
-              <Pressable
-                onPress={() => changeDate(1)}
-                style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}
-              >
-                <Ionicons name="chevron-forward" size={20} color={theme.chrome} />
-              </Pressable>
-            </View>
-          </View>
-
-          {/* Calendar view */}
-          {showCalendar && renderCalendar()}
+          {/* Weekly calendar strip */}
+          <WeeklyCalendar
+            completedDays={mealDays}
+            selectedDay={dk}
+            onDayPress={(date) => setSelectedDate(date)}
+          />
 
           {/* Daily totals */}
           <View style={{ paddingHorizontal: 24, marginBottom: 20 }}>

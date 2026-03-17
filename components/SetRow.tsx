@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, Text, TextInput, View } from 'react-native';
+import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useSettings } from '@/lib/settings-context';
 import { LoggedSet } from '@/lib/types';
@@ -11,6 +12,7 @@ interface SetRowProps {
   data: LoggedSet;
   onChange: (data: LoggedSet) => void;
   onComplete: () => void;
+  onDelete?: () => void;
   isBodyweight?: boolean;
   weightLabel?: string;
   exerciseName?: string;
@@ -19,6 +21,7 @@ interface SetRowProps {
   onWeightSubmit?: () => void;
   onRepsSubmit?: () => void;
   isLastSet?: boolean;
+  isSuperset?: boolean;
   isDropSet?: boolean;
   showLabels?: boolean;
 }
@@ -28,6 +31,7 @@ export function SetRow({
   data,
   onChange,
   onComplete,
+  onDelete,
   isBodyweight,
   weightLabel = 'Weight',
   exerciseName = '',
@@ -36,18 +40,25 @@ export function SetRow({
   onWeightSubmit,
   onRepsSubmit,
   isLastSet,
+  isSuperset,
   isDropSet,
   showLabels = true,
 }: SetRowProps) {
   const { theme, weightUnit } = useSettings();
   const prevCompleted = useRef(data.completed);
   const weightStep = weightUnit === 'lbs' ? 5 : 2.5;
-  const showIncrement = setNumber >= 2 && !isBodyweight && !data.completed;
+  const isBarbellExercise = !isBodyweight && exerciseName !== '' && isBarbell(exerciseName);
+  const showIncrement = setNumber >= 2 && !isBodyweight && !data.completed && !isBarbellExercise;
   const [showPlateCalc, setShowPlateCalc] = useState(false);
-  const showCalcIcon = !isBodyweight && exerciseName !== '' && isBarbell(exerciseName) && !data.completed;
+  const showCalcIcon = isBarbellExercise && !data.completed;
+  const swipeRef = useRef<Swipeable>(null);
+  const repsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-check: when both weight and reps have values, auto-complete
+  // For the last set, delay 3s so user can blur to complete immediately
+  const autoCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
+    if (autoCompleteTimerRef.current) clearTimeout(autoCompleteTimerRef.current);
     if (data.completed || prevCompleted.current) {
       prevCompleted.current = data.completed;
       return;
@@ -55,12 +66,43 @@ export function SetRow({
     const hasWeight = isBodyweight || (data.weight != null && data.weight > 0);
     const hasReps = data.reps > 0;
     if (hasWeight && hasReps) {
-      // Use requestAnimationFrame to ensure state is flushed before completing
-      requestAnimationFrame(() => {
-        onComplete();
-      });
+      if (isLastSet || isSuperset) {
+        autoCompleteTimerRef.current = setTimeout(() => {
+          onComplete();
+        }, 3000);
+      } else {
+        requestAnimationFrame(() => {
+          onComplete();
+        });
+      }
     }
+    return () => { if (autoCompleteTimerRef.current) clearTimeout(autoCompleteTimerRef.current); };
   }, [data.weight, data.reps]);
+
+  // On last set reps blur: if reps entered, complete immediately
+  const handleRepsBlur = () => {
+    if (isLastSet && !data.completed && data.reps > 0) {
+      const hasWeight = isBodyweight || (data.weight != null && data.weight > 0);
+      if (hasWeight) {
+        if (autoCompleteTimerRef.current) clearTimeout(autoCompleteTimerRef.current);
+        if (repsTimerRef.current) clearTimeout(repsTimerRef.current);
+        prevCompleted.current = true;
+        onChange({ ...data, completed: true });
+        onComplete();
+      }
+    }
+  };
+
+  // After reps typing stops for 3s, auto-focus next set's reps
+  useEffect(() => {
+    if (repsTimerRef.current) clearTimeout(repsTimerRef.current);
+    if (data.reps > 0 && onRepsSubmit) {
+      repsTimerRef.current = setTimeout(() => {
+        onRepsSubmit();
+      }, 3000);
+    }
+    return () => { if (repsTimerRef.current) clearTimeout(repsTimerRef.current); };
+  }, [data.reps]);
 
   const handleToggle = () => {
     if (data.completed) {
@@ -95,7 +137,30 @@ export function SetRow({
     }
   };
 
-  return (
+  const renderRightActions = () => {
+    if (!onDelete) return null;
+    return (
+      <Pressable
+        onPress={() => {
+          swipeRef.current?.close();
+          onDelete();
+        }}
+        style={{
+          backgroundColor: '#EF4444',
+          borderRadius: 12,
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 56,
+          marginLeft: 8,
+          marginBottom: 8,
+        }}
+      >
+        <Ionicons name="trash-outline" size={20} color="#fff" />
+      </Pressable>
+    );
+  };
+
+  const rowContent = (
     <Pressable onPress={data.completed ? handleToggle : undefined} style={{
       flexDirection: 'row',
       alignItems: 'center',
@@ -152,7 +217,7 @@ export function SetRow({
                   <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textSecondary, lineHeight: 20 }}>+</Text>
                 </Pressable>
               )}
-              {showCalcIcon && !showIncrement && (
+              {showCalcIcon && (
                 <Pressable onPress={() => setShowPlateCalc(true)} hitSlop={6} style={{ marginLeft: 6 }}>
                   <Ionicons name="calculator-outline" size={16} color={theme.chrome} />
                 </Pressable>
@@ -175,6 +240,7 @@ export function SetRow({
             onChangeText={handleRepsChange}
             onSubmitEditing={onRepsSubmit}
             onFocus={handleFocusUncheck}
+            onBlur={handleRepsBlur}
           />
         </View>
       </View>
@@ -185,8 +251,24 @@ export function SetRow({
           onClose={() => setShowPlateCalc(false)}
           onConfirm={(weight) => onChange({ ...data, weight })}
           initialWeight={data.weight}
+          exerciseName={exerciseName}
         />
       )}
     </Pressable>
   );
+
+  if (onDelete) {
+    return (
+      <Swipeable
+        ref={swipeRef}
+        renderRightActions={renderRightActions}
+        overshootRight={false}
+        friction={2}
+      >
+        {rowContent}
+      </Swipeable>
+    );
+  }
+
+  return rowContent;
 }

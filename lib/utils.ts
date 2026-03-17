@@ -31,9 +31,9 @@ export function formatNumber(n: number): string {
 export function animateLayout() {
   const { LayoutAnimation } = require('react-native');
   LayoutAnimation.configureNext({
-    duration: 400,
+    duration: 250,
     update: { type: LayoutAnimation.Types.easeInEaseOut },
-    create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-    delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
+    create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity, duration: 200 },
+    delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity, duration: 150 },
   });
 }
