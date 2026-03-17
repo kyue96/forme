@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import {
+  Alert,
   Animated,
   KeyboardAvoidingView,
   Modal,
@@ -10,7 +11,6 @@ import {
   Text,
   TextInput,
   View,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,17 +19,23 @@ import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler'
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import * as Haptics from 'expo-haptics';
 
-import { usePlan } from '@/lib/plan-context';
-import { useCustomExerciseStore } from '@/lib/custom-exercise-store';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { useWorkoutStore } from '@/lib/workout-store';
+import { useCustomExerciseStore, CustomExercise } from '@/lib/custom-exercise-store';
 import { SetRow } from '@/components/SetRow';
+import { BottomSheet } from '@/components/BottomSheet';
 import { LoggedExercise, LoggedSet } from '@/lib/types';
 import { SemanticColors } from '@/constants/theme';
-import { isBodyweightExercise, getInstructions, EXERCISE_DATABASE } from '@/lib/exercise-data';
+import {
+  EXERCISE_DATABASE,
+  EXERCISE_CATEGORIES,
+  isBodyweightExercise,
+  getInstructions,
+} from '@/lib/exercise-data';
 import { formatTimeMs, formatTime, animateLayout } from '@/lib/utils';
-import { getWarmupForFocus } from '@/lib/warmup-data';
+
+type Phase = 'pick' | 'workout';
 
 function ShakeWrapper({ isActive, children }: { isActive: boolean; children: React.ReactNode }) {
   const rotation = useRef(new Animated.Value(0)).current;
@@ -66,45 +72,39 @@ function ShakeWrapper({ isActive, children }: { isActive: boolean; children: Rea
   );
 }
 
-export default function WorkoutScreen() {
-  const { dayIndex } = useLocalSearchParams<{ dayIndex: string }>();
+export default function QuickWorkoutScreen() {
   const router = useRouter();
-  const { plan } = usePlan();
   const { weightUnit, restTimerEnabled, restTimerDuration, theme } = useSettings();
 
   const {
     activeWorkout,
     startWorkout,
     updateExercises,
-    setWarmupDone: storeSetWarmupDone,
     pauseWorkout,
     resumeWorkout,
     clearWorkout,
     getElapsedMs,
   } = useWorkoutStore();
 
-  const dayIdx = parseInt(dayIndex ?? '0', 10);
-  const day = plan?.weeklyPlan[dayIdx];
-
-  const exercises = day?.exercises.filter(
-    (ex) => !ex.name.toLowerCase().startsWith('warm-up') && !ex.name.toLowerCase().startsWith('warmup') && !ex.name.toLowerCase().includes('warm up')
-  ) ?? [];
-
-  const [loggedExercises, setLoggedExercises] = useState<LoggedExercise[]>(() => {
-    const aw = activeWorkout;
-    if (aw?.dayIndex === dayIdx && (aw?.loggedExercises?.length ?? 0) > 0) {
-      return aw.loggedExercises;
-    }
-    return exercises.map((ex) => ({
-      name: ex.name,
-      sets: Array.from({ length: ex.sets }, () => ({
-        weight: null,
-        reps: 0,
-        completed: false,
-      })),
-    }));
+  const [phase, setPhase] = useState<Phase>(() => {
+    if (activeWorkout?.dayIndex === -1) return 'workout';
+    return 'pick';
   });
 
+  // --- Exercise picker state ---
+  const [search, setSearch] = useState('');
+  const [selectedNames, setSelectedNames] = useState<string[]>([]);
+  const [workoutName, setWorkoutName] = useState(activeWorkout?.dayName ?? 'My Workout');
+  const [editingName, setEditingName] = useState(false);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+
+  // --- Workout state ---
+  const [loggedExercises, setLoggedExercises] = useState<LoggedExercise[]>(() => {
+    if (activeWorkout?.dayIndex === -1 && (activeWorkout?.loggedExercises?.length ?? 0) > 0) {
+      return activeWorkout.loggedExercises;
+    }
+    return [];
+  });
   const [previousSets, setPreviousSets] = useState<Record<string, LoggedSet[]>>({});
   const [displayMs, setDisplayMs] = useState(0);
   const [expandedDetails, setExpandedDetails] = useState<Record<number, boolean>>({});
@@ -119,77 +119,56 @@ export default function WorkoutScreen() {
   const [confirmFinish, setConfirmFinish] = useState(false);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { exercises: customExercises, loaded: customLoaded, load: loadCustomExercises } = useCustomExerciseStore();
+  const { exercises: customExercises, loaded: customLoaded, load: loadCustomExercises, create: createCustomExercise } = useCustomExerciseStore();
+  const [showCreateCustom, setShowCreateCustom] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [customMuscleGroup, setCustomMuscleGroup] = useState('Chest');
+  const [customEquipment, setCustomEquipment] = useState('');
 
-
-  // Rest timer state — integrated into main timer
+  // Rest timer state
   const [restRemaining, setRestRemaining] = useState(0);
   const restIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const startedRef = useRef(false);
   const swipeableRefs = useRef<Record<number, Swipeable | null>>({});
   const inputRefs = useRef<Record<string, TextInput | null>>({});
-
-  const warmupDone = activeWorkout?.warmupDone ?? false;
   const isPaused = activeWorkout?.isPaused ?? false;
   const isResting = restRemaining > 0;
 
-  // Timer display update
+  // Timer tick
   useEffect(() => {
+    if (phase !== 'workout') return;
     const id = setInterval(() => setDisplayMs(getElapsedMs()), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [phase]);
 
   useEffect(() => { loadPreviousSets(); }, []);
   useEffect(() => { if (!customLoaded) loadCustomExercises(); }, []);
 
-  // Start workout — timer starts PAUSED
   useEffect(() => {
-    if (!day || startedRef.current) return;
-    startedRef.current = true;
-    if (activeWorkout?.dayIndex === dayIdx) return;
-    const initial: LoggedExercise[] = exercises.map((ex) => ({
-      name: ex.name,
-      sets: Array.from({ length: ex.sets }, () => ({
-        weight: null,
-        reps: 0,
-        completed: false,
-      })),
-    }));
-    startWorkout(dayIdx, day.dayName, day.focus, initial);
-    setLoggedExercises(initial);
-    // Start paused
-    setTimeout(() => pauseWorkout(), 50);
-  }, [day]);
-
-  useEffect(() => {
-    if (loggedExercises.length > 0) {
+    if (phase === 'workout' && loggedExercises.length > 0) {
       updateExercises(loggedExercises);
     }
-  }, [loggedExercises]);
+  }, [loggedExercises, phase]);
 
   const activeWorkoutRef = useRef(activeWorkout);
   useEffect(() => { activeWorkoutRef.current = activeWorkout; }, [activeWorkout]);
 
   useFocusEffect(useCallback(() => {
-    // Don't auto-resume on focus if we just started paused
-    if (startedRef.current) {
-      const aw = activeWorkoutRef.current;
-      if (aw?.isPaused && aw.elapsedMs > 0) resumeWorkout();
-    }
+    const aw = activeWorkoutRef.current;
+    if (aw?.isPaused && aw.elapsedMs > 0 && phase === 'workout') resumeWorkout();
     return () => {
       const aw = activeWorkoutRef.current;
-      if (aw && !aw.isPaused) pauseWorkout();
+      if (aw && !aw.isPaused && phase === 'workout') pauseWorkout();
     };
-  }, []));
+  }, [phase]));
 
-  // Auto-expand first exercise after warmup
+  // Cleanup rest timer
   useEffect(() => {
-    if (warmupDone && activeExercise === null) {
-      animateLayout();
-      setActiveExercise(0);
-    }
-  }, [warmupDone]);
+    return () => {
+      if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+    };
+  }, []);
 
   const loadPreviousSets = async () => {
     try {
@@ -227,12 +206,9 @@ export default function WorkoutScreen() {
   };
 
 
-  // Start rest timer (yellow timer + haptics on end)
   const startRestTimer = () => {
     if (!restTimerEnabled) return;
-    // Clear existing rest timer if any
     if (restIntervalRef.current) clearInterval(restIntervalRef.current);
-
     setRestRemaining(restTimerDuration);
     restIntervalRef.current = setInterval(() => {
       setRestRemaining((prev) => {
@@ -253,40 +229,33 @@ export default function WorkoutScreen() {
     setRestRemaining(0);
   };
 
-  // Cleanup rest timer on unmount
-  useEffect(() => {
-    return () => {
-      if (restIntervalRef.current) clearInterval(restIntervalRef.current);
-    };
-  }, []);
+  // --- Exercise picker logic ---
+  const filteredExercises = search.trim()
+    ? EXERCISE_DATABASE.filter((e) => e.name.toLowerCase().includes(search.toLowerCase()))
+    : EXERCISE_DATABASE;
 
-  const handleExit = () => {
-    skipRestTimer();
-    if (activeWorkout) {
-      Alert.alert(
-        'Leave workout?',
-        'Your progress is saved as a draft. You can resume later.',
-        [
-          { text: 'Stay', style: 'cancel' },
-          { text: 'Leave', style: 'destructive', onPress: () => router.back() },
-        ],
-      );
-    } else {
-      router.back();
-    }
+  const toggleExercise = (name: string) => {
+    animateLayout();
+    setSelectedNames((prev) =>
+      prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]
+    );
   };
 
-  if (!day) {
-    return (
-      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 24 }}>
-        <Text style={{ color: theme.textSecondary, fontSize: 16, textAlign: 'center' }}>Workout not found.</Text>
-        <Pressable onPress={() => router.back()} style={{ marginTop: 16 }}>
-          <Text style={{ color: theme.text, fontWeight: '600', fontSize: 16 }}>← Go back</Text>
-        </Pressable>
-      </SafeAreaView>
-    );
-  }
+  const startQuickWorkout = () => {
+    if (selectedNames.length === 0) return;
+    const initial: LoggedExercise[] = selectedNames.map((name) => ({
+      name,
+      sets: [{ weight: null, reps: 0, completed: false }],
+    }));
+    startWorkout(-1, workoutName.trim() || 'My Workout', 'Custom', initial);
+    setLoggedExercises(initial);
+    startedRef.current = true;
+    setPhase('workout');
+    // Start paused
+    setTimeout(() => pauseWorkout(), 50);
+  };
 
+  // --- Workout logic ---
   const updateSet = (exIdx: number, setIdx: number, data: LoggedSet) => {
     setLoggedExercises((prev) => {
       const updated = [...prev];
@@ -413,19 +382,13 @@ export default function WorkoutScreen() {
     );
   };
 
-  const addExercise = (name: string) => {
+  const addExerciseDuringWorkout = (name: string) => {
     animateLayout();
-    const newEx: LoggedExercise = {
-      name,
-      sets: [{ weight: null, reps: 0, completed: false }],
-    };
+    const newEx: LoggedExercise = { name, sets: [{ weight: null, reps: 0, completed: false }] };
     setLoggedExercises((prev) => [...prev, newEx]);
     setAddExerciseOpen(false);
     setExerciseSearch('');
-    // Expand the newly added exercise
-    setTimeout(() => {
-      setActiveExercise(loggedExercises.length);
-    }, 100);
+    setTimeout(() => setActiveExercise(loggedExercises.length), 100);
   };
 
 
@@ -452,11 +415,11 @@ export default function WorkoutScreen() {
     const durationMinutes = Math.round(getElapsedMs() / 60000);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user && plan) {
+      if (user) {
         await supabase.from('workout_logs').insert({
           user_id: user.id,
-          plan_id: plan.id,
-          day_name: day.dayName,
+          plan_id: null,
+          day_name: workoutName.trim() || 'My Workout',
           exercises: loggedExercises,
           duration_minutes: durationMinutes,
           completed_at: new Date().toISOString(),
@@ -469,35 +432,406 @@ export default function WorkoutScreen() {
         pathname: '/workout/post-workout',
         params: {
           exercises: JSON.stringify(loggedExercises),
-          dayName: day.dayName,
-          focus: day.focus,
+          dayName: workoutName.trim() || 'My Workout',
+          focus: 'Custom',
           durationMinutes: String(durationMinutes),
         },
       });
     }
   };
 
-  // Current exercise index (first with incomplete sets)
-  const currentExIdx = loggedExercises.findIndex((ex) => ex.sets.some((s) => !s.completed));
+  const handleExit = () => {
+    skipRestTimer();
+    if (phase === 'workout') {
+      Alert.alert(
+        'Leave workout?',
+        'Your progress is saved as a draft. You can resume later.',
+        [
+          { text: 'Stay', style: 'cancel' },
+          { text: 'Leave', style: 'destructive', onPress: () => router.back() },
+        ],
+      );
+    } else {
+      router.back();
+    }
+  };
+
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
 
-  // Filter exercises for add modal
-  const filteredExercises = EXERCISE_DATABASE.filter((e) =>
+  // ==================== RENDER ====================
+
+  // Phase 1: Exercise Picker
+  if (phase === 'pick') {
+    const groupedByCategory = EXERCISE_CATEGORIES.map((cat) => ({
+      category: cat,
+      exercises: filteredExercises.filter((e) => e.category === cat),
+    })).filter((g) => g.exercises.length > 0);
+
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+        <View style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          paddingHorizontal: 20,
+          paddingVertical: 14,
+          backgroundColor: theme.surface,
+          borderBottomWidth: 1,
+          borderBottomColor: theme.border,
+        }}>
+          <Pressable onPress={handleExit} hitSlop={12} style={{ padding: 4 }}>
+            <Ionicons name="chevron-back" size={24} color={theme.text} />
+          </Pressable>
+          <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text }}>Choose Exercises</Text>
+          <View style={{ width: 32 }} />
+        </View>
+
+        {/* Workout name */}
+        <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 }}>
+          {editingName ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <TextInput
+                style={{
+                  flex: 1,
+                  fontSize: 18,
+                  fontWeight: '700',
+                  color: theme.text,
+                  backgroundColor: theme.surface,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  borderRadius: 12,
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                }}
+                placeholder="Workout name"
+                placeholderTextColor={theme.textSecondary}
+                value={workoutName}
+                onChangeText={setWorkoutName}
+                maxLength={40}
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={() => setEditingName(false)}
+              />
+              <Pressable onPress={() => setEditingName(false)} hitSlop={8}>
+                <Ionicons name="checkmark-circle" size={24} color={theme.text} />
+              </Pressable>
+            </View>
+          ) : (
+            <Pressable
+              onPress={() => setEditingName(true)}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
+            >
+              <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text }}>
+                {workoutName.trim() || 'My Workout'}
+              </Text>
+              <Ionicons name="pencil-outline" size={16} color={theme.chrome} />
+            </Pressable>
+          )}
+        </View>
+
+        <View style={{ paddingHorizontal: 20, paddingVertical: 12 }}>
+          <View style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            backgroundColor: theme.surface,
+            borderWidth: 1,
+            borderColor: theme.border,
+            borderRadius: 12,
+            paddingHorizontal: 12,
+          }}>
+            <Ionicons name="search-outline" size={18} color={theme.textSecondary} />
+            <TextInput
+              style={{ flex: 1, paddingVertical: 12, paddingHorizontal: 8, fontSize: 16, color: theme.text }}
+              placeholder="Search exercises..."
+              placeholderTextColor={theme.textSecondary}
+              value={search}
+              onChangeText={setSearch}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {search.length > 0 && (
+              <Pressable onPress={() => setSearch('')} hitSlop={8}>
+                <Ionicons name="close-circle" size={18} color={theme.textSecondary} />
+              </Pressable>
+            )}
+          </View>
+        </View>
+
+
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 120 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {/* Create Custom Exercise button */}
+          <Pressable
+            onPress={() => setShowCreateCustom(true)}
+            style={{
+              flexDirection: 'row', alignItems: 'center', gap: 8,
+              paddingVertical: 12, paddingHorizontal: 12, marginBottom: 12,
+              borderRadius: 12, borderWidth: 1, borderColor: theme.border, borderStyle: 'dashed',
+            }}
+          >
+            <Ionicons name="add-circle-outline" size={20} color={theme.chrome} />
+            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.chrome }}>Create Custom Exercise</Text>
+          </Pressable>
+
+          {/* Custom exercises */}
+          {customExercises.length > 0 && (
+            <View style={{ marginBottom: 12 }}>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: theme.chrome, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 8 }}>
+                Custom Exercises
+              </Text>
+              {customExercises
+                .filter((ce) => !search.trim() || ce.name.toLowerCase().includes(search.toLowerCase()))
+                .map((ce) => {
+                  const isSelected = selectedNames.includes(ce.name);
+                  return (
+                    <Pressable
+                      key={ce.id}
+                      onPress={() => toggleExercise(ce.name)}
+                      style={{
+                        flexDirection: 'row', alignItems: 'center',
+                        paddingVertical: 12, paddingHorizontal: 12, marginBottom: 4, borderRadius: 12,
+                        backgroundColor: isSelected ? theme.chrome + '15' : 'transparent',
+                        borderWidth: isSelected ? 1 : 0, borderColor: theme.chrome + '30',
+                      }}
+                    >
+                      <View style={{
+                        width: 22, height: 22, borderRadius: 11, borderWidth: 2,
+                        borderColor: isSelected ? SemanticColors.success : theme.border,
+                        backgroundColor: isSelected ? SemanticColors.success : 'transparent',
+                        alignItems: 'center', justifyContent: 'center', marginRight: 12,
+                      }}>
+                        {isSelected && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 16, color: theme.text, fontWeight: isSelected ? '600' : '400' }}>
+                          {ce.name}
+                        </Text>
+                        <Text style={{ fontSize: 12, color: theme.chrome }}>{ce.muscleGroup} · Custom</Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
+            </View>
+          )}
+
+          {/* Exercise list */}
+          {groupedByCategory
+            .map(({ category, exercises: catExercises }) => {
+            const isSearching = search.trim().length > 0;
+            const isCatExpanded = isSearching || expandedCategories.has(category);
+            const selectedInCat = catExercises.filter((e) => selectedNames.includes(e.name)).length;
+
+            return (
+              <View key={category} style={{ marginBottom: 12 }}>
+                <Pressable
+                  onPress={() => {
+                    animateLayout();
+                    setExpandedCategories((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(category)) next.delete(category);
+                      else next.add(category);
+                      return next;
+                    });
+                  }}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingVertical: 8,
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Ionicons
+                      name={isCatExpanded ? 'chevron-down' : 'chevron-forward'}
+                      size={16}
+                      color={theme.chrome}
+                    />
+                    <Text style={{
+                      fontSize: 12,
+                      fontWeight: '700',
+                      color: theme.chrome,
+                      textTransform: 'uppercase',
+                      letterSpacing: 1.5,
+                    }}>
+                      {category}
+                    </Text>
+                  </View>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    {selectedInCat > 0 && (
+                      <View style={{
+                        backgroundColor: SemanticColors.success,
+                        borderRadius: 10,
+                        minWidth: 20,
+                        height: 20,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        paddingHorizontal: 6,
+                      }}>
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFF' }}>{selectedInCat}</Text>
+                      </View>
+                    )}
+                    <Text style={{ fontSize: 12, color: theme.textSecondary }}>{catExercises.length}</Text>
+                  </View>
+                </Pressable>
+                {isCatExpanded && catExercises.map((ex) => {
+                  const isSelected = selectedNames.includes(ex.name);
+                  return (
+                    <Pressable
+                      key={ex.name}
+                      onPress={() => toggleExercise(ex.name)}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        paddingVertical: 12,
+                        paddingHorizontal: 12,
+                        marginBottom: 4,
+                        borderRadius: 12,
+                        backgroundColor: isSelected ? theme.chrome + '15' : 'transparent',
+                        borderWidth: isSelected ? 1 : 0,
+                        borderColor: theme.chrome + '30',
+                      }}
+                    >
+                      <View style={{
+                        width: 22, height: 22, borderRadius: 11,
+                        borderWidth: 2,
+                        borderColor: isSelected ? SemanticColors.success : theme.border,
+                        backgroundColor: isSelected ? SemanticColors.success : 'transparent',
+                        alignItems: 'center', justifyContent: 'center', marginRight: 12,
+                      }}>
+                        {isSelected && <Ionicons name="checkmark" size={14} color="#FFFFFF" />}
+                      </View>
+                      <Text style={{ fontSize: 16, color: theme.text, fontWeight: isSelected ? '600' : '400' }}>
+                        {ex.name}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            );
+          })}
+        </ScrollView>
+
+        <View style={{
+          paddingHorizontal: 20, paddingBottom: 32, paddingTop: 12,
+          backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border,
+        }}>
+          {selectedNames.length > 0 && (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+              {selectedNames.map((name) => (
+                <Pressable
+                  key={name}
+                  onPress={() => toggleExercise(name)}
+                  style={{
+                    flexDirection: 'row', alignItems: 'center',
+                    backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border,
+                    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6,
+                  }}
+                >
+                  <Text style={{ fontSize: 13, color: theme.text, marginRight: 4 }}>{name}</Text>
+                  <Ionicons name="close" size={12} color={theme.textSecondary} />
+                </Pressable>
+              ))}
+            </View>
+          )}
+          <Pressable
+            onPress={startQuickWorkout}
+            disabled={selectedNames.length === 0}
+            style={{
+              backgroundColor: selectedNames.length > 0 ? theme.text : theme.surface,
+              paddingVertical: 16, borderRadius: 16, alignItems: 'center',
+              opacity: selectedNames.length === 0 ? 0.5 : 1,
+            }}
+          >
+            <Text style={{
+              color: selectedNames.length > 0 ? theme.background : theme.textSecondary,
+              fontWeight: '600', fontSize: 16,
+            }}>
+              {selectedNames.length === 0
+                ? 'Select exercises to start'
+                : `Start workout · ${selectedNames.length} exercise${selectedNames.length > 1 ? 's' : ''}`}
+            </Text>
+          </Pressable>
+        </View>
+
+        <BottomSheet visible={showCreateCustom} onClose={() => { setShowCreateCustom(false); setCustomName(''); setCustomEquipment(''); }}>
+          <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text, marginBottom: 16 }}>Create Custom Exercise</Text>
+          <TextInput
+            style={{ fontSize: 16, color: theme.text, backgroundColor: theme.background, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderColor: theme.border, marginBottom: 12 }}
+            placeholder="Exercise name"
+            placeholderTextColor={theme.textSecondary}
+            value={customName}
+            onChangeText={setCustomName}
+            autoFocus
+          />
+          <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textSecondary, marginBottom: 8 }}>Muscle Group</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {EXERCISE_CATEGORIES.map((cat) => (
+                <Pressable
+                  key={cat}
+                  onPress={() => setCustomMuscleGroup(cat)}
+                  style={{
+                    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                    backgroundColor: customMuscleGroup === cat ? theme.text : theme.background,
+                    borderWidth: 1, borderColor: customMuscleGroup === cat ? theme.text : theme.border,
+                  }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: customMuscleGroup === cat ? theme.background : theme.text }}>{cat}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+          <TextInput
+            style={{ fontSize: 16, color: theme.text, backgroundColor: theme.background, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderColor: theme.border, marginBottom: 16 }}
+            placeholder="Equipment (optional)"
+            placeholderTextColor={theme.textSecondary}
+            value={customEquipment}
+            onChangeText={setCustomEquipment}
+          />
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <Pressable
+              onPress={() => { setShowCreateCustom(false); setCustomName(''); setCustomEquipment(''); }}
+              style={{ flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: theme.border }}
+            >
+              <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text }}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => {
+                if (!customName.trim()) return;
+                await createCustomExercise(customName.trim(), customMuscleGroup, customEquipment.trim() || undefined);
+                setShowCreateCustom(false);
+                setCustomName('');
+                setCustomEquipment('');
+              }}
+              style={{ flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: theme.text }}
+            >
+              <Text style={{ fontSize: 16, fontWeight: '700', color: theme.background }}>Create</Text>
+            </Pressable>
+          </View>
+        </BottomSheet>
+      </SafeAreaView>
+    );
+  }
+
+  // Phase 2: Active Workout
+  const currentExIdx = loggedExercises.findIndex((ex) => ex.sets.some((s) => !s.completed));
+
+  const filteredAddExercises = EXERCISE_DATABASE.filter((e) =>
     e.name.toLowerCase().includes(exerciseSearch.toLowerCase()) &&
     !loggedExercises.some((le) => le.name.toLowerCase() === e.name.toLowerCase())
   );
 
-  // Swipeable render — swipe left to reveal image + trash buttons
   const renderRightActions = (exIdx: number) => () => (
     <View style={{ flexDirection: 'row', gap: 4, marginLeft: 8 }}>
       <View
         style={{
           backgroundColor: theme.chrome,
-          justifyContent: 'center',
-          alignItems: 'center',
-          width: 60,
-          borderRadius: 16,
-          marginBottom: 12,
+          justifyContent: 'center', alignItems: 'center',
+          width: 60, borderRadius: 16, marginBottom: 12,
         }}
       >
         <Ionicons name="image-outline" size={22} color="#000" />
@@ -510,11 +844,8 @@ export default function WorkoutScreen() {
         }}
         style={{
           backgroundColor: SemanticColors.danger,
-          justifyContent: 'center',
-          alignItems: 'center',
-          width: 60,
-          borderRadius: 16,
-          marginBottom: 12,
+          justifyContent: 'center', alignItems: 'center',
+          width: 60, borderRadius: 16, marginBottom: 12,
         }}
       >
         <Ionicons name="trash-outline" size={22} color="#fff" />
@@ -525,32 +856,44 @@ export default function WorkoutScreen() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
-        {/* Header bar: [Exercise Name + "Exercise X of Y"] ... [+] [Pause] [X] */}
+        {/* Header */}
         <View style={{
-          flexDirection: 'row',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          paddingHorizontal: 16,
-          paddingVertical: 12,
-          backgroundColor: theme.surface,
-          borderBottomWidth: 1,
-          borderBottomColor: theme.border,
+          flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+          paddingHorizontal: 16, paddingVertical: 12,
+          backgroundColor: theme.surface, borderBottomWidth: 1, borderBottomColor: theme.border,
         }}>
           <View style={{ flex: 1, marginRight: 12 }}>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }} numberOfLines={1}>
-              {day.dayName}
-            </Text>
+            {editingName ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <TextInput
+                  style={{ fontSize: 16, fontWeight: '700', color: theme.text, flex: 1, borderBottomWidth: 1, borderBottomColor: theme.chrome, paddingBottom: 2 }}
+                  value={workoutName}
+                  onChangeText={setWorkoutName}
+                  maxLength={40}
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={() => setEditingName(false)}
+                />
+                <Pressable onPress={() => setEditingName(false)} hitSlop={8}>
+                  <Ionicons name="checkmark-circle" size={20} color={theme.text} />
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable onPress={() => setEditingName(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }} numberOfLines={1}>
+                  {workoutName.trim() || 'My Workout'}
+                </Text>
+                <Ionicons name="pencil-outline" size={14} color={theme.chrome} />
+              </Pressable>
+            )}
             <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
               Exercise {currentExIdx >= 0 ? currentExIdx + 1 : loggedExercises.length} of {loggedExercises.length}
             </Text>
           </View>
-
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-            {/* Add exercise */}
             <Pressable onPress={() => setAddExerciseOpen(true)} hitSlop={12} style={{ padding: 4 }}>
               <Ionicons name="add-outline" size={24} color={theme.chrome} />
             </Pressable>
-            {/* Exit — no confirmation */}
             <Pressable onPress={handleExit} hitSlop={12} style={{ padding: 4 }}>
               <Ionicons name="close-outline" size={26} color={theme.chrome} />
             </Pressable>
@@ -562,58 +905,17 @@ export default function WorkoutScreen() {
           data={loggedExercises}
           keyExtractor={(_, i) => String(i)}
           onDragEnd={({ data }) => { setLoggedExercises(data); animateLayout(); }}
+          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 120 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
-          contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 120 }}
-          ListHeaderComponent={
-            !warmupDone ? (
-              <View style={{
-                marginBottom: 20,
-                backgroundColor: theme.surface,
-                borderRadius: 16,
-                padding: 16,
-                borderWidth: 1,
-                borderColor: theme.border,
-              }}>
-                <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text, marginBottom: 4 }}>
-                  Warmup — 5 min
-                </Text>
-                <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>
-                  Get your blood flowing before lifting.
-                </Text>
-                {getWarmupForFocus(day?.focus ?? '').map((w, i) => (
-                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.chrome, marginRight: 10 }} />
-                    <Text style={{ fontSize: 14, color: theme.text, flex: 1 }}>{w.name}</Text>
-                    <Text style={{ fontSize: 12, color: theme.textSecondary }}>{w.duration}</Text>
-                  </View>
-                ))}
-                <Pressable
-                  onPress={() => storeSetWarmupDone(true)}
-                  style={{
-                    backgroundColor: theme.text,
-                    paddingVertical: 12,
-                    borderRadius: 12,
-                    alignItems: 'center',
-                    marginTop: 12,
-                  }}
-                >
-                  <Text style={{ color: theme.background, fontWeight: '600', fontSize: 14 }}>
-                    Done with warmup
-                  </Text>
-                </Pressable>
-              </View>
-            ) : null
-          }
           renderItem={({ item: logged, getIndex, drag, isActive }: RenderItemParams<LoggedExercise>) => {
             const exIdx = getIndex()!;
-            const exercise = exercises[exIdx];
             const isExpanded = activeExercise === exIdx;
             const detailsOpen = expandedDetails[exIdx] ?? false;
             const suggested = getSuggestedWeight(logged.name);
             const instructions = getInstructions(logged.name);
             const isBW = isBodyweightExercise(logged.name);
-            const allSetsComplete = logged?.sets.every((s) => s.completed) ?? false;
+            const allSetsComplete = logged.sets.every((s) => s.completed);
 
             return (
               <ShakeWrapper isActive={isActive}>
@@ -624,19 +926,16 @@ export default function WorkoutScreen() {
                   friction={2}
                   enabled={loggedExercises.length > 1}
                 >
-                  <View
-                    style={{
-                      marginBottom: 12,
-                      borderRadius: 16,
-                      backgroundColor: isExpanded ? theme.surface : 'transparent',
-                      borderWidth: isExpanded ? 1 : 0,
-                      borderColor: theme.border,
-                      padding: isExpanded ? 12 : 0,
-                      paddingVertical: isExpanded ? 12 : 4,
-                      paddingHorizontal: isExpanded ? 12 : 4,
-                      ...(logged.supersetGroupId ? { borderLeftWidth: 3, borderLeftColor: theme.chrome } : {}),
-                    }}
-                  >
+                  <View style={{
+                    marginBottom: 12, borderRadius: 16,
+                    backgroundColor: isExpanded ? theme.surface : 'transparent',
+                    borderWidth: isExpanded ? 1 : 0, borderColor: theme.border,
+                    padding: isExpanded ? 12 : 0,
+                    paddingVertical: isExpanded ? 12 : 4,
+                    paddingHorizontal: isExpanded ? 12 : 4,
+                    opacity: isActive ? 0.9 : 1,
+                    ...(logged.supersetGroupId ? { borderLeftWidth: 3, borderLeftColor: theme.chrome } : {}),
+                  }}>
                     {logged.supersetGroupId && (exIdx === 0 || loggedExercises[exIdx - 1]?.supersetGroupId !== logged.supersetGroupId) && (
                       <View style={{ position: 'absolute', top: -10, left: 8, backgroundColor: theme.chrome, borderRadius: 4, paddingHorizontal: 6, paddingVertical: 1 }}>
                         <Text style={{ fontSize: 9, fontWeight: '800', color: theme.background, letterSpacing: 1 }}>SUPERSET</Text>
@@ -648,7 +947,6 @@ export default function WorkoutScreen() {
                         setActiveExercise(isExpanded ? null : exIdx);
                       }}
                       onLongPress={drag}
-                      disabled={isActive}
                       style={{ flexDirection: 'row', alignItems: 'center', marginBottom: isExpanded ? 12 : 0 }}
                     >
                       {selectionMode && (
@@ -660,7 +958,6 @@ export default function WorkoutScreen() {
                           />
                         </Pressable>
                       )}
-                      {/* Exercise number indicator */}
                       <Text style={{
                         fontSize: 14,
                         fontWeight: '700',
@@ -672,15 +969,13 @@ export default function WorkoutScreen() {
                         {exIdx + 1}
                       </Text>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>
-                          {logged.name}
-                        </Text>
+                        <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>{logged.name}</Text>
                         <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
-                          {logged.sets.length} sets{exercise ? ` · ${exercise.reps} reps` : ''}
+                          {logged.sets.length} set{logged.sets.length !== 1 ? 's' : ''}
                         </Text>
                         {suggested != null && (
                           <Text style={{ fontSize: 12, color: theme.chrome, marginTop: 2 }}>
-                            Suggested: {suggested} {unitLabel} based on last session
+                            Suggested: {suggested} {unitLabel}
                           </Text>
                         )}
                       </View>
@@ -694,17 +989,11 @@ export default function WorkoutScreen() {
                           <Ionicons name="trash-outline" size={16} color={SemanticColors.danger} />
                         </Pressable>
                       )}
-                      <Ionicons
-                        name={isExpanded ? 'chevron-up' : 'chevron-down'}
-                        size={18}
-                        color={theme.chrome}
-                        style={{ marginLeft: 8 }}
-                      />
+                      <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={theme.chrome} style={{ marginLeft: 8 }} />
                     </Pressable>
 
                     {isExpanded && (
                       <>
-                        {/* Form tips toggle — above sets */}
                         <Pressable
                           onPress={() => {
                             animateLayout();
@@ -716,35 +1005,14 @@ export default function WorkoutScreen() {
                             {detailsOpen ? 'Hide tips ↑' : 'Form tips ↓'}
                           </Text>
                         </Pressable>
-
                         {detailsOpen && (
-                          <View style={{
-                            backgroundColor: theme.background,
-                            borderRadius: 12,
-                            padding: 12,
-                            marginBottom: 8,
-                            borderWidth: 1,
-                            borderColor: theme.border,
-                          }}>
-                            <Text style={{
-                              fontSize: 11,
-                              fontWeight: '700',
-                              color: theme.chrome,
-                              marginBottom: 6,
-                              textTransform: 'uppercase',
-                              letterSpacing: 1,
-                            }}>
-                              Form Tips
-                            </Text>
-                            <Text style={{ fontSize: 14, color: theme.text, lineHeight: 20 }}>
-                              {instructions}
-                            </Text>
+                          <View style={{ backgroundColor: theme.background, borderRadius: 12, padding: 12, marginBottom: 4, borderWidth: 1, borderColor: theme.border }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: theme.chrome, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Form Tips</Text>
+                            <Text style={{ fontSize: 14, color: theme.text, lineHeight: 20 }}>{instructions}</Text>
                           </View>
                         )}
-
-                        {/* Set rows */}
-                        {logged?.sets.map((set, setIdx) => {
-                          const isLast = setIdx === (logged?.sets.length ?? 1) - 1;
+                        {logged.sets.map((set, setIdx) => {
+                          const isLast = setIdx === logged.sets.length - 1;
                           return (
                             <SetRow
                               key={setIdx}
@@ -768,8 +1036,6 @@ export default function WorkoutScreen() {
                             />
                           );
                         })}
-
-                        {/* Add / Drop / Remove set */}
                         <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, marginBottom: 8 }}>
                           <Pressable
                             onPress={() => addSet(exIdx)}
@@ -790,7 +1056,6 @@ export default function WorkoutScreen() {
                             <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>− Remove</Text>
                           </Pressable>
                         </View>
-
                       </>
                     )}
                   </View>
@@ -826,77 +1091,80 @@ export default function WorkoutScreen() {
               <Text style={{ fontSize: 12, color: '#000', opacity: 0.7, marginTop: 2 }}>Tap to skip rest</Text>
             </Pressable>
           ) : (
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12, paddingBottom: 32 }}>
-              {/* Play / Pause — left aligned, no circle */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, paddingBottom: 32, gap: 12 }}>
+              {/* Play / Pause */}
               <Pressable
                 onPress={() => {
-                  if (!workoutStarted) {
-                    // Start countdown 3..2..1
+                  if (!workoutStarted && countdown === null) {
+                    // First tap: start countdown 3..2..1
                     setCountdown(3);
-                    const countdownInterval = setInterval(() => {
-                      setCountdown((prev) => {
-                        if (prev === null || prev <= 1) {
-                          clearInterval(countdownInterval);
-                          setWorkoutStarted(true);
-                          setCountdown(null);
-                          resumeWorkout();
-                          return null;
-                        }
-                        return prev - 1;
-                      });
+                    let c = 3;
+                    const id = setInterval(() => {
+                      c -= 1;
+                      if (c > 0) {
+                        setCountdown(c);
+                      } else {
+                        clearInterval(id);
+                        setCountdown(null);
+                        setWorkoutStarted(true);
+                        resumeWorkout();
+                      }
                     }, 1000);
-                    return;
+                  } else if (isPaused) {
+                    resumeWorkout();
+                  } else {
+                    pauseWorkout();
                   }
-                  if (isPaused) resumeWorkout();
-                  else pauseWorkout();
                 }}
                 hitSlop={12}
                 style={{ padding: 8 }}
               >
                 <Ionicons
                   name={(!workoutStarted || isPaused) ? 'play' : 'pause'}
-                  size={24}
+                  size={26}
                   color={theme.text}
                 />
               </Pressable>
 
-              {/* Timer — centered */}
+              {/* Timer */}
               <View style={{ flex: 1, alignItems: 'center' }}>
                 <Text style={{
-                  fontSize: 24,
-                  fontWeight: '700',
-                  color: countdown !== null ? SemanticColors.warning : (isPaused ? theme.chrome : theme.text),
-                  fontVariant: ['tabular-nums'],
-                  letterSpacing: 1,
+                  fontSize: 24, fontWeight: '700',
+                  color: countdown !== null ? SemanticColors.warning : isPaused ? theme.chrome : theme.text,
+                  fontVariant: ['tabular-nums'], letterSpacing: 1,
                 }}>
-                  {countdown !== null ? String(countdown) : (!workoutStarted ? 'START' : formatTimeMs(displayMs))}
+                  {!workoutStarted && countdown === null
+                    ? 'START'
+                    : countdown !== null
+                    ? String(countdown)
+                    : formatTimeMs(displayMs)}
                 </Text>
-                {workoutStarted && countdown === null && (
-                  <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2 }}>
-                    {isPaused ? 'Paused' : day.focus}
-                  </Text>
-                )}
               </View>
 
-              {/* Finish — right aligned, two-tap confirm */}
+              {/* Finish (two-tap) */}
               <Pressable
                 onPress={() => {
                   if (confirmFinish) {
+                    // Second tap: confirm finish
                     if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+                    confirmTimerRef.current = null;
                     setConfirmFinish(false);
                     handleFinish();
                   } else {
+                    // First tap: show confirmation
                     setConfirmFinish(true);
-                    confirmTimerRef.current = setTimeout(() => setConfirmFinish(false), 3000);
+                    confirmTimerRef.current = setTimeout(() => {
+                      setConfirmFinish(false);
+                      confirmTimerRef.current = null;
+                    }, 3000);
                   }
                 }}
                 hitSlop={12}
                 style={{ padding: 8 }}
-                disabled={saving}
               >
                 <Ionicons
-                  name={confirmFinish ? 'checkmark' : 'flag'}
-                  size={24}
+                  name={confirmFinish ? 'checkmark' : 'flag-outline'}
+                  size={26}
                   color={confirmFinish ? SemanticColors.success : theme.text}
                 />
               </Pressable>
@@ -908,13 +1176,8 @@ export default function WorkoutScreen() {
         <Modal visible={addExerciseOpen} animationType="slide" presentationStyle="pageSheet">
           <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
             <View style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              paddingHorizontal: 20,
-              paddingVertical: 14,
-              borderBottomWidth: 1,
-              borderBottomColor: theme.border,
+              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+              paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.border,
             }}>
               <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text }}>
                 Add Exercise
@@ -923,18 +1186,12 @@ export default function WorkoutScreen() {
                 <Ionicons name="close" size={24} color={theme.chrome} />
               </Pressable>
             </View>
-
             <View style={{ paddingHorizontal: 20, paddingVertical: 12 }}>
               <TextInput
                 style={{
-                  fontSize: 16,
-                  color: theme.text,
-                  backgroundColor: theme.surface,
-                  borderRadius: 12,
-                  paddingHorizontal: 16,
-                  paddingVertical: 12,
-                  borderWidth: 1,
-                  borderColor: theme.border,
+                  fontSize: 16, color: theme.text, backgroundColor: theme.surface,
+                  borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12,
+                  borderWidth: 1, borderColor: theme.border,
                 }}
                 placeholder="Search exercises…"
                 placeholderTextColor={theme.textSecondary}
@@ -943,14 +1200,13 @@ export default function WorkoutScreen() {
                 autoFocus
               />
             </View>
-
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
               {customExercises
                 .filter((ce) => ce.name.toLowerCase().includes(exerciseSearch.toLowerCase()) && !loggedExercises.some((le) => le.name.toLowerCase() === ce.name.toLowerCase()))
                 .map((ce) => (
                   <Pressable
                     key={ce.id}
-                    onPress={() => addExercise(ce.name)}
+                    onPress={() => addExerciseDuringWorkout(ce.name)}
                     style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
                   >
                     <View>
@@ -960,17 +1216,13 @@ export default function WorkoutScreen() {
                     <Ionicons name="add-circle-outline" size={22} color={theme.chrome} />
                   </Pressable>
                 ))}
-              {filteredExercises.map((exercise, i) => (
+              {filteredAddExercises.map((exercise, i) => (
                 <Pressable
                   key={i}
-                  onPress={() => addExercise(exercise.name)}
+                  onPress={() => addExerciseDuringWorkout(exercise.name)}
                   style={{
-                    paddingVertical: 14,
-                    borderBottomWidth: 1,
-                    borderBottomColor: theme.border,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
+                    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.border,
+                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
                   }}
                 >
                   <View>
@@ -980,10 +1232,8 @@ export default function WorkoutScreen() {
                   <Ionicons name="add-circle-outline" size={22} color={theme.chrome} />
                 </Pressable>
               ))}
-              {filteredExercises.length === 0 && (
-                <Text style={{ color: theme.textSecondary, fontSize: 14, textAlign: 'center', marginTop: 40 }}>
-                  No exercises found
-                </Text>
+              {filteredAddExercises.length === 0 && (
+                <Text style={{ color: theme.textSecondary, fontSize: 14, textAlign: 'center', marginTop: 40 }}>No exercises found</Text>
               )}
             </ScrollView>
           </SafeAreaView>

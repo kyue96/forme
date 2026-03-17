@@ -2,27 +2,25 @@
 export type Gender = 'Male' | 'Female';
 export type Goal = 'Build muscle' | 'Build strength' | 'Lose weight' | 'Stay active';
 export type Experience = 'Beginner' | 'Some experience' | 'Intermediate' | 'Advanced';
-export type Equipment = 'Full gym' | 'Dumbbells' | 'Resistance bands' | 'Bodyweight';
+export type Equipment = 'Full gym' | 'Dumbbells' | 'Resistance bands' | 'None';
 export type DaysPerWeek = '2' | '3' | '4' | '5+';
 export type WorkoutDuration = '30 min' | '45 min' | '60 min' | '90 min';
 export type PreferredSplit = 'Push/Pull/Legs' | 'Full body' | 'Upper/Lower';
 export type RoutineChoice = 'Generate my plan' | "I'll build my own";
-export type MealsPerDay = '2' | '3' | '4' | '5+';
 export type Injury = 'None' | 'Lower back' | 'Knees' | 'Shoulders';
 
 export interface QuizAnswers {
   gender?: Gender;
-  goal?: Goal;
+  age?: number;
+  goal?: Goal[];
   experience?: Experience;
   equipment?: Equipment[];
   daysPerWeek?: DaysPerWeek;
   workoutDuration?: WorkoutDuration;
   preferredSplit?: PreferredSplit;
   routineChoice?: RoutineChoice;
-  mealsPerDay?: MealsPerDay;
   height?: string;
   weight?: string;
-  goalWeight?: string;
   injuries?: Injury;
 }
 
@@ -61,11 +59,13 @@ export interface LoggedSet {
   reps: number;
   completed: boolean;
   suggestedWeight?: number | null;
+  isDropSet?: boolean;
 }
 
 export interface LoggedExercise {
   name: string;
   sets: LoggedSet[];
+  supersetGroupId?: string;
 }
 
 // Meal logging

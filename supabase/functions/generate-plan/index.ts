@@ -21,7 +21,6 @@ Deno.serve(async (req) => {
     let prompt: string;
 
     if (mode === 'session') {
-      // Pre-workout: generate a single session
       const lastWorkedStr = (session.lastWorked ?? [])
         .map((lw: { muscleGroup: string; date: string }) => `${lw.muscleGroup} on ${lw.date}`)
         .join(', ');
@@ -50,27 +49,44 @@ Return ONLY valid JSON with no markdown, no explanation — just the JSON object
   ]
 }`;
     } else {
-      // Full weekly plan generation
       const daysCount = answers.daysPerWeek === '5+' ? 5 : parseInt(answers.daysPerWeek);
       const splitInfo = answers.preferredSplit
         ? `\nPreferred training split: ${answers.preferredSplit}`
         : '';
 
-      prompt = `You are a certified personal trainer. Generate a personalised weekly workout plan based on the following details:
+      // Equipment enforcement
+      const equipmentList = Array.isArray(answers.equipment) ? answers.equipment : [answers.equipment];
+      const equipmentStr = equipmentList.join(', ');
+      let equipmentRule = '';
+      if (equipmentList.length === 1 && equipmentList[0] === 'Bodyweight') {
+        equipmentRule = 'Only include bodyweight exercises (push-ups, lunges, planks, dips, etc). Do NOT include any exercises requiring dumbbells, barbells, machines, or any other equipment.';
+      } else if (equipmentList.length === 1 && equipmentList[0] === 'Resistance bands') {
+        equipmentRule = 'Only include resistance band exercises. Do NOT include any exercises requiring dumbbells, barbells, or machines.';
+      } else if (equipmentList.includes('Dumbbells') && !equipmentList.includes('Full gym')) {
+        equipmentRule = `Only include exercises that use the following equipment: ${equipmentStr}. Do NOT include any exercises requiring barbells, cable machines, or gym machines.`;
+      } else {
+        equipmentRule = `Only include exercises that use the following equipment: ${equipmentStr}. Do not include any exercises requiring other equipment.`;
+      }
+
+      prompt = `You are a certified personal trainer. Generate a personalized weekly workout plan based on the following details:
 
 Goal: ${answers.goal}
 Experience level: ${answers.experience}
-Equipment available: ${answers.equipment}
+Equipment available: ${equipmentStr}
 Days per week: ${answers.daysPerWeek}${splitInfo}
 Areas to avoid: ${answers.injuries}
 Height: ${answers.height}
 Weight: ${answers.weight}
 
-Create a structured weekly programme with exactly ${daysCount} workout days. ${
+EQUIPMENT RULES: ${equipmentRule}
+
+Create a structured weekly program with exactly ${daysCount} workout days. ${
         answers.preferredSplit
-          ? `Organise the days using a ${answers.preferredSplit} split structure.`
+          ? `Organize the days using a ${answers.preferredSplit} split structure.`
           : ''
       } Include specific exercises appropriate for the equipment and experience level. Avoid exercises that stress the areas listed under "areas to avoid".
+
+Do not include cardio exercises in the workout plan. Cardio is tracked separately by the user.
 
 Keep exercise notes to 5 words or fewer. Return ONLY valid JSON with no markdown, no explanation — just the JSON object:
 {
@@ -99,15 +115,12 @@ Keep exercise notes to 5 words or fewer. Return ONLY valid JSON with no markdown
     });
 
     const raw = message.content[0].type === 'text' ? message.content[0].text : '';
-    // Strip markdown fences
     let text = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```\s*$/i, '').trim();
-    // Find the outermost JSON object
     const jsonStart = text.indexOf('{');
     const jsonEnd = text.lastIndexOf('}');
     if (jsonStart !== -1 && jsonEnd !== -1) {
       text = text.slice(jsonStart, jsonEnd + 1);
     }
-    // Detect truncated response (stop_reason = max_tokens means output was cut off)
     if (message.stop_reason === 'max_tokens') {
       throw new Error('Plan generation was cut off — response too long. Please try again.');
     }
@@ -116,11 +129,10 @@ Keep exercise notes to 5 words or fewer. Return ONLY valid JSON with no markdown
     try {
       plan = JSON.parse(text);
     } catch {
-      // Try to fix common issues: trailing commas before } or ]
       const fixed = text
         .replace(/,\s*}/g, '}')
         .replace(/,\s*]/g, ']')
-        .replace(/[\u0000-\u001F\u007F-\u009F]/g, ' '); // strip control chars
+        .replace(/[\u0000-\u001F\u007F-\u009F]/g, ' ');
       plan = JSON.parse(fixed);
     }
 

@@ -36,6 +36,7 @@ export default function SignInScreen() {
     <SafeAreaView className="flex-1 bg-white">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
         className="flex-1"
       >
         <View className="flex-1 px-6 pt-6 pb-8 justify-between">

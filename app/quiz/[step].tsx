@@ -2,7 +2,6 @@ import { useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   KeyboardAvoidingView,
-  LayoutAnimation,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
@@ -19,8 +18,9 @@ import { QuizTile } from '@/components/QuizTile';
 import { useQuiz } from '@/lib/quiz-store';
 import { QuizAnswers } from '@/lib/types';
 import { useSettings } from '@/lib/settings-context';
+import { animateLayout } from '@/lib/utils';
 
-const TOTAL_STEPS = 11;
+const TOTAL_STEPS = 10;
 
 type TileStep = {
   key: keyof QuizAnswers;
@@ -37,11 +37,13 @@ const TILE_STEPS: TileStep[] = [
     subtitle: "Helps us personalize your plan.",
     options: ['Male', 'Female'],
   },
+  // Step 2 = age (handled separately)
   {
     key: 'goal',
-    question: "What's your goal?",
-    subtitle: "We'll build your plan around this.",
+    question: "What are your goals?",
+    subtitle: "Select all that apply.",
     options: ['Build muscle', 'Build strength', 'Lose weight', 'Stay active'],
+    multiSelect: true,
   },
   {
     key: 'experience',
@@ -53,12 +55,12 @@ const TILE_STEPS: TileStep[] = [
     key: 'equipment',
     question: "What equipment do you have?",
     subtitle: "Select all that apply.",
-    options: ['Full gym', 'Dumbbells', 'Resistance bands', 'Bodyweight'],
+    options: ['Full gym', 'Dumbbells', 'Resistance bands', 'None'],
     multiSelect: true,
   },
   {
     key: 'daysPerWeek',
-    question: "How many days a week do you want to train?",
+    question: "How many days per week do you want to work out?",
     subtitle: "Quality beats quantity.",
     options: ['2', '3', '4', '5+'],
   },
@@ -71,7 +73,7 @@ const TILE_STEPS: TileStep[] = [
   {
     key: 'preferredSplit',
     question: "Preferred split?",
-    subtitle: "How do you like to organise your training?",
+    subtitle: "A 'split' is how you divide muscle groups across your workout days.",
     options: ['Push/Pull/Legs', 'Full body', 'Upper/Lower'],
   },
   {
@@ -80,22 +82,44 @@ const TILE_STEPS: TileStep[] = [
     subtitle: "Let us build it, or do it yourself.",
     options: ['Generate my plan', "I'll build my own"],
   },
-  {
-    key: 'mealsPerDay',
-    question: "How many meals per day?",
-    subtitle: "Helps us plan your nutrition.",
-    options: ['2', '3', '4', '5+'],
-  },
 ];
 
-// Step 10 = body stats (height, current weight, goal weight)
-// Step 11 = injuries
+// Step 9 = body stats (height, current weight)
+// Step 10 = injuries
 const INJURIES_STEP: TileStep = {
   key: 'injuries',
   question: "Any areas to avoid?",
   subtitle: "Your safety matters most.",
   options: ['None', 'Lower back', 'Knees', 'Shoulders'],
 };
+
+// Mapping from stepNum to the tile step config
+// Steps: 1=gender, 2=age, 3=goal, 4=experience, 5=equipment, 6=days, 7=duration, 8=split, 9=body stats, 10=injuries
+// But routineChoice was step 8 and is now step 8 = split... let me re-map:
+// TILE_STEPS[0] = gender (step 1)
+// step 2 = age (custom)
+// TILE_STEPS[1] = goal (step 3)
+// TILE_STEPS[2] = experience (step 4)
+// TILE_STEPS[3] = equipment (step 5)
+// TILE_STEPS[4] = daysPerWeek (step 6)
+// TILE_STEPS[5] = duration (step 7)
+// TILE_STEPS[6] = split (step 8)
+// step 9 = body stats (custom)
+// step 10 = injuries
+
+function getTileConfig(stepNum: number): TileStep | null {
+  if (stepNum === 1) return TILE_STEPS[0]; // gender
+  if (stepNum === 2) return null; // age (custom)
+  if (stepNum === 3) return TILE_STEPS[1]; // goal
+  if (stepNum === 4) return TILE_STEPS[2]; // experience
+  if (stepNum === 5) return TILE_STEPS[3]; // equipment
+  if (stepNum === 6) return TILE_STEPS[4]; // daysPerWeek
+  if (stepNum === 7) return TILE_STEPS[5]; // duration
+  if (stepNum === 8) return TILE_STEPS[6]; // split
+  if (stepNum === 9) return null; // body stats (custom)
+  if (stepNum === 10) return INJURIES_STEP;
+  return null;
+}
 
 // --- Scroll wheel picker ---
 const ITEM_HEIGHT = 48;
@@ -183,16 +207,21 @@ function buildWeightOptions(): string[] {
 const HEIGHT_OPTIONS = buildHeightOptions();
 const WEIGHT_OPTIONS = buildWeightOptions();
 
+// Age range
+const MIN_AGE = 16;
+const MAX_AGE = 80;
+
 export default function QuizStepScreen() {
   const { step } = useLocalSearchParams<{ step: string }>();
   const router = useRouter();
-  const { answers, setAnswer, toggleEquipment } = useQuiz();
+  const { answers, setAnswer, toggleEquipment, toggleGoal } = useQuiz();
   const { theme } = useSettings();
 
   const stepNum = parseInt(step ?? '1', 10);
-  const isStatsStep = stepNum === 10;
-  const isInjuriesStep = stepNum === 11;
-  const tileConfig = stepNum <= 9 ? TILE_STEPS[stepNum - 1] : isInjuriesStep ? INJURIES_STEP : null;
+  const isAgeStep = stepNum === 2;
+  const isStatsStep = stepNum === 9;
+  const isInjuriesStep = stepNum === 10;
+  const tileConfig = getTileConfig(stepNum);
 
   const initHeightIdx = answers.height
     ? HEIGHT_OPTIONS.indexOf(answers.height)
@@ -200,16 +229,16 @@ export default function QuizStepScreen() {
   const initWeightIdx = answers.weight
     ? WEIGHT_OPTIONS.indexOf(answers.weight)
     : WEIGHT_OPTIONS.indexOf('170 lbs');
-  const initGoalWeightIdx = answers.goalWeight
-    ? WEIGHT_OPTIONS.indexOf(answers.goalWeight)
-    : WEIGHT_OPTIONS.indexOf('160 lbs');
 
   const [heightIdx, setHeightIdx] = useState(Math.max(0, initHeightIdx));
   const [weightIdx, setWeightIdx] = useState(Math.max(0, initWeightIdx));
-  const [goalWeightIdx, setGoalWeightIdx] = useState(Math.max(0, initGoalWeightIdx));
+  const [ageValue, setAgeValue] = useState(answers.age ?? 25);
+
+  const scrollViewRef = useRef<ScrollView>(null);
 
   const canProceed = (() => {
     if (isStatsStep) return true;
+    if (isAgeStep) return true;
     if (!tileConfig) return false;
     if (tileConfig.multiSelect) {
       const arr = answers[tileConfig.key] as unknown[];
@@ -219,11 +248,13 @@ export default function QuizStepScreen() {
   })();
 
   const handleNext = () => {
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    if (isStatsStep) {
+    animateLayout();
+    if (isAgeStep) {
+      setAnswer('age', ageValue);
+      router.push(`/quiz/${stepNum + 1}`);
+    } else if (isStatsStep) {
       setAnswer('height', HEIGHT_OPTIONS[heightIdx]);
       setAnswer('weight', WEIGHT_OPTIONS[weightIdx]);
-      setAnswer('goalWeight', WEIGHT_OPTIONS[goalWeightIdx]);
       router.push(`/quiz/${stepNum + 1}`);
     } else if (isInjuriesStep) {
       router.push('/plan-result');
@@ -244,16 +275,74 @@ export default function QuizStepScreen() {
   const handleTilePress = (option: string) => {
     if (!tileConfig) return;
     if (tileConfig.multiSelect) {
-      toggleEquipment(option);
+      if (tileConfig.key === 'goal') {
+        toggleGoal(option);
+      } else {
+        toggleEquipment(option);
+      }
     } else {
       setAnswer(tileConfig.key, option as never);
     }
+  };
+
+  // Age stepper render (−/+ buttons)
+  const renderAgeStep = () => {
+    return (
+      <View>
+        <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text, marginBottom: 4 }}>
+          How old are you?
+        </Text>
+        <Text allowFontScaling style={{ fontSize: 16, color: theme.textSecondary, marginBottom: 32 }}>
+          Helps us tailor intensity and recovery.
+        </Text>
+
+        {/* Large age display with −/+ buttons */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 24, marginBottom: 24 }}>
+          <Pressable
+            onPress={() => setAgeValue(Math.max(MIN_AGE, ageValue - 1))}
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 28,
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ fontSize: 28, fontWeight: '600', color: theme.text }}>−</Text>
+          </Pressable>
+
+          <Text allowFontScaling style={{ fontSize: 64, fontWeight: '800', color: theme.text, minWidth: 100, textAlign: 'center' }}>
+            {ageValue}
+          </Text>
+
+          <Pressable
+            onPress={() => setAgeValue(Math.min(MAX_AGE, ageValue + 1))}
+            style={{
+              width: 56,
+              height: 56,
+              borderRadius: 28,
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ fontSize: 28, fontWeight: '600', color: theme.text }}>+</Text>
+          </Pressable>
+        </View>
+      </View>
+    );
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 88 : 0}
         style={{ flex: 1 }}
       >
         <View style={{ flex: 1, paddingHorizontal: 24, paddingTop: 16 }}>
@@ -273,12 +362,19 @@ export default function QuizStepScreen() {
             </Text>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-            {isStatsStep ? (
+          <ScrollView ref={scrollViewRef} showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
+            {isAgeStep ? (
+              renderAgeStep()
+            ) : isStatsStep ? (
               <View>
-                <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text, marginBottom: 4 }}>
-                  Body stats
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text }}>
+                    Body stats
+                  </Text>
+                  <View style={{ backgroundColor: theme.surface, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary }}>Optional</Text>
+                  </View>
+                </View>
                 <Text allowFontScaling style={{ fontSize: 16, color: theme.textSecondary, marginBottom: 32 }}>
                   Helps us calibrate the right intensity.
                 </Text>
@@ -289,10 +385,13 @@ export default function QuizStepScreen() {
 
                 <Text allowFontScaling style={{ fontSize: 14, fontWeight: '500', color: theme.text, marginBottom: 8 }}>Current weight</Text>
                 <ScrollWheelPicker items={WEIGHT_OPTIONS} selectedIndex={weightIdx} onSelect={setWeightIdx} />
-                <View style={{ height: 16 }} />
 
-                <Text allowFontScaling style={{ fontSize: 14, fontWeight: '500', color: theme.text, marginBottom: 8 }}>Goal weight</Text>
-                <ScrollWheelPicker items={WEIGHT_OPTIONS} selectedIndex={goalWeightIdx} onSelect={setGoalWeightIdx} />
+                <Pressable
+                  onPress={() => router.push(`/quiz/${stepNum + 1}`)}
+                  style={{ marginTop: 20, alignItems: 'center', paddingVertical: 12 }}
+                >
+                  <Text style={{ fontSize: 14, fontWeight: '500', color: theme.textSecondary }}>Skip this step</Text>
+                </Pressable>
               </View>
             ) : tileConfig ? (
               <View>

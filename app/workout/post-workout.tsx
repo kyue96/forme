@@ -6,7 +6,6 @@ import {
   ScrollView,
   Share,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,10 +14,10 @@ import * as Notifications from 'expo-notifications';
 import { captureRef } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
 
-import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
-import { AppHeader } from '@/components/AppHeader';
 import { LoggedExercise } from '@/lib/types';
+import { EXERCISE_DATABASE } from '@/lib/exercise-data';
+import { formatNumber } from '@/lib/utils';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -29,6 +28,26 @@ Notifications.setNotificationHandler({
     shouldShowList: true,
   }),
 });
+
+function getMusclesWorked(exercises: LoggedExercise[]): string[] {
+  const muscles = new Set<string>();
+  for (const ex of exercises) {
+    const match = EXERCISE_DATABASE.find(
+      (e) => e.name.toLowerCase() === ex.name.toLowerCase()
+    );
+    if (match) muscles.add(match.category);
+    else {
+      const lower = ex.name.toLowerCase();
+      if (lower.includes('bench') || lower.includes('chest') || lower.includes('push') || lower.includes('fly')) muscles.add('Chest');
+      else if (lower.includes('row') || lower.includes('pull') || lower.includes('lat') || lower.includes('deadlift')) muscles.add('Back');
+      else if (lower.includes('squat') || lower.includes('leg') || lower.includes('lunge') || lower.includes('calf') || lower.includes('hip')) muscles.add('Legs');
+      else if (lower.includes('shoulder') || lower.includes('press') || lower.includes('raise') || lower.includes('delt')) muscles.add('Shoulders');
+      else if (lower.includes('curl') || lower.includes('tricep') || lower.includes('bicep')) muscles.add('Arms');
+      else if (lower.includes('plank') || lower.includes('crunch') || lower.includes('ab') || lower.includes('core')) muscles.add('Core');
+    }
+  }
+  return Array.from(muscles);
+}
 
 export default function PostWorkoutScreen() {
   const router = useRouter();
@@ -47,23 +66,22 @@ export default function PostWorkoutScreen() {
   const durationMinutes = parseInt(params.durationMinutes ?? '0', 10);
   const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 
-  const totalExercises = exercises.length;
   const totalSets = exercises.reduce((sum, ex) => sum + ex.sets.filter((s) => s.completed).length, 0);
+  const totalReps = exercises.reduce(
+    (sum, ex) => sum + ex.sets.filter((s) => s.completed).reduce((r, set) => r + set.reps, 0),
+    0
+  );
   const totalVolume = exercises.reduce(
     (sum, ex) =>
       sum + ex.sets.filter((s) => s.completed && s.weight != null)
         .reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0),
     0
   );
-
-  // Volume in user's preferred unit
   const displayVolume = weightUnit === 'lbs' ? Math.round(totalVolume * 2.205) : totalVolume;
+  const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
+  const musclesWorked = getMusclesWorked(exercises);
 
-  const [calories, setCalories] = useState('');
-  const [protein, setProtein] = useState('');
-  const [carbs, setCarbs] = useState('');
-  const [macrosSaved, setMacrosSaved] = useState(false);
-  const [savingMacros, setSavingMacros] = useState(false);
+  const [showCard, setShowCard] = useState(false);
 
   useEffect(() => {
     if (!notificationSent.current) {
@@ -77,33 +95,10 @@ export default function PostWorkoutScreen() {
       const { status } = await Notifications.requestPermissionsAsync();
       if (status !== 'granted') return;
       await Notifications.scheduleNotificationAsync({
-        content: { title: 'Great workout!', body: 'Time to refuel — log your meal.' },
+        content: { title: 'Great workout!', body: 'Time to refuel \u2014 log your meal.' },
         trigger: null,
       });
     } catch {}
-  };
-
-  const saveMacros = async () => {
-    const cal = parseInt(calories) || null;
-    const prot = parseInt(protein) || null;
-    const carb = parseInt(carbs) || null;
-    if (!cal && !prot && !carb) return;
-
-    setSavingMacros(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      await supabase.from('meals').insert({
-        user_id: user.id,
-        date: new Date().toISOString().split('T')[0],
-        calories: cal,
-        protein: prot,
-        carbs: carb,
-      });
-      setMacrosSaved(true);
-    } catch {} finally {
-      setSavingMacros(false);
-    }
   };
 
   const handleShare = async () => {
@@ -113,148 +108,208 @@ export default function PostWorkoutScreen() {
         Alert.alert('Permission needed', 'Allow photo library access to save your workout card.');
         return;
       }
-
       const uri = await captureRef(cardRef, { format: 'png', quality: 1 });
       const asset = await MediaLibrary.createAssetAsync(uri);
       await Share.share({
         url: asset.uri,
-        message: `Just finished ${params.focus} — ${totalExercises} exercises, ${totalSets} sets, ${formatVolume(displayVolume)} ${weightUnit} volume in ${durationMinutes} min`,
+        message: `Just finished ${params.focus} \u2014 ${totalSets} sets, ${totalReps} reps, ${formatNumber(displayVolume)} ${weightUnit} moved in ${durationMinutes} min`,
       });
     } catch {
       Alert.alert('Error', 'Could not save or share the workout card.');
     }
   };
 
-  const formatVolume = (v: number): string => {
-    if (v >= 1000) return `${(v / 1000).toFixed(1)}k`;
-    return String(Math.round(v));
+  const formatDuration = (mins: number): string => {
+    if (mins < 60) return `${mins}m`;
+    const h = Math.floor(mins / 60);
+    const m = mins % 60;
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
   };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
-      <AppHeader />
+      {/* Header with back button */}
+      <View style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        backgroundColor: theme.background,
+        borderBottomWidth: 1,
+        borderBottomColor: theme.border,
+      }}>
+        <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 4, marginRight: 12 }}>
+          <Ionicons name="chevron-back" size={24} color={theme.text} />
+        </Pressable>
+        <Text style={{ fontSize: 17, fontWeight: '800', letterSpacing: 3, color: theme.text, textTransform: 'uppercase' }}>
+          FORME
+        </Text>
+      </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         {/* Header */}
-        <View style={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: 20 }}>
-          <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text, marginBottom: 4 }}>Workout complete</Text>
-          <Text allowFontScaling style={{ fontSize: 14, color: theme.textSecondary }}>{params.focus} · {params.dayName}</Text>
+        <View style={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: 24 }}>
+          <Text style={{ fontSize: 28, fontWeight: '800', color: theme.text, marginBottom: 4 }}>Workout complete</Text>
+          <Text style={{ fontSize: 14, color: theme.textSecondary }}>{params.focus} · {params.dayName}</Text>
         </View>
 
-        {/* Summary stats */}
+        {/* Summary metrics */}
         <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
           <View style={{ flexDirection: 'row', gap: 12 }}>
             <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
-              <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text }}>{totalExercises}</Text>
-              <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>Exercises</Text>
+              <Text style={{ fontSize: 26, fontWeight: '700', color: theme.text }}>{totalSets}</Text>
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>Sets</Text>
             </View>
             <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
-              <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text }}>{totalSets}</Text>
-              <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>Sets</Text>
+              <Text style={{ fontSize: 26, fontWeight: '700', color: theme.text }}>{totalReps}</Text>
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>Reps</Text>
+            </View>
+            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
+              <Text style={{ fontSize: 26, fontWeight: '700', color: theme.text }}>{formatNumber(displayVolume)}</Text>
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>{unitLabel} Moved</Text>
             </View>
           </View>
           <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
             <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
-              <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text }}>{formatVolume(displayVolume)}</Text>
-              <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>Volume ({weightUnit})</Text>
-            </View>
-            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
-              <Text allowFontScaling style={{ fontSize: 24, fontWeight: '700', color: theme.text }}>{durationMinutes}</Text>
-              <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>Minutes</Text>
+              <Text style={{ fontSize: 26, fontWeight: '700', color: theme.text }}>{formatDuration(durationMinutes)}</Text>
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>Time</Text>
             </View>
           </View>
-        </View>
-
-        {/* Shareable workout card - black bg, receipt style */}
-        <View style={{ paddingHorizontal: 24, marginBottom: 20 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-            <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.textSecondary }}>Workout card</Text>
-            <Pressable onPress={handleShare}>
-              <Ionicons name="share-outline" size={22} color={theme.text} />
-            </Pressable>
-          </View>
-
-          <View
-            ref={cardRef}
-            collapsable={false}
-            style={{ backgroundColor: '#000000', borderRadius: 20, padding: 24 }}
-          >
-            {/* Header row */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-              <Text style={{ fontSize: 14, fontWeight: '800', color: '#FFFFFF', letterSpacing: 3, textTransform: 'uppercase' }}>
-                FORME
-              </Text>
-              <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.5)', letterSpacing: 0.5 }}>
-                {dateStr}
-              </Text>
-            </View>
-
-            {/* Focus + day */}
-            <Text style={{ fontSize: 20, fontWeight: '800', color: '#FFFFFF', marginBottom: 2 }}>
-              {(params.focus ?? '').length > 22 ? (params.focus ?? '').slice(0, 22) + '…' : params.focus}
-            </Text>
-            <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.4)', marginBottom: 16 }}>{params.dayName}</Text>
-
-            {/* Divider */}
-            <View style={{ height: 2, backgroundColor: '#FFFFFF', marginBottom: 20 }} />
-
-            {/* Metrics grid */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
-              {[
-                { val: String(totalExercises), label: 'EXERCISES' },
-                { val: String(totalSets), label: 'SETS' },
-                { val: formatVolume(displayVolume), label: weightUnit.toUpperCase() + ' VOL' },
-                { val: `${String(Math.floor(durationMinutes / 60)).padStart(2,'0')}:${String(durationMinutes % 60).padStart(2,'0')}`, label: 'DURATION' },
-              ].map(({ val, label }) => (
-                <View key={label} style={{ alignItems: 'center' }}>
-                  <Text style={{ fontSize: 24, fontWeight: '800', color: '#FFFFFF', fontVariant: ['tabular-nums'] }}>{val}</Text>
-                  <Text style={{ fontSize: 8, color: 'rgba(255,255,255,0.35)', letterSpacing: 1, marginTop: 2 }}>{label}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
-        </View>
-
-        {/* Macro logging */}
-        <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
-          <Text allowFontScaling style={{ fontSize: 18, fontWeight: '700', color: theme.text, marginBottom: 4 }}>Log your meal</Text>
-          <Text allowFontScaling style={{ fontSize: 14, color: theme.textSecondary, marginBottom: 16 }}>Quick post-workout nutrition tracking.</Text>
-
-          {macrosSaved ? (
-            <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: '#22C55E' }}>
-              <Ionicons name="checkmark-circle" size={24} color="#22C55E" />
-              <Text allowFontScaling style={{ color: '#22C55E', fontWeight: '600', marginTop: 4 }}>Macros saved!</Text>
-            </View>
-          ) : (
-            <>
-              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
-                {[
-                  { label: 'Calories', val: calories, set: setCalories },
-                  { label: 'Protein (g)', val: protein, set: setProtein },
-                  { label: 'Carbs (g)', val: carbs, set: setCarbs },
-                ].map(({ label, val, set }) => (
-                  <View key={label} style={{ flex: 1 }}>
-                    <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginBottom: 6 }}>{label}</Text>
-                    <TextInput
-                      style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: theme.text }}
-                      keyboardType="number-pad"
-                      placeholder="—"
-                      placeholderTextColor={theme.textSecondary}
-                      value={val}
-                      onChangeText={set}
-                    />
+          {musclesWorked.length > 0 && (
+            <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginTop: 12 }}>
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 8 }}>Muscles Worked</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                {musclesWorked.map((m) => (
+                  <View key={m} style={{ backgroundColor: theme.background, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: theme.border }}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>{m}</Text>
                   </View>
                 ))}
               </View>
-              <Pressable
-                onPress={saveMacros}
-                disabled={savingMacros}
-                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 12, borderRadius: 12, alignItems: 'center' }}
-              >
-                <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  {savingMacros ? 'Saving…' : 'Save macros'}
-                </Text>
-              </Pressable>
-            </>
+            </View>
+          )}
+        </View>
+
+        {/* Share Workout button */}
+        <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
+          {!showCard ? (
+            <Pressable
+              onPress={() => setShowCard(true)}
+              style={{
+                backgroundColor: theme.surface,
+                borderRadius: 16,
+                paddingVertical: 16,
+                alignItems: 'center',
+                borderWidth: 1,
+                borderColor: theme.border,
+                flexDirection: 'row',
+                justifyContent: 'center',
+                gap: 8,
+              }}
+            >
+              <Ionicons name="share-outline" size={20} color={theme.text} />
+              <Text style={{ fontSize: 15, fontWeight: '600', color: theme.text }}>Share Workout</Text>
+            </Pressable>
+          ) : (
+            <View>
+              {/* Capturable card — simple dark style */}
+              <View ref={cardRef} collapsable={false}>
+                <View style={{ backgroundColor: '#000000', borderRadius: 20, padding: 24 }}>
+                  {/* Share icon inside card but excluded from capture via positioning outside ref would need a different approach. Instead, we keep it outside the cardRef. */}
+
+                  {/* Header */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '800', color: '#FFFFFF', letterSpacing: 3 }}>
+                      FORME
+                    </Text>
+                    <Text style={{ fontSize: 11, color: 'rgba(255,255,255,0.4)', letterSpacing: 0.5 }}>
+                      {dateStr}
+                    </Text>
+                  </View>
+
+                  {/* Focus + day */}
+                  <Text style={{ fontSize: 22, fontWeight: '800', color: '#FFFFFF', marginBottom: 2 }}>
+                    {(params.focus ?? '').length > 22 ? (params.focus ?? '').slice(0, 22) + '\u2026' : params.focus}
+                  </Text>
+                  <Text style={{ fontSize: 13, color: 'rgba(255,255,255,0.4)', marginBottom: 16 }}>{params.dayName}</Text>
+
+                  {/* Divider */}
+                  <View style={{ height: 2, backgroundColor: '#FFFFFF', marginBottom: 16 }} />
+
+                  {/* Metrics — single clean row */}
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                    {[
+                      { val: String(totalSets), label: 'SETS' },
+                      { val: String(totalReps), label: 'REPS' },
+                      { val: formatNumber(displayVolume), label: unitLabel.toUpperCase() },
+                      { val: formatDuration(durationMinutes), label: 'TIME' },
+                    ].map(({ val, label }) => (
+                      <View key={label} style={{ alignItems: 'center', flex: 1 }}>
+                        <Text style={{ fontSize: 22, fontWeight: '800', color: '#FFFFFF', fontVariant: ['tabular-nums'] }}>{val}</Text>
+                        <Text style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', letterSpacing: 1.5, marginTop: 2 }}>{label}</Text>
+                      </View>
+                    ))}
+                  </View>
+
+                  {/* Body part tags */}
+                  {musclesWorked.length > 0 && (
+                    <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 16 }}>
+                      {musclesWorked.map((m) => (
+                        <View key={m} style={{ borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 }}>
+                          <Text style={{ fontSize: 10, color: '#FFFFFF', fontWeight: '600' }}>{m}</Text>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+                </View>
+              </View>
+
+              {/* Action buttons — outside cardRef so excluded from exported image */}
+              <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 12 }}>
+                <Pressable
+                  onPress={handleShare}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    backgroundColor: theme.surface,
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    borderRadius: 12,
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                  }}
+                >
+                  <Ionicons name="share-outline" size={18} color={theme.text} />
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Save & Share</Text>
+                </Pressable>
+                <Pressable
+                  onPress={() => {
+                    const cardDataJson = JSON.stringify({
+                      focus: params.focus ?? '',
+                      dayName: params.dayName ?? '',
+                      sets: totalSets,
+                      reps: totalReps,
+                      volume: displayVolume,
+                      unitLabel,
+                      durationMinutes,
+                      muscles: musclesWorked,
+                    });
+                    router.push({ pathname: '/create-post', params: { cardData: cardDataJson } });
+                  }}
+                  style={{
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    backgroundColor: theme.text,
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    borderRadius: 12,
+                  }}
+                >
+                  <Ionicons name="people" size={18} color={theme.background} />
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: theme.background }}>Post to Forme</Text>
+                </Pressable>
+              </View>
+            </View>
           )}
         </View>
       </ScrollView>
@@ -265,7 +320,7 @@ export default function PostWorkoutScreen() {
           onPress={() => router.replace('/(tabs)')}
           style={{ backgroundColor: theme.text, paddingVertical: 16, borderRadius: 16, alignItems: 'center' }}
         >
-          <Text allowFontScaling style={{ color: theme.background, fontWeight: '600', fontSize: 16 }}>Done</Text>
+          <Text style={{ color: theme.background, fontWeight: '600', fontSize: 16 }}>Done</Text>
         </Pressable>
       </View>
     </SafeAreaView>

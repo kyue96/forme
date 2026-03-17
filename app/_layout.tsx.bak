@@ -19,10 +19,9 @@ function RootLayoutNav({ session }: { session: Session | null }) {
 
   useEffect(() => {
     const inAuthGroup = segments[0] === '(auth)';
-    const onOnboarding = segments[1] === 'onboarding';
     if (!session && !inAuthGroup) {
       router.replace('/(auth)/welcome');
-    } else if (session && inAuthGroup && !onOnboarding) {
+    } else if (session && inAuthGroup) {
       router.replace('/(tabs)');
     }
   }, [session, segments]);
@@ -34,9 +33,6 @@ function RootLayoutNav({ session }: { session: Session | null }) {
       <Stack.Screen name="quiz" />
       <Stack.Screen name="plan-result" />
       <Stack.Screen name="workout/[dayIndex]" />
-      <Stack.Screen name="create-post" options={{ presentation: 'modal' }} />
-      <Stack.Screen name="user/[userId]" />
-      <Stack.Screen name="discover" />
     </Stack>
   );
 }

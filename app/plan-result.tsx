@@ -123,7 +123,7 @@ export default function PlanResultScreen() {
           <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 32, paddingBottom: 24 }}>
             <Text style={{ fontSize: 28, fontWeight: '700', color: theme.text, marginBottom: 4 }}>Your plan is ready</Text>
             <Text style={{ fontSize: 16, color: theme.textSecondary, marginBottom: 32 }}>
-              Here's your personalised weekly programme.
+              Here is your {weeklyPlan?.length ?? 0}-day weekly routine.
             </Text>
 
             {weeklyPlan?.map((day, i) => (

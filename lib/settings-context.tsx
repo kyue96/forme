@@ -5,7 +5,7 @@ import { Colors, ThemeColors } from '../constants/theme';
 
 export type WeightUnit = 'lbs' | 'kg';
 export type ThemeMode = 'light' | 'dark';
-export type RestTimerDuration = 30 | 60 | 90 | 120;
+export type RestTimerDuration = 30 | 45 | 60 | 90 | 120;
 
 const STORAGE_KEYS = {
   theme: '@forme/theme',
@@ -55,7 +55,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
       if (storedUnit === 'lbs' || storedUnit === 'kg') setWeightUnitState(storedUnit);
       if (storedTimer) {
         const d = parseInt(storedTimer) as RestTimerDuration;
-        if ([30, 60, 90, 120].includes(d)) setRestTimerDurationState(d);
+        if ([30, 45, 60, 90, 120].includes(d)) setRestTimerDurationState(d);
       }
       if (storedTimerEnabled !== null) setRestTimerEnabledState(storedTimerEnabled !== 'false');
 

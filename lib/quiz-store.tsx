@@ -5,6 +5,7 @@ interface QuizContextType {
   answers: QuizAnswers;
   setAnswer: <K extends keyof QuizAnswers>(key: K, value: QuizAnswers[K]) => void;
   toggleEquipment: (item: string) => void;
+  toggleGoal: (item: string) => void;
   resetQuiz: () => void;
 }
 
@@ -28,10 +29,21 @@ export function QuizProvider({ children }: { children: React.ReactNode }) {
     });
   };
 
+  const toggleGoal = (item: string) => {
+    setAnswers((prev) => {
+      const current = prev.goal ?? [];
+      const exists = current.includes(item as never);
+      const updated = exists
+        ? current.filter((g) => g !== item)
+        : [...current, item as never];
+      return { ...prev, goal: updated };
+    });
+  };
+
   const resetQuiz = () => setAnswers({});
 
   return (
-    <QuizContext.Provider value={{ answers, setAnswer, toggleEquipment, resetQuiz }}>
+    <QuizContext.Provider value={{ answers, setAnswer, toggleEquipment, toggleGoal, resetQuiz }}>
       {children}
     </QuizContext.Provider>
   );

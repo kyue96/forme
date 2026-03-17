@@ -1,7 +1,10 @@
+import { useEffect } from 'react';
 import { Tabs } from 'expo-router';
 import { View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSettings } from '@/lib/settings-context';
+import { useUserStore } from '@/lib/user-store';
+import { ProfileDrawer } from '@/components/ProfileDrawer';
 
 type IoniconName = keyof typeof Ionicons.glyphMap;
 
@@ -19,52 +22,60 @@ function TabIcon({ icon, focused, activeColor, inactiveColor }: { icon: IoniconN
 
 export default function TabsLayout() {
   const { theme } = useSettings();
+  const loadUser = useUserStore((s) => s.loadUser);
+
+  useEffect(() => {
+    loadUser();
+  }, []);
 
   return (
-    <Tabs
-      screenOptions={{
-        headerShown: false,
-        tabBarShowLabel: false,
-        tabBarStyle: {
-          height: 70,
-          paddingTop: 0,
-          paddingBottom: 10,
-          backgroundColor: theme.background,
-          borderTopWidth: 1,
-          borderTopColor: theme.border,
-          shadowColor: '#000',
-          shadowOffset: { width: 0, height: -2 },
-          shadowOpacity: 0.04,
-          shadowRadius: 12,
-          elevation: 12,
-        },
-        animation: 'fade',
-      }}
-    >
-      <Tabs.Screen
-        name="index"
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon icon="home" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
+    <View style={{ flex: 1 }}>
+      <Tabs
+        screenOptions={{
+          headerShown: false,
+          tabBarShowLabel: false,
+          tabBarStyle: {
+            height: 60,
+            paddingTop: 0,
+            paddingBottom: 8,
+            backgroundColor: theme.background,
+            borderTopWidth: 1,
+            borderTopColor: theme.border,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: -2 },
+            shadowOpacity: 0.04,
+            shadowRadius: 12,
+            elevation: 12,
+          },
+          animation: 'fade',
         }}
-      />
-      <Tabs.Screen
-        name="workout"
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon icon="barbell" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
-        }}
-      />
-      <Tabs.Screen
-        name="meals"
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon icon="restaurant" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          tabBarIcon: ({ focused }) => <TabIcon icon="person" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
-        }}
-      />
-    </Tabs>
+      >
+        <Tabs.Screen
+          name="index"
+          options={{
+            tabBarIcon: ({ focused }) => <TabIcon icon="home" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
+          }}
+        />
+        <Tabs.Screen
+          name="workout"
+          options={{
+            tabBarIcon: ({ focused }) => <TabIcon icon="barbell" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
+          }}
+        />
+        <Tabs.Screen
+          name="meals"
+          options={{
+            tabBarIcon: ({ focused }) => <TabIcon icon="restaurant" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
+          }}
+        />
+        <Tabs.Screen
+          name="social"
+          options={{
+            tabBarIcon: ({ focused }) => <TabIcon icon="people" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
+          }}
+        />
+      </Tabs>
+      <ProfileDrawer />
+    </View>
   );
 }

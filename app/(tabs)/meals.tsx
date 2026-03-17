@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import {
   Alert,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -14,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { AppHeader } from '@/components/AppHeader';
+import { formatNumber } from '@/lib/utils';
 
 function dateKey(d: Date): string {
   return d.toISOString().split('T')[0];
@@ -23,43 +26,8 @@ function formatDate(d: Date): string {
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
-function parseHeightToCm(height: string): number {
-  const match = height.match(/(\d+)'(\d+)"/);
-  if (!match) return 175;
-  const ft = parseInt(match[1]);
-  const inc = parseInt(match[2]);
-  return Math.round((ft * 12 + inc) * 2.54);
-}
-
-function parseWeightToKg(weight: string): number {
-  const match = weight.match(/(\d+)/);
-  if (!match) return 77;
-  const lbs = parseInt(match[1]);
-  return Math.round(lbs / 2.205);
-}
-
-function calculateTDEE(heightCm: number, weightKg: number, daysPerWeek: number, gender: string): number {
-  const age = 28;
-  let bmr: number;
-  if (gender === 'Female') {
-    bmr = 10 * weightKg + 6.25 * heightCm - 5 * age - 161;
-  } else {
-    bmr = 10 * weightKg + 6.25 * heightCm - 5 * age + 5;
-  }
-  const multipliers: Record<number, number> = { 2: 1.375, 3: 1.55, 4: 1.725 };
-  const multiplier = multipliers[daysPerWeek] ?? 1.9;
-  return Math.round(bmr * multiplier);
-}
-
-function getCalorieTarget(tdee: number, goal: string): { calories: number; label: string; rate: string } {
-  if (goal === 'Build muscle' || goal === 'Build strength') {
-    const cal = tdee + (goal === 'Build muscle' ? 400 : 200);
-    return { calories: cal, label: 'Muscle gain surplus', rate: `+${goal === 'Build muscle' ? 400 : 200} cal over maintenance` };
-  }
-  if (goal === 'Lose weight') {
-    return { calories: tdee - 400, label: 'Fat loss deficit', rate: '~0.5–0.8 lbs/week loss' };
-  }
-  return { calories: tdee, label: 'Maintenance', rate: 'Maintain current weight' };
+function daysInMonth(year: number, month: number): number {
+  return new Date(year, month + 1, 0).getDate();
 }
 
 interface MealRow {
@@ -77,7 +45,6 @@ export default function MealsScreen() {
   const [meals, setMeals] = useState<MealRow[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const [showAdd, setShowAdd] = useState(false);
   const [mealName, setMealName] = useState('');
   const [cal, setCal] = useState('');
   const [prot, setProt] = useState('');
@@ -90,9 +57,11 @@ export default function MealsScreen() {
   const [editProt, setEditProt] = useState('');
   const [editCarb, setEditCarb] = useState('');
 
-  const [calorieGoal, setCalorieGoal] = useState<number | null>(null);
-  const [calorieAdjust, setCalorieAdjust] = useState(0);
-  const [tdeeData, setTdeeData] = useState<{ tdee: number; label: string; rate: string } | null>(null);
+  // Calendar view
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [calMonth, setCalMonth] = useState(new Date().getMonth());
+  const [calYear, setCalYear] = useState(new Date().getFullYear());
+  const [mealDates, setMealDates] = useState<Set<string>>(new Set());
 
   const dk = dateKey(selectedDate);
   const isToday = dk === dateKey(new Date());
@@ -114,32 +83,26 @@ export default function MealsScreen() {
     }
   }, [dk]);
 
-  useFocusEffect(useCallback(() => { loadMeals(); }, [loadMeals]));
-
-  useEffect(() => {
-    loadGoal();
-  }, []);
-
-  const loadGoal = async () => {
+  const loadMealDates = useCallback(async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data: profile } = await supabase
-        .from('profiles')
-        .select('height, weight, goal, days_per_week, gender')
-        .eq('id', user.id)
-        .single();
-      if (profile?.height && profile?.weight && profile?.days_per_week) {
-        const heightCm = parseHeightToCm(profile.height);
-        const weightKg = parseWeightToKg(profile.weight);
-        const days = parseInt((profile.days_per_week ?? '3').replace('+', ''));
-        const tdee = calculateTDEE(heightCm, weightKg, days, profile.gender ?? 'Male');
-        const target = getCalorieTarget(tdee, profile.goal ?? 'Stay active');
-        setTdeeData({ tdee, label: target.label, rate: target.rate });
-        setCalorieGoal(target.calories);
+      const startDate = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-01`;
+      const endDay = daysInMonth(calYear, calMonth);
+      const endDate = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(endDay).padStart(2, '0')}`;
+      const { data } = await supabase
+        .from('meals')
+        .select('date')
+        .eq('user_id', user.id)
+        .gte('date', startDate)
+        .lte('date', endDate);
+      if (data) {
+        setMealDates(new Set(data.map((m: { date: string }) => m.date)));
       }
     } catch {}
-  };
+  }, [calMonth, calYear]);
+
+  useFocusEffect(useCallback(() => { loadMeals(); loadMealDates(); }, [loadMeals, loadMealDates]));
 
   const changeDate = (offset: number) => {
     const d = new Date(selectedDate);
@@ -166,7 +129,6 @@ export default function MealsScreen() {
         name: mealName.trim() || null,
       });
       setMealName(''); setCal(''); setProt(''); setCarb('');
-      setShowAdd(false);
       loadMeals();
     } catch {} finally {
       setSaving(false);
@@ -224,222 +186,256 @@ export default function MealsScreen() {
     color: theme.text,
   };
 
-  const effectiveGoal = calorieGoal != null ? calorieGoal + calorieAdjust : null;
+  // Calendar grid
+  const renderCalendar = () => {
+    const firstDay = new Date(calYear, calMonth, 1).getDay();
+    const totalDays = daysInMonth(calYear, calMonth);
+    const offset = firstDay === 0 ? 6 : firstDay - 1; // Monday start
+    const cells: (number | null)[] = [];
+    for (let i = 0; i < offset; i++) cells.push(null);
+    for (let d = 1; d <= totalDays; d++) cells.push(d);
+    while (cells.length % 7 !== 0) cells.push(null);
+
+    const monthLabel = new Date(calYear, calMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    return (
+      <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+          <Pressable onPress={() => {
+            if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); }
+            else setCalMonth(m => m - 1);
+          }}>
+            <Ionicons name="chevron-back" size={20} color={theme.chrome} />
+          </Pressable>
+          <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>{monthLabel}</Text>
+          <Pressable onPress={() => {
+            if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); }
+            else setCalMonth(m => m + 1);
+          }}>
+            <Ionicons name="chevron-forward" size={20} color={theme.chrome} />
+          </Pressable>
+        </View>
+        <View style={{ flexDirection: 'row', marginBottom: 8 }}>
+          {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => (
+            <View key={i} style={{ flex: 1, alignItems: 'center' }}>
+              <Text style={{ fontSize: 11, color: theme.textSecondary, fontWeight: '600' }}>{d}</Text>
+            </View>
+          ))}
+        </View>
+        {Array.from({ length: cells.length / 7 }, (_, row) => (
+          <View key={row} style={{ flexDirection: 'row', marginBottom: 4 }}>
+            {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
+              if (day == null) return <View key={col} style={{ flex: 1, height: 36 }} />;
+              const dayStr = `${calYear}-${String(calMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              const hasMeal = mealDates.has(dayStr);
+              const isSelected = dayStr === dk;
+              return (
+                <Pressable
+                  key={col}
+                  onPress={() => {
+                    setSelectedDate(new Date(calYear, calMonth, day));
+                    setShowCalendar(false);
+                  }}
+                  style={{ flex: 1, height: 36, alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <View style={{
+                    width: 30, height: 30, borderRadius: 15, alignItems: 'center', justifyContent: 'center',
+                    backgroundColor: isSelected ? theme.text : 'transparent',
+                  }}>
+                    <Text style={{ fontSize: 13, color: isSelected ? theme.background : theme.text, fontWeight: isSelected ? '700' : '400' }}>{day}</Text>
+                  </View>
+                  {hasMeal && (
+                    <View style={{ width: 4, height: 4, borderRadius: 2, backgroundColor: theme.chrome, position: 'absolute', bottom: 0 }} />
+                  )}
+                </Pressable>
+              );
+            })}
+          </View>
+        ))}
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
       <AppHeader />
 
-      <ScrollView
+      <KeyboardAvoidingView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingBottom: 40 }}
-        showsVerticalScrollIndicator={false}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={49}
       >
-        {/* Date picker */}
-        <View style={{ paddingHorizontal: 24, paddingTop: 20, paddingBottom: 16 }}>
-          <View style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            backgroundColor: theme.surface,
-            borderRadius: 16,
-            paddingHorizontal: 4,
-            paddingVertical: 4,
-            borderWidth: 1,
-            borderColor: theme.border,
-          }}>
-            <Pressable
-              onPress={() => changeDate(-1)}
-              style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Ionicons name="chevron-back" size={20} color={theme.chrome} />
-            </Pressable>
-            <Pressable onPress={() => setSelectedDate(new Date())}>
-              <Text allowFontScaling style={{
-                fontSize: 15,
-                fontWeight: '700',
-                color: isToday ? theme.text : theme.textSecondary,
-              }}>
-                {isToday ? 'Today' : formatDate(selectedDate)}
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => changeDate(1)}
-              style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}
-            >
-              <Ionicons name="chevron-forward" size={20} color={theme.chrome} />
-            </Pressable>
-          </View>
-        </View>
-
-        {/* Calorie goal card */}
-        {effectiveGoal != null && (
-          <View style={{ paddingHorizontal: 24, marginBottom: 16 }}>
-            <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 6 }}>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Daily goal</Text>
-                <Text style={{ fontSize: 20, fontWeight: '800', color: theme.text }}>{effectiveGoal} cal</Text>
-              </View>
-              {/* Progress bar */}
-              <View style={{ height: 6, backgroundColor: theme.border, borderRadius: 3, overflow: 'hidden', marginBottom: 6 }}>
-                <View style={{
-                  height: '100%',
-                  borderRadius: 3,
-                  backgroundColor: totalCal > effectiveGoal ? '#EF4444' : '#22C55E',
-                  width: `${Math.min(100, (totalCal / effectiveGoal) * 100)}%`,
-                }} />
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                <Text style={{ fontSize: 11, color: theme.textSecondary }}>{totalCal} / {effectiveGoal} cal</Text>
-                <Text style={{ fontSize: 11, color: theme.textSecondary }}>{tdeeData?.rate}</Text>
-              </View>
-              {/* Adjust label */}
-              <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                Adjust goal: {calorieAdjust > 0 ? '+' : ''}{calorieAdjust} cal
-              </Text>
-              {/* +/- buttons */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 4 }}>
-                <Pressable
-                  onPress={() => setCalorieAdjust(a => Math.max(-500, a - 50))}
-                  style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: theme.chromeLight, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <Text style={{ color: theme.text, fontWeight: '700' }}>−</Text>
-                </Pressable>
-                <View style={{ flex: 1, height: 2, backgroundColor: theme.border }} />
-                <Pressable
-                  onPress={() => setCalorieAdjust(a => Math.min(500, a + 50))}
-                  style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: theme.chromeLight, alignItems: 'center', justifyContent: 'center' }}
-                >
-                  <Text style={{ color: theme.text, fontWeight: '700' }}>+</Text>
-                </Pressable>
-              </View>
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingBottom: 80 }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+        >
+          {/* Date picker: [←] [Date (tappable)] [→] */}
+          <View style={{ paddingHorizontal: 24, paddingTop: 20, paddingBottom: 16 }}>
+            <View style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: theme.surface,
+              borderRadius: 16,
+              paddingHorizontal: 4,
+              paddingVertical: 4,
+              borderWidth: 1,
+              borderColor: theme.border,
+            }}>
+              <Pressable
+                onPress={() => changeDate(-1)}
+                style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Ionicons name="chevron-back" size={20} color={theme.chrome} />
+              </Pressable>
+              <Pressable onPress={() => { setShowCalendar(!showCalendar); loadMealDates(); }}>
+                <Text allowFontScaling style={{
+                  fontSize: 15,
+                  fontWeight: '700',
+                  color: isToday ? theme.text : theme.textSecondary,
+                }}>
+                  {isToday ? 'Today' : formatDate(selectedDate)}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => changeDate(1)}
+                style={{ width: 40, height: 40, alignItems: 'center', justifyContent: 'center' }}
+              >
+                <Ionicons name="chevron-forward" size={20} color={theme.chrome} />
+              </Pressable>
             </View>
           </View>
-        )}
 
-        {/* Daily totals */}
-        <View style={{ paddingHorizontal: 24, marginBottom: 20 }}>
-          <View style={{ flexDirection: 'row', gap: 10 }}>
-            {[
-              { label: 'Calories', value: String(totalCal), unit: '' },
-              { label: 'Protein', value: String(totalProt), unit: 'g' },
-              { label: 'Carbs', value: String(totalCarb), unit: 'g' },
-            ].map(({ label, value, unit }) => (
-              <View
-                key={label}
-                style={{
-                  flex: 1,
-                  backgroundColor: theme.surface,
-                  borderRadius: 16,
-                  padding: 14,
-                  alignItems: 'center',
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                }}
-              >
-                <Text allowFontScaling style={{ fontSize: 22, fontWeight: '800', color: theme.text }}>
-                  {value}{unit}
-                </Text>
-                <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>
-                  {label}
-                </Text>
-              </View>
-            ))}
-          </View>
-        </View>
+          {/* Calendar view */}
+          {showCalendar && renderCalendar()}
 
-        {/* Meal list */}
-        <View style={{ paddingHorizontal: 24 }}>
-          {meals.length === 0 && !loading ? (
-            <View style={{ alignItems: 'center', paddingVertical: 32 }}>
-              <Ionicons name="restaurant-outline" size={32} color={theme.border} />
-              <Text allowFontScaling style={{ color: theme.textSecondary, marginTop: 8 }}>
-                No meals logged for this day.
-              </Text>
+          {/* Daily totals */}
+          <View style={{ paddingHorizontal: 24, marginBottom: 20 }}>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {[
+                { label: 'Calories', value: formatNumber(totalCal), unit: '' },
+                { label: 'Protein', value: String(totalProt), unit: 'g' },
+                { label: 'Carbs', value: String(totalCarb), unit: 'g' },
+              ].map(({ label, value, unit }) => (
+                <View
+                  key={label}
+                  style={{
+                    flex: 1,
+                    backgroundColor: theme.surface,
+                    borderRadius: 16,
+                    padding: 12,
+                    alignItems: 'center',
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                  }}
+                >
+                  <Text allowFontScaling style={{ fontSize: 18, fontWeight: '800', color: theme.text }}>
+                    {value}{unit}
+                  </Text>
+                  <Text allowFontScaling style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2 }}>
+                    {label}
+                  </Text>
+                </View>
+              ))}
             </View>
-          ) : (
-            meals.map((meal, i) => (
-              <View
-                key={meal.id}
-                style={{
-                  backgroundColor: theme.surface,
-                  borderRadius: 16,
-                  padding: 16,
-                  marginBottom: 10,
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                }}
-              >
-                {editingId === meal.id ? (
-                  <>
-                    {/* Meal name */}
-                    <TextInput
-                      style={{ ...macroInputStyle, marginBottom: 10 }}
-                      placeholder="Meal name (optional)"
-                      placeholderTextColor={theme.textSecondary}
-                      underlineColorAndroid="transparent"
-                      value={editName}
-                      onChangeText={setEditName}
-                    />
-                    <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-                      {[
-                        { label: 'Cal', val: editCal, set: setEditCal },
-                        { label: 'Protein', val: editProt, set: setEditProt },
-                        { label: 'Carbs', val: editCarb, set: setEditCarb },
-                      ].map(({ label, val, set }) => (
-                        <View key={label} style={{ flex: 1 }}>
-                          <Text allowFontScaling style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
-                            {label}
-                          </Text>
-                          <TextInput
-                            style={macroInputStyle}
-                            keyboardType="number-pad"
-                            placeholder="—"
-                            placeholderTextColor={theme.textSecondary}
-                            underlineColorAndroid="transparent"
-                            value={val}
-                            onChangeText={set}
-                          />
-                        </View>
-                      ))}
-                    </View>
-                    <View style={{ flexDirection: 'row', gap: 8 }}>
-                      <Pressable
-                        onPress={saveEdit}
-                        style={{ flex: 1, backgroundColor: theme.text, paddingVertical: 10, borderRadius: 12, alignItems: 'center' }}
-                      >
-                        <Text allowFontScaling style={{ color: theme.background, fontWeight: '700', fontSize: 13 }}>Save</Text>
-                      </Pressable>
-                      <Pressable
-                        onPress={() => setEditingId(null)}
-                        style={{ flex: 1, backgroundColor: theme.chromeLight, paddingVertical: 10, borderRadius: 12, alignItems: 'center' }}
-                      >
-                        <Text allowFontScaling style={{ color: theme.textSecondary, fontWeight: '600', fontSize: 13 }}>Cancel</Text>
-                      </Pressable>
-                    </View>
-                  </>
-                ) : (
-                  <Pressable onPress={() => startEdit(meal)} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <View style={{ flex: 1 }}>
-                      <Text allowFontScaling style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>
-                        {meal.name || `Meal ${i + 1}`}
-                      </Text>
-                      <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
-                        {meal.calories ?? 0} cal · {meal.protein ?? 0}g protein · {meal.carbs ?? 0}g carbs
-                      </Text>
-                    </View>
-                    <Pressable onPress={() => deleteMeal(meal.id)} style={{ padding: 8, marginLeft: 4 }}>
-                      <Ionicons name="trash-outline" size={16} color={theme.chrome} />
-                    </Pressable>
-                  </Pressable>
-                )}
-              </View>
-            ))
-          )}
-        </View>
+          </View>
 
-        {/* Add meal form */}
-        {showAdd && (
+          {/* Meal list */}
+          <View style={{ paddingHorizontal: 24 }}>
+            {meals.length === 0 && !loading ? (
+              <View style={{ alignItems: 'center', paddingVertical: 32 }}>
+                <Ionicons name="restaurant-outline" size={32} color={theme.border} />
+                <Text allowFontScaling style={{ color: theme.textSecondary, marginTop: 8 }}>
+                  No meals logged for this day.
+                </Text>
+              </View>
+            ) : (
+              meals.map((meal, i) => (
+                <View
+                  key={meal.id}
+                  style={{
+                    backgroundColor: theme.surface,
+                    borderRadius: 16,
+                    padding: 16,
+                    marginBottom: 10,
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                  }}
+                >
+                  {editingId === meal.id ? (
+                    <>
+                      <TextInput
+                        style={{ ...macroInputStyle, marginBottom: 10 }}
+                        placeholder="Meal name (optional)"
+                        placeholderTextColor={theme.textSecondary}
+                        underlineColorAndroid="transparent"
+                        value={editName}
+                        onChangeText={setEditName}
+                      />
+                      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+                        {[
+                          { label: 'Cal', val: editCal, set: setEditCal },
+                          { label: 'Protein', val: editProt, set: setEditProt },
+                          { label: 'Carbs', val: editCarb, set: setEditCarb },
+                        ].map(({ label, val, set }) => (
+                          <View key={label} style={{ flex: 1 }}>
+                            <Text allowFontScaling style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+                              {label}
+                            </Text>
+                            <TextInput
+                              style={macroInputStyle}
+                              keyboardType="decimal-pad"
+                              placeholder=""
+                              placeholderTextColor={theme.textSecondary}
+                              underlineColorAndroid="transparent"
+                              value={val}
+                              onChangeText={set}
+                            />
+                          </View>
+                        ))}
+                      </View>
+                      <View style={{ flexDirection: 'row', gap: 8 }}>
+                        <Pressable
+                          onPress={saveEdit}
+                          style={{ flex: 1, backgroundColor: theme.text, paddingVertical: 10, borderRadius: 12, alignItems: 'center' }}
+                        >
+                          <Text allowFontScaling style={{ color: theme.background, fontWeight: '700', fontSize: 13 }}>Save</Text>
+                        </Pressable>
+                        <Pressable
+                          onPress={() => setEditingId(null)}
+                          style={{ flex: 1, backgroundColor: theme.chromeLight, paddingVertical: 10, borderRadius: 12, alignItems: 'center' }}
+                        >
+                          <Text allowFontScaling style={{ color: theme.textSecondary, fontWeight: '600', fontSize: 13 }}>Cancel</Text>
+                        </Pressable>
+                      </View>
+                    </>
+                  ) : (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <View style={{ flex: 1 }}>
+                        <Text allowFontScaling style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>
+                          {meal.name || `Meal ${i + 1}`}
+                        </Text>
+                        <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
+                          {formatNumber(meal.calories ?? 0)} cal · {meal.protein ?? 0}g protein · {meal.carbs ?? 0}g carbs
+                        </Text>
+                      </View>
+                      <Pressable onPress={() => startEdit(meal)} style={{ padding: 8, marginLeft: 4 }}>
+                        <Ionicons name="pencil-outline" size={16} color={theme.chrome} />
+                      </Pressable>
+                      <Pressable onPress={() => deleteMeal(meal.id)} style={{ padding: 8, marginLeft: 4 }}>
+                        <Ionicons name="trash-outline" size={16} color={theme.chrome} />
+                      </Pressable>
+                    </View>
+                  )}
+                </View>
+              ))
+            )}
+          </View>
+
+          {/* Add meal form (always visible) */}
           <View style={{ paddingHorizontal: 24, marginTop: 8 }}>
             <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border }}>
               <TextInput
@@ -462,8 +458,8 @@ export default function MealsScreen() {
                     </Text>
                     <TextInput
                       style={macroInputStyle}
-                      keyboardType="number-pad"
-                      placeholder="—"
+                      keyboardType="decimal-pad"
+                      placeholder=""
                       placeholderTextColor={theme.textSecondary}
                       underlineColorAndroid="transparent"
                       value={val}
@@ -472,39 +468,19 @@ export default function MealsScreen() {
                   </View>
                 ))}
               </View>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <Pressable
-                  onPress={addMeal}
-                  disabled={saving}
-                  style={{ flex: 1, backgroundColor: theme.text, paddingVertical: 12, borderRadius: 12, alignItems: 'center', opacity: saving ? 0.6 : 1 }}
-                >
-                  <Text allowFontScaling style={{ color: theme.background, fontWeight: '700' }}>
-                    {saving ? 'Saving…' : 'Save'}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => { setShowAdd(false); setMealName(''); setCal(''); setProt(''); setCarb(''); }}
-                  style={{ flex: 1, backgroundColor: theme.chromeLight, paddingVertical: 12, borderRadius: 12, alignItems: 'center' }}
-                >
-                  <Text allowFontScaling style={{ color: theme.textSecondary, fontWeight: '600' }}>Cancel</Text>
-                </Pressable>
-              </View>
+              <Pressable
+                onPress={addMeal}
+                disabled={saving}
+                style={{ backgroundColor: theme.text, paddingVertical: 12, borderRadius: 12, alignItems: 'center', opacity: saving ? 0.6 : 1 }}
+              >
+                <Text allowFontScaling style={{ color: theme.background, fontWeight: '700' }}>
+                  {saving ? 'Saving…' : 'Save'}
+                </Text>
+              </Pressable>
             </View>
           </View>
-        )}
-      </ScrollView>
-
-      {/* Add meal button */}
-      {!showAdd && (
-        <View style={{ paddingHorizontal: 24, paddingBottom: 24, paddingTop: 12, backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border }}>
-          <Pressable
-            onPress={() => setShowAdd(true)}
-            style={{ backgroundColor: theme.text, paddingVertical: 16, borderRadius: 16, alignItems: 'center' }}
-          >
-            <Text allowFontScaling style={{ color: theme.background, fontWeight: '700', fontSize: 15 }}>+ Add meal</Text>
-          </Pressable>
-        </View>
-      )}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
