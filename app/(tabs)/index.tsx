@@ -477,7 +477,7 @@ export default function HomeScreen() {
                       </View>
                       {/* Exercise progress */}
                       <View style={{ marginTop: 16, gap: 6 }}>
-                        {activeWorkout.loggedExercises.slice(0, 5).map((ex, i) => {
+                        {activeWorkout.loggedExercises.map((ex, i) => {
                           const done = ex.sets.filter((s) => s.completed).length;
                           return (
                             <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
@@ -489,24 +489,7 @@ export default function HomeScreen() {
                             </View>
                           );
                         })}
-                        {activeWorkout.loggedExercises.length > 5 && (
-                          <Text style={{ fontSize: 12, color: '#FFFFFF66', marginTop: 2 }}>+{activeWorkout.loggedExercises.length - 5} more</Text>
-                        )}
                       </View>
-                      {/* Discard button */}
-                      <Pressable
-                        onPress={(e) => {
-                          e.stopPropagation();
-                          Alert.alert('Discard workout?', 'Your progress will be lost.', [
-                            { text: 'Cancel', style: 'cancel' },
-                            { text: 'Discard', style: 'destructive', onPress: () => clearWorkout() },
-                          ]);
-                        }}
-                        hitSlop={8}
-                        style={{ position: 'absolute', top: 16, right: 16 }}
-                      >
-                        <Ionicons name="close-circle-outline" size={22} color="#FFFFFF66" />
-                      </Pressable>
                     </LinearGradient>
                   </Pressable>
                 );
@@ -540,7 +523,7 @@ export default function HomeScreen() {
                     </View>
                     {/* Exercise list preview */}
                     <View style={{ marginTop: 16, gap: 6 }}>
-                      {todayWorkout.exercises.slice(0, 5).map((ex, i) => (
+                      {todayWorkout.exercises.map((ex, i) => (
                         <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
                           <Text style={{ fontSize: 13, color: '#FFFFFFAA', fontWeight: '400' }}>
                             {i + 1}. {ex.name}
@@ -548,9 +531,6 @@ export default function HomeScreen() {
                           <Text style={{ fontSize: 11, color: '#FFFFFF66', marginLeft: 'auto' }}>{ex.sets} × {ex.reps}</Text>
                         </View>
                       ))}
-                      {todayWorkout.exercises.length > 5 && (
-                        <Text style={{ fontSize: 12, color: '#FFFFFF66', marginTop: 2 }}>+{todayWorkout.exercises.length - 5} more</Text>
-                      )}
                     </View>
                   </LinearGradient>
                 </Pressable>

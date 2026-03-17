@@ -28,8 +28,8 @@ import { SetRow, SetRowKeyboardAccessory } from '@/components/SetRow';
 import { LoggedExercise, LoggedSet } from '@/lib/types';
 import { SemanticColors } from '@/constants/theme';
 import { isBodyweightExercise, getInstructions, EXERCISE_DATABASE } from '@/lib/exercise-data';
-import { formatTimeMs, formatTime, animateLayout } from '@/lib/utils';
-import { getWarmupForFocus } from '@/lib/warmup-data';
+import { formatTimeMs, formatTime, animateLayout, animateLayoutSlow } from '@/lib/utils';
+import { getWarmupRoutine } from '@/lib/warmup-data';
 
 
 export default function WorkoutScreen() {
@@ -84,7 +84,11 @@ export default function WorkoutScreen() {
   const [reorderMode, setReorderMode] = useState(false);
   const [supersetMode, setSupersetMode] = useState(false);
   const [selectedForSuperset, setSelectedForSuperset] = useState<number[]>([]);
+  const [confirmRestart, setConfirmRestart] = useState(false);
+  const [warmupChecked, setWarmupChecked] = useState<Record<string, boolean>>({});
+  const [warmupCollapsed, setWarmupCollapsed] = useState(activeWorkout?.warmupDone ?? false);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { exercises: customExercises, loaded: customLoaded, load: loadCustomExercises } = useCustomExerciseStore();
 
@@ -94,19 +98,42 @@ export default function WorkoutScreen() {
   const restIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const startedRef = useRef(false);
+  const isResuming = useRef(activeWorkout?.dayIndex === dayIdx && getElapsedMs() > 0);
   const swipeableRefs = useRef<Record<number, Swipeable | null>>({});
   const inputRefs = useRef<Record<string, TextInput | null>>({});
 
   const warmupAnim = useRef(new Animated.Value(1)).current;
 
+  const warmupAutoDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const dismissWarmup = () => {
-    Animated.timing(warmupAnim, {
-      toValue: 0,
-      duration: 300,
-      useNativeDriver: true,
-    }).start(() => {
-      storeSetWarmupDone(true);
-    });
+    if (warmupAutoDismissRef.current) clearTimeout(warmupAutoDismissRef.current);
+    animateLayoutSlow();
+    setWarmupCollapsed(true);
+  };
+
+  const startFromWarmup = () => {
+    // Start the clock but keep warmup card visible
+    if (!workoutStarted && countdown === null) {
+      setCountdown(3);
+      const countdownInterval = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev === null || prev <= 1) {
+            clearInterval(countdownInterval);
+            setWorkoutStarted(true);
+            setCountdown(null);
+            resumeWorkout();
+            return null;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    // Auto-dismiss warmup card after 11 minutes
+    if (warmupAutoDismissRef.current) clearTimeout(warmupAutoDismissRef.current);
+    warmupAutoDismissRef.current = setTimeout(() => {
+      dismissWarmup();
+    }, 11 * 60 * 1000);
   };
 
   const warmupDone = activeWorkout?.warmupDone ?? false;
@@ -170,6 +197,29 @@ export default function WorkoutScreen() {
     }
   }, [warmupDone]);
 
+  // Auto-collapse warmup when all exercises checked green
+  useEffect(() => {
+    if (warmupCollapsed) return;
+    const warmup = getWarmupRoutine(day?.focus ?? '');
+    const totalItems = warmup.cardio.length + warmup.mobility.length;
+    const checkedCount = Object.values(warmupChecked).filter(Boolean).length;
+    if (totalItems > 0 && checkedCount >= totalItems) {
+      const timer = setTimeout(() => {
+        dismissWarmup();
+        // Focus first exercise, set 1, weight field
+        setTimeout(() => {
+          setActiveExercise(0);
+          animateLayout();
+          setTimeout(() => {
+            const ref = inputRefs.current['0-0-w'];
+            if (ref) ref.focus();
+          }, 400);
+        }, 350);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [warmupChecked, warmupCollapsed]);
+
   const loadPreviousSets = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -207,8 +257,8 @@ export default function WorkoutScreen() {
 
 
   // Start rest timer (yellow timer + haptics on end)
-  const startRestTimer = () => {
-    if (!restTimerEnabled) return;
+  const startRestTimer = (manual = false) => {
+    if (!manual && !restTimerEnabled) return;
     // Clear existing rest timer if any
     if (restIntervalRef.current) clearInterval(restIntervalRef.current);
 
@@ -238,6 +288,41 @@ export default function WorkoutScreen() {
       if (restIntervalRef.current) clearInterval(restIntervalRef.current);
     };
   }, []);
+
+  const handleRestart = () => {
+    if (!confirmRestart) {
+      setConfirmRestart(true);
+      // Auto-reset after 3 seconds if not confirmed
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = setTimeout(() => setConfirmRestart(false), 3000);
+      return;
+    }
+    // Second tap — restart
+    setConfirmRestart(false);
+    if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+    const initial: LoggedExercise[] = exercises.map((ex) => ({
+      name: ex.name,
+      sets: Array.from({ length: ex.sets }, () => ({
+        weight: null,
+        reps: 0,
+        completed: false,
+      })),
+    }));
+    clearWorkout();
+    startWorkout(dayIdx, day!.dayName, day!.focus, initial);
+    setLoggedExercises(initial);
+    setWorkoutStarted(false);
+    setCountdown(null);
+    setConfirmFinish(false);
+    setActiveExercise(0);
+    skipRestTimer();
+    // Reset warmup
+    setWarmupCollapsed(false);
+    setWarmupChecked({});
+    storeSetWarmupDone(false);
+    warmupAnim.setValue(1);
+    setTimeout(() => pauseWorkout(), 50);
+  };
 
   const handleExit = () => {
     skipRestTimer();
@@ -570,7 +655,7 @@ export default function WorkoutScreen() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SetRowKeyboardAccessory />
-      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+      <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.background }}>
         {/* Header bar: [Exercise Name + "Exercise X of Y"] ... [+] [Pause] [X] */}
         <View style={{
           flexDirection: 'row',
@@ -625,7 +710,11 @@ export default function WorkoutScreen() {
                 <Pressable onPress={() => setAddExerciseOpen(true)} hitSlop={12} style={{ padding: 4 }}>
                   <Ionicons name="add-outline" size={24} color={theme.chrome} />
                 </Pressable>
-                {/* Exit — no confirmation */}
+                {/* Restart — two-tap confirm */}
+                <Pressable onPress={handleRestart} hitSlop={12} style={{ padding: 4 }}>
+                  <Ionicons name="refresh-outline" size={22} color={confirmRestart ? SemanticColors.danger : theme.chrome} />
+                </Pressable>
+                {/* Exit */}
                 <Pressable onPress={handleExit} hitSlop={12} style={{ padding: 4 }}>
                   <Ionicons name="close-outline" size={26} color={theme.chrome} />
                 </Pressable>
@@ -642,53 +731,104 @@ export default function WorkoutScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 120 }}
-          ListHeaderComponent={
-            !warmupDone ? (
-              <Animated.View style={{
+          ListHeaderComponent={(() => {
+            const warmup = getWarmupRoutine(day?.focus ?? '');
+            const totalItems = warmup.cardio.length + warmup.mobility.length;
+            const checkedCount = Object.values(warmupChecked).filter(Boolean).length;
+            const allWarmupDone = totalItems > 0 && checkedCount >= totalItems;
+
+            if (warmupCollapsed) {
+              // Collapsed: tappable bar to re-expand
+              return (
+                <Pressable
+                  onPress={() => { animateLayoutSlow(); setWarmupCollapsed(false); }}
+                  style={{
+                    marginBottom: 12,
+                    backgroundColor: theme.surface,
+                    borderRadius: 12,
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>Warm-Up</Text>
+                    <Text style={{ fontSize: 12, color: allWarmupDone ? SemanticColors.success : theme.textSecondary }}>
+                      {checkedCount}/{totalItems}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-down" size={18} color={theme.textSecondary} />
+                </Pressable>
+              );
+            }
+
+            // Expanded: full warmup card
+            return (
+              <View style={{
                 marginBottom: 20,
                 backgroundColor: theme.surface,
                 borderRadius: 16,
                 padding: 16,
                 borderWidth: 1,
                 borderColor: theme.border,
-                opacity: warmupAnim,
-                transform: [{
-                  translateY: warmupAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-80, 0],
-                  }),
-                }],
               }}>
-                <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text, marginBottom: 4 }}>
-                  Warmup — 5 min
-                </Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>
+                    Warm-Up — 10 min
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <Pressable onPress={startFromWarmup} disabled={workoutStarted} hitSlop={8} style={{ backgroundColor: workoutStarted ? theme.chrome : theme.text, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 }}>
+                      <Text style={{ color: theme.background, fontWeight: '600', fontSize: 13 }}>{workoutStarted ? 'In progress' : 'Start'}</Text>
+                    </Pressable>
+                    <Pressable onPress={() => { dismissWarmup(); }} hitSlop={8}>
+                      <Ionicons name="chevron-up" size={20} color={theme.textSecondary} />
+                    </Pressable>
+                  </View>
+                </View>
                 <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>
                   Get your blood flowing before lifting.
                 </Text>
-                {getWarmupForFocus(day?.focus ?? '').map((w, i) => (
-                  <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
-                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.chrome, marginRight: 10 }} />
-                    <Text style={{ fontSize: 14, color: theme.text, flex: 1 }}>{w.name}</Text>
-                    <Text style={{ fontSize: 12, color: theme.textSecondary }}>{w.duration}</Text>
-                  </View>
-                ))}
-                <Pressable
-                  onPress={dismissWarmup}
-                  style={{
-                    backgroundColor: theme.text,
-                    paddingVertical: 12,
-                    borderRadius: 12,
-                    alignItems: 'center',
-                    marginTop: 12,
-                  }}
-                >
-                  <Text style={{ color: theme.background, fontWeight: '600', fontSize: 14 }}>
-                    Done with warmup
-                  </Text>
-                </Pressable>
-              </Animated.View>
-            ) : null
-          }
+                <Text style={{ fontSize: 12, fontWeight: '600', color: theme.chrome, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                  Cardio — 5 min
+                </Text>
+                {warmup.cardio.map((w, i) => {
+                  const key = `c-${i}`;
+                  const done = warmupChecked[key] ?? false;
+                  return (
+                    <View key={key} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: done ? SemanticColors.success : theme.chrome, marginRight: 10 }} />
+                      <Text style={{ fontSize: 14, color: done ? theme.textSecondary : theme.text, flex: 1, textDecorationLine: done ? 'line-through' : 'none' }}>{w.name}</Text>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginRight: 10 }}>{w.duration}</Text>
+                      <Pressable onPress={() => setWarmupChecked((prev) => ({ ...prev, [key]: !prev[key] }))} hitSlop={6}>
+                        <Ionicons name={done ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={done ? SemanticColors.success : theme.border} />
+                      </Pressable>
+                    </View>
+                  );
+                })}
+                <Text style={{ fontSize: 12, fontWeight: '600', color: theme.chrome, textTransform: 'uppercase', letterSpacing: 1, marginTop: 8, marginBottom: 8 }}>
+                  Dynamic Stretching — 5 min
+                </Text>
+                {warmup.mobility.map((w, i) => {
+                  const key = `m-${i}`;
+                  const done = warmupChecked[key] ?? false;
+                  return (
+                    <View key={key} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: done ? SemanticColors.success : theme.chrome, marginRight: 10 }} />
+                      <Text style={{ fontSize: 14, color: done ? theme.textSecondary : theme.text, flex: 1, textDecorationLine: done ? 'line-through' : 'none' }}>{w.name}</Text>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginRight: 10 }}>{w.duration}</Text>
+                      <Pressable onPress={() => setWarmupChecked((prev) => ({ ...prev, [key]: !prev[key] }))} hitSlop={6}>
+                        <Ionicons name={done ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={done ? SemanticColors.success : theme.border} />
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </View>
+            );
+          })()}
           renderItem={({ item: logged, getIndex, drag, isActive }: RenderItemParams<LoggedExercise>) => {
             const exIdx = getIndex()!;
             const exercise = exercises[exIdx];
@@ -765,7 +905,7 @@ export default function WorkoutScreen() {
                       <Text style={{
                         fontSize: 14,
                         fontWeight: '700',
-                        color: allSetsComplete ? SemanticColors.success : SemanticColors.warning,
+                        color: allSetsComplete ? SemanticColors.success : theme.textSecondary,
                         marginRight: 10,
                         minWidth: 16,
                         textAlign: 'center',
@@ -899,25 +1039,48 @@ export default function WorkoutScreen() {
         />
         </KeyboardAvoidingView>
 
-        {/* Bottom bar: Timer + Finish */}
-        <View style={{ backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border }}>
-          {isResting ? (
+        {/* Bottom bar: Play | Timer + Rest | Finish — single row */}
+        <View style={{ backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border, paddingHorizontal: 24, paddingTop: 10, paddingBottom: 28 }}>
+          <View style={{ position: 'relative', height: 36 }}>
+            {/* Timer — absolutely centered, never moves */}
             <Pressable
-              onPress={skipRestTimer}
-              style={{ backgroundColor: '#EAB308', paddingVertical: 14, alignItems: 'center' }}
+              onPress={() => {
+                if (!workoutStarted && countdown === null) {
+                  setCountdown(3);
+                  const countdownInterval = setInterval(() => {
+                    setCountdown((prev) => {
+                      if (prev === null || prev <= 1) {
+                        clearInterval(countdownInterval);
+                        setWorkoutStarted(true);
+                        setCountdown(null);
+                        resumeWorkout();
+                        return null;
+                      }
+                      return prev - 1;
+                    });
+                  }, 1000);
+                }
+              }}
+              disabled={workoutStarted || countdown !== null}
+              style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}
             >
-              <Text style={{ fontSize: 28, fontWeight: '800', color: '#000', fontVariant: ['tabular-nums'], letterSpacing: 1 }}>
-                {formatTime(restRemaining)}
+              <Text style={{
+                fontSize: 22,
+                fontWeight: '700',
+                color: countdown !== null ? SemanticColors.warning : (isPaused ? theme.chrome : theme.text),
+                fontVariant: ['tabular-nums'],
+                letterSpacing: 1,
+              }}>
+                {countdown !== null ? String(countdown) : (!workoutStarted ? (isResuming.current ? 'RESUME' : 'START') : formatTimeMs(displayMs))}
               </Text>
-              <Text style={{ fontSize: 12, color: '#000', opacity: 0.7, marginTop: 2 }}>Tap to skip rest</Text>
             </Pressable>
-          ) : (
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 12, paddingBottom: 32 }}>
-              {/* Play / Pause — left aligned, no circle */}
+
+            {/* Left/right controls on top of timer */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 36 }}>
+              {/* Play / Pause */}
               <Pressable
                 onPress={() => {
                   if (!workoutStarted) {
-                    // Start countdown 3..2..1
                     setCountdown(3);
                     const countdownInterval = setInterval(() => {
                       setCountdown((prev) => {
@@ -941,50 +1104,12 @@ export default function WorkoutScreen() {
               >
                 <Ionicons
                   name={(!workoutStarted || isPaused) ? 'play' : 'pause'}
-                  size={24}
+                  size={22}
                   color={theme.text}
                 />
               </Pressable>
 
-              {/* Timer — centered, tappable for START */}
-              <Pressable
-                onPress={() => {
-                  if (!workoutStarted && countdown === null) {
-                    setCountdown(3);
-                    const countdownInterval = setInterval(() => {
-                      setCountdown((prev) => {
-                        if (prev === null || prev <= 1) {
-                          clearInterval(countdownInterval);
-                          setWorkoutStarted(true);
-                          setCountdown(null);
-                          resumeWorkout();
-                          return null;
-                        }
-                        return prev - 1;
-                      });
-                    }, 1000);
-                  }
-                }}
-                disabled={workoutStarted || countdown !== null}
-                style={{ flex: 1, alignItems: 'center' }}
-              >
-                <Text style={{
-                  fontSize: 24,
-                  fontWeight: '700',
-                  color: countdown !== null ? SemanticColors.warning : (isPaused ? theme.chrome : theme.text),
-                  fontVariant: ['tabular-nums'],
-                  letterSpacing: 1,
-                }}>
-                  {countdown !== null ? String(countdown) : (!workoutStarted ? 'START' : formatTimeMs(displayMs))}
-                </Text>
-                {workoutStarted && countdown === null && (
-                  <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2 }}>
-                    {isPaused ? 'Paused' : day.focus}
-                  </Text>
-                )}
-              </Pressable>
-
-              {/* Finish — right aligned, two-tap confirm */}
+              {/* Finish — two-tap confirm (right edge) */}
               <Pressable
                 onPress={() => {
                   if (confirmFinish) {
@@ -1002,12 +1127,52 @@ export default function WorkoutScreen() {
               >
                 <Ionicons
                   name={confirmFinish ? 'checkmark' : 'flag'}
-                  size={24}
+                  size={22}
                   color={confirmFinish ? SemanticColors.success : theme.text}
                 />
               </Pressable>
             </View>
-          )}
+
+            {/* Rest timer pill — absolutely positioned between clock and finish, only when workout started */}
+            {workoutStarted && <Pressable
+              onPress={() => {
+                if (isResting) {
+                  skipRestTimer();
+                } else {
+                  startRestTimer(true);
+                }
+              }}
+              hitSlop={8}
+              style={{
+                position: 'absolute',
+                right: 50,
+                top: 0,
+                bottom: 0,
+                justifyContent: 'center',
+              }}
+            >
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: isResting ? '#EAB30825' : theme.surface,
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: isResting ? '#EAB30850' : theme.border,
+              }}>
+                {isResting ? (
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#EAB308', fontVariant: ['tabular-nums'] }}>
+                    {formatTime(restRemaining)}
+                  </Text>
+                ) : (
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, letterSpacing: 0.5 }}>
+                    REST
+                  </Text>
+                )}
+              </View>
+            </Pressable>}
+          </View>
         </View>
 
         {/* Add exercise modal */}

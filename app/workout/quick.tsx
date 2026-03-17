@@ -83,7 +83,9 @@ export default function QuickWorkoutScreen() {
   const [reorderMode, setReorderMode] = useState(false);
   const [supersetMode, setSupersetMode] = useState(false);
   const [selectedForSuperset, setSelectedForSuperset] = useState<number[]>([]);
+  const [confirmRestart, setConfirmRestart] = useState(false);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { exercises: customExercises, loaded: customLoaded, load: loadCustomExercises, create: createCustomExercise } = useCustomExerciseStore();
   const [showCreateCustom, setShowCreateCustom] = useState(false);
@@ -172,8 +174,8 @@ export default function QuickWorkoutScreen() {
   };
 
 
-  const startRestTimer = () => {
-    if (!restTimerEnabled) return;
+  const startRestTimer = (manual = false) => {
+    if (!manual && !restTimerEnabled) return;
     if (restIntervalRef.current) clearInterval(restIntervalRef.current);
     setRestRemaining(restTimerDuration);
     restIntervalRef.current = setInterval(() => {
@@ -464,6 +466,35 @@ export default function QuickWorkoutScreen() {
         },
       });
     }
+  };
+
+  const handleRestart = () => {
+    if (!confirmRestart) {
+      setConfirmRestart(true);
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = setTimeout(() => setConfirmRestart(false), 3000);
+      return;
+    }
+    // Second tap — restart
+    setConfirmRestart(false);
+    if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
+    const initial: LoggedExercise[] = loggedExercises.map((ex) => ({
+      name: ex.name,
+      sets: Array.from({ length: ex.sets.length }, () => ({
+        weight: null,
+        reps: 0,
+        completed: false,
+      })),
+    }));
+    clearWorkout();
+    startWorkout(-1, 'Quick', 'Quick Workout', initial);
+    setLoggedExercises(initial);
+    setWorkoutStarted(false);
+    setCountdown(null);
+    setConfirmFinish(false);
+    setActiveExercise(0);
+    skipRestTimer();
+    setTimeout(() => pauseWorkout(), 50);
   };
 
   const handleExit = () => {
@@ -882,7 +913,7 @@ export default function QuickWorkoutScreen() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SetRowKeyboardAccessory />
-      <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+      <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.background }}>
         {/* Header */}
         <View style={{
           flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -950,6 +981,10 @@ export default function QuickWorkoutScreen() {
                 {/* Add exercise */}
                 <Pressable onPress={() => setAddExerciseOpen(true)} hitSlop={12} style={{ padding: 4 }}>
                   <Ionicons name="add-outline" size={24} color={theme.chrome} />
+                </Pressable>
+                {/* Restart — two-tap confirm */}
+                <Pressable onPress={handleRestart} hitSlop={12} style={{ padding: 4 }}>
+                  <Ionicons name="refresh-outline" size={22} color={confirmRestart ? SemanticColors.danger : theme.chrome} />
                 </Pressable>
                 <Pressable onPress={handleExit} hitSlop={12} style={{ padding: 4 }}>
                   <Ionicons name="close-outline" size={26} color={theme.chrome} />
@@ -1038,7 +1073,7 @@ export default function QuickWorkoutScreen() {
                       <Text style={{
                         fontSize: 14,
                         fontWeight: '700',
-                        color: allSetsComplete ? SemanticColors.success : SemanticColors.warning,
+                        color: allSetsComplete ? SemanticColors.success : theme.textSecondary,
                         marginRight: 10,
                         minWidth: 16,
                         textAlign: 'center',
@@ -1140,25 +1175,50 @@ export default function QuickWorkoutScreen() {
         />
         </KeyboardAvoidingView>
 
-        {/* Bottom bar: Timer + Finish */}
-        <View style={{ backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border }}>
-          {isResting ? (
+        {/* Bottom bar: Play | Timer (abs center) | Rest + Finish */}
+        <View style={{ backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border, paddingHorizontal: 24, paddingTop: 10, paddingBottom: 28 }}>
+          <View style={{ position: 'relative', height: 36 }}>
+            {/* Timer — absolutely centered, never moves */}
             <Pressable
-              onPress={skipRestTimer}
-              style={{ backgroundColor: '#EAB308', paddingVertical: 14, alignItems: 'center' }}
+              onPress={() => {
+                if (!workoutStarted && countdown === null) {
+                  setCountdown(3);
+                  let c = 3;
+                  const id = setInterval(() => {
+                    c -= 1;
+                    if (c > 0) {
+                      setCountdown(c);
+                    } else {
+                      clearInterval(id);
+                      setCountdown(null);
+                      setWorkoutStarted(true);
+                      resumeWorkout();
+                    }
+                  }, 1000);
+                }
+              }}
+              disabled={workoutStarted || countdown !== null}
+              style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}
             >
-              <Text style={{ fontSize: 28, fontWeight: '800', color: '#000', fontVariant: ['tabular-nums'], letterSpacing: 1 }}>
-                {formatTime(restRemaining)}
+              <Text style={{
+                fontSize: 22, fontWeight: '700',
+                color: countdown !== null ? SemanticColors.warning : isPaused ? theme.chrome : theme.text,
+                fontVariant: ['tabular-nums'], letterSpacing: 1,
+              }}>
+                {!workoutStarted && countdown === null
+                  ? 'START'
+                  : countdown !== null
+                  ? String(countdown)
+                  : formatTimeMs(displayMs)}
               </Text>
-              <Text style={{ fontSize: 12, color: '#000', opacity: 0.7, marginTop: 2 }}>Tap to skip rest</Text>
             </Pressable>
-          ) : (
-            <View style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 20, paddingVertical: 12, paddingBottom: 32, gap: 12 }}>
+
+            {/* Left/right controls on top of timer */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 36 }}>
               {/* Play / Pause */}
               <Pressable
                 onPress={() => {
                   if (!workoutStarted && countdown === null) {
-                    // First tap: start countdown 3..2..1
                     setCountdown(3);
                     let c = 3;
                     const id = setInterval(() => {
@@ -1183,57 +1243,20 @@ export default function QuickWorkoutScreen() {
               >
                 <Ionicons
                   name={(!workoutStarted || isPaused) ? 'play' : 'pause'}
-                  size={26}
+                  size={22}
                   color={theme.text}
                 />
-              </Pressable>
-
-              {/* Timer — tappable for START */}
-              <Pressable
-                onPress={() => {
-                  if (!workoutStarted && countdown === null) {
-                    setCountdown(3);
-                    let c = 3;
-                    const id = setInterval(() => {
-                      c -= 1;
-                      if (c > 0) {
-                        setCountdown(c);
-                      } else {
-                        clearInterval(id);
-                        setCountdown(null);
-                        setWorkoutStarted(true);
-                        resumeWorkout();
-                      }
-                    }, 1000);
-                  }
-                }}
-                disabled={workoutStarted || countdown !== null}
-                style={{ flex: 1, alignItems: 'center' }}
-              >
-                <Text style={{
-                  fontSize: 24, fontWeight: '700',
-                  color: countdown !== null ? SemanticColors.warning : isPaused ? theme.chrome : theme.text,
-                  fontVariant: ['tabular-nums'], letterSpacing: 1,
-                }}>
-                  {!workoutStarted && countdown === null
-                    ? 'START'
-                    : countdown !== null
-                    ? String(countdown)
-                    : formatTimeMs(displayMs)}
-                </Text>
               </Pressable>
 
               {/* Finish (two-tap) */}
               <Pressable
                 onPress={() => {
                   if (confirmFinish) {
-                    // Second tap: confirm finish
                     if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
                     confirmTimerRef.current = null;
                     setConfirmFinish(false);
                     handleFinish();
                   } else {
-                    // First tap: show confirmation
                     setConfirmFinish(true);
                     confirmTimerRef.current = setTimeout(() => {
                       setConfirmFinish(false);
@@ -1246,12 +1269,52 @@ export default function QuickWorkoutScreen() {
               >
                 <Ionicons
                   name={confirmFinish ? 'checkmark' : 'flag-outline'}
-                  size={26}
+                  size={22}
                   color={confirmFinish ? SemanticColors.success : theme.text}
                 />
               </Pressable>
             </View>
-          )}
+
+            {/* Rest timer pill — only when workout started */}
+            {workoutStarted && <Pressable
+              onPress={() => {
+                if (isResting) {
+                  skipRestTimer();
+                } else {
+                  startRestTimer(true);
+                }
+              }}
+              hitSlop={8}
+              style={{
+                position: 'absolute',
+                right: 50,
+                top: 0,
+                bottom: 0,
+                justifyContent: 'center',
+              }}
+            >
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: isResting ? '#EAB30825' : theme.surface,
+                paddingHorizontal: 10,
+                paddingVertical: 4,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: isResting ? '#EAB30850' : theme.border,
+              }}>
+                {isResting ? (
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#EAB308', fontVariant: ['tabular-nums'] }}>
+                    {formatTime(restRemaining)}
+                  </Text>
+                ) : (
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, letterSpacing: 0.5 }}>
+                    REST
+                  </Text>
+                )}
+              </View>
+            </Pressable>}
+          </View>
         </View>
 
         {/* Add exercise modal */}

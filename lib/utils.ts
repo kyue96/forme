@@ -37,3 +37,16 @@ export function animateLayout() {
     delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity, duration: 150 },
   });
 }
+
+/**
+ * Slower layout animation for expand/collapse transitions (500ms).
+ */
+export function animateLayoutSlow() {
+  const { LayoutAnimation } = require('react-native');
+  LayoutAnimation.configureNext({
+    duration: 500,
+    update: { type: LayoutAnimation.Types.easeInEaseOut },
+    create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity, duration: 400 },
+    delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity, duration: 300 },
+  });
+}
