@@ -24,7 +24,7 @@ import { useCustomExerciseStore } from '@/lib/custom-exercise-store';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { useWorkoutStore } from '@/lib/workout-store';
-import { SetRow } from '@/components/SetRow';
+import { SetRow, SetRowKeyboardAccessory } from '@/components/SetRow';
 import { LoggedExercise, LoggedSet } from '@/lib/types';
 import { SemanticColors } from '@/constants/theme';
 import { isBodyweightExercise, getInstructions, EXERCISE_DATABASE } from '@/lib/exercise-data';
@@ -267,6 +267,12 @@ export default function WorkoutScreen() {
   }
 
   const updateSet = (exIdx: number, setIdx: number, data: LoggedSet) => {
+    // Auto-start clock on first data entry
+    if (!workoutStarted && (data.weight !== null || data.reps > 0)) {
+      setWorkoutStarted(true);
+      setCountdown(null);
+      resumeWorkout();
+    }
     setLoggedExercises((prev) => {
       const updated = [...prev];
       updated[exIdx] = {
@@ -563,6 +569,7 @@ export default function WorkoutScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <SetRowKeyboardAccessory />
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
         {/* Header bar: [Exercise Name + "Exercise X of Y"] ... [+] [Pause] [X] */}
         <View style={{

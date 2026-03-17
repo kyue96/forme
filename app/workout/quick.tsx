@@ -22,7 +22,7 @@ import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { useWorkoutStore } from '@/lib/workout-store';
 import { useCustomExerciseStore, CustomExercise } from '@/lib/custom-exercise-store';
-import { SetRow } from '@/components/SetRow';
+import { SetRow, SetRowKeyboardAccessory } from '@/components/SetRow';
 import { BottomSheet } from '@/components/BottomSheet';
 import { LoggedExercise, LoggedSet } from '@/lib/types';
 import { SemanticColors } from '@/constants/theme';
@@ -223,6 +223,12 @@ export default function QuickWorkoutScreen() {
 
   // --- Workout logic ---
   const updateSet = (exIdx: number, setIdx: number, data: LoggedSet) => {
+    // Auto-start clock on first data entry
+    if (!workoutStarted && (data.weight !== null || data.reps > 0)) {
+      setWorkoutStarted(true);
+      setCountdown(null);
+      resumeWorkout();
+    }
     setLoggedExercises((prev) => {
       const updated = [...prev];
       updated[exIdx] = {
@@ -875,6 +881,7 @@ export default function QuickWorkoutScreen() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <SetRowKeyboardAccessory />
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
         {/* Header */}
         <View style={{

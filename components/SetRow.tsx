@@ -1,11 +1,33 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { InputAccessoryView, Keyboard, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useSettings } from '@/lib/settings-context';
 import { LoggedSet } from '@/lib/types';
 import { isBarbell } from '@/lib/plate-calculator';
 import { PlateCalculatorSheet } from '@/components/PlateCalculatorSheet';
+
+// Module-level ref so the shared InputAccessoryView always calls the active row's handler
+const activeNextHandler: { current: (() => void) | null } = { current: null };
+
+export const SET_ROW_ACCESSORY_ID = 'setRowKeyboard';
+
+/** Render once in the parent screen — shared across all SetRow inputs */
+export function SetRowKeyboardAccessory() {
+  if (Platform.OS !== 'ios') return null;
+  return (
+    <InputAccessoryView nativeID={SET_ROW_ACCESSORY_ID}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#d1d5db', paddingHorizontal: 16, paddingVertical: 10 }}>
+        <Pressable onPress={() => Keyboard.dismiss()} hitSlop={8}>
+          <Text style={{ fontSize: 17, color: '#007AFF' }}>Cancel</Text>
+        </Pressable>
+        <Pressable onPress={() => { activeNextHandler.current?.(); }} hitSlop={8}>
+          <Text style={{ fontSize: 17, fontWeight: '600', color: '#007AFF' }}>Next</Text>
+        </Pressable>
+      </View>
+    </InputAccessoryView>
+  );
+}
 
 interface SetRowProps {
   setNumber: number;
@@ -47,6 +69,7 @@ export function SetRow({
   const { theme, weightUnit } = useSettings();
   const prevCompleted = useRef(data.completed);
   const weightStep = weightUnit === 'lbs' ? 5 : 2.5;
+  const focusedField = useRef<'weight' | 'reps' | null>(null);
   const isBarbellExercise = !isBodyweight && exerciseName !== '' && isBarbell(exerciseName);
   const showIncrement = setNumber >= 2 && !isBodyweight && !data.completed && !isBarbellExercise;
   const [showPlateCalc, setShowPlateCalc] = useState(false);
@@ -206,7 +229,8 @@ export function SetRow({
                 value={data.weight != null ? String(data.weight) : ''}
                 onChangeText={handleWeightChange}
                 onSubmitEditing={onWeightSubmit}
-                onFocus={handleFocusUncheck}
+                onFocus={() => { focusedField.current = 'weight'; activeNextHandler.current = () => onWeightSubmit?.(); handleFocusUncheck(); }}
+                {...(Platform.OS === 'ios' ? { inputAccessoryViewID: SET_ROW_ACCESSORY_ID } : {})}
               />
               {showIncrement && (
                 <Pressable
@@ -239,8 +263,9 @@ export function SetRow({
             value={data.reps > 0 ? String(data.reps) : ''}
             onChangeText={handleRepsChange}
             onSubmitEditing={onRepsSubmit}
-            onFocus={handleFocusUncheck}
+            onFocus={() => { focusedField.current = 'reps'; activeNextHandler.current = () => onRepsSubmit?.(); handleFocusUncheck(); }}
             onBlur={handleRepsBlur}
+            {...(Platform.OS === 'ios' ? { inputAccessoryViewID: SET_ROW_ACCESSORY_ID } : {})}
           />
         </View>
       </View>
@@ -260,13 +285,13 @@ export function SetRow({
   if (onDelete) {
     return (
       <Swipeable
-        ref={swipeRef}
-        renderRightActions={renderRightActions}
-        overshootRight={false}
-        friction={2}
-      >
-        {rowContent}
-      </Swipeable>
+          ref={swipeRef}
+          renderRightActions={renderRightActions}
+          overshootRight={false}
+          friction={2}
+        >
+          {rowContent}
+        </Swipeable>
     );
   }
 
