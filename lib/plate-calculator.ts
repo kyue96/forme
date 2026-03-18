@@ -48,7 +48,7 @@ export function defaultBarWeight(unit: WeightUnit): number {
 
 /**
  * Given a total weight and bar weight, calculate which plates go on each side.
- * Uses a greedy algorithm — largest plates first.
+ * Uses a greedy algorithm - largest plates first.
  * Returns remainder > 0 if the weight can't be exactly achieved.
  */
 export function calculatePlatesPerSide(

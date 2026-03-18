@@ -48,7 +48,7 @@ const TILE_STEPS: TileStep[] = [
   {
     key: 'experience',
     question: "What's your experience level?",
-    subtitle: "Be honest — this helps us get it right.",
+    subtitle: "Be honest, this helps us get it right.",
     options: ['Beginner', 'Some experience', 'Intermediate', 'Advanced'],
   },
   {

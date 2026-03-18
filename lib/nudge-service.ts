@@ -71,16 +71,16 @@ export function checkVolumeInsight(
 ): string | null {
   const { thisWeekSessions = 0, hasEnoughHistory = true } = options ?? {};
 
-  // Not enough history for percentage comparisons — show absolute numbers
+  // Not enough history for percentage comparisons - show absolute numbers
   if (!hasEnoughHistory) {
     if (thisWeekSessions > 0 && thisWeekVolume > 0) {
       const formatted = thisWeekVolume >= 1000
         ? `${(thisWeekVolume / 1000).toFixed(1)}k`
         : String(Math.round(thisWeekVolume));
-      return `Logged ${thisWeekSessions} session${thisWeekSessions === 1 ? '' : 's'} this week — ${formatted} lbs total volume`;
+      return `Logged ${thisWeekSessions} session${thisWeekSessions === 1 ? '' : 's'} this week · ${formatted} lbs total volume`;
     }
     if (thisWeekSessions > 0) {
-      return `Logged ${thisWeekSessions} session${thisWeekSessions === 1 ? '' : 's'} this week — keep it up!`;
+      return `Logged ${thisWeekSessions} session${thisWeekSessions === 1 ? '' : 's'} this week. Keep it up!`;
     }
     return null;
   }
@@ -89,9 +89,9 @@ export function checkVolumeInsight(
   if (lastWeekVolume === 0 || thisWeekVolume === 0) return null;
 
   const pct = Math.round(((thisWeekVolume - lastWeekVolume) / lastWeekVolume) * 100);
-  if (pct > 10) return `Volume up ${pct}% vs last week — great progress!`;
-  if (pct < -10) return `Volume down ${Math.abs(pct)}% vs last week — recovery week?`;
-  return `Consistent volume this week — staying on track!`;
+  if (pct > 10) return `Volume up ${pct}% vs last week. Great progress!`;
+  if (pct < -10) return `Volume down ${Math.abs(pct)}% vs last week. Recovery week?`;
+  return `Consistent volume this week. Staying on track!`;
 }
 
 /**

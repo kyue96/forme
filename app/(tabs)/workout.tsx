@@ -74,7 +74,7 @@ export default function WorkoutScreen() {
   const [activeTab, setActiveTab] = useState<'plan' | 'history' | 'badges'>('plan');
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
-  // selectedLog state removed — now navigates to session-view
+  // selectedLog state removed - now navigates to session-view
   const [expandedDay, setExpandedDay] = useState<number | null>(null);
   const [todayLoggedDays, setTodayLoggedDays] = useState<Set<string>>(new Set());
   const [completedDays, setCompletedDays] = useState<Set<string>>(new Set());
@@ -225,7 +225,7 @@ export default function WorkoutScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
       <AppHeader />
 
-      {/* Weekly calendar strip — outside ScrollView padding */}
+      {/* Weekly calendar strip - outside ScrollView padding */}
       {plan && (
         <WeeklyCalendar
           completedDays={completedDays}
@@ -412,7 +412,7 @@ export default function WorkoutScreen() {
         ) : activeTab === 'badges' ? (
           <BadgesTab />
         ) : (
-          /* Weekly plan — accordion */
+          /* Weekly plan - accordion */
           <View>
             {!plan ? (
               <View style={{ marginTop: 32, alignItems: 'center' }}>
@@ -538,7 +538,7 @@ export default function WorkoutScreen() {
         )}
       </ScrollView>
 
-      {/* Log detail modal removed — now navigates to /workout/session-view */}
+      {/* Log detail modal removed - now navigates to /workout/session-view */}
     </SafeAreaView>
     </GestureHandlerRootView>
   );

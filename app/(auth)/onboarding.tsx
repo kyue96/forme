@@ -32,7 +32,7 @@ const SCREENS = [
     icon: 'trophy' as const,
     title: 'Challenges & Streaks',
     subtitle: 'Stay consistent',
-    description: 'Join community challenges, earn badges for consistency, and track your streaks — built for every fitness level.',
+    description: 'Join community challenges, earn badges for consistency, and track your streaks. Built for every fitness level.',
     color: '#10B981',
   },
 ];

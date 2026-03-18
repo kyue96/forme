@@ -34,7 +34,7 @@ Recently worked muscles (avoid repeating within 48hrs): ${lastWorkedStr || 'None
 
 Provide exercises that fit within the available time. Choose exercises appropriate for ${session.location === 'Home' ? 'home with minimal equipment' : 'a fully equipped gym'}.
 
-Return ONLY valid JSON with no markdown, no explanation — just the JSON object:
+Return ONLY valid JSON with no markdown, no explanation. Just the JSON object:
 {
   "dayName": "Today",
   "focus": "${session.muscleGroup}",
@@ -88,7 +88,7 @@ Create a structured weekly program with exactly ${daysCount} workout days. ${
 
 Do not include cardio exercises in the workout plan. Cardio is tracked separately by the user.
 
-Keep exercise notes to 5 words or fewer. Return ONLY valid JSON with no markdown, no explanation — just the JSON object:
+Keep exercise notes to 5 words or fewer. Return ONLY valid JSON with no markdown, no explanation. Just the JSON object:
 {
   "weeklyPlan": [
     {
@@ -122,7 +122,7 @@ Keep exercise notes to 5 words or fewer. Return ONLY valid JSON with no markdown
       text = text.slice(jsonStart, jsonEnd + 1);
     }
     if (message.stop_reason === 'max_tokens') {
-      throw new Error('Plan generation was cut off — response too long. Please try again.');
+      throw new Error('Plan generation was cut off. Response too long. Please try again.');
     }
 
     let plan;

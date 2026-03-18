@@ -46,7 +46,7 @@ export default function MealsScreen() {
   const [editProt, setEditProt] = useState('');
   const [editCarb, setEditCarb] = useState('');
 
-  // Weekly calendar — days with meals logged
+  // Weekly calendar - days with meals logged
   const [mealDays, setMealDays] = useState<Set<string>>(new Set());
 
   const dk = dateKey(selectedDate);

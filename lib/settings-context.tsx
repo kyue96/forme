@@ -136,7 +136,7 @@ export function convertWeight(kg: number, unit: WeightUnit): number {
 }
 
 export function displayWeight(kg: number | null, unit: WeightUnit): string {
-  if (kg == null) return '—';
+  if (kg == null) return '-';
   const val = convertWeight(kg, unit);
   return `${val} ${unit}`;
 }

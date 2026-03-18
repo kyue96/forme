@@ -210,7 +210,7 @@ export default function PostWorkoutScreen() {
             </Pressable>
           ) : (
             <View>
-              {/* Capturable card — simple dark style */}
+              {/* Capturable card - simple dark style */}
               <View ref={cardRef} collapsable={false}>
                 <View style={{ backgroundColor: '#000000', borderRadius: 20, padding: 24 }}>
                   {/* Share icon inside card but excluded from capture via positioning outside ref would need a different approach. Instead, we keep it outside the cardRef. */}
@@ -234,7 +234,7 @@ export default function PostWorkoutScreen() {
                   {/* Divider */}
                   <View style={{ height: 2, backgroundColor: '#FFFFFF', marginBottom: 16 }} />
 
-                  {/* Metrics — single clean row */}
+                  {/* Metrics - single clean row */}
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
                     {[
                       { val: String(totalSets), label: 'SETS' },
@@ -262,7 +262,7 @@ export default function PostWorkoutScreen() {
                 </View>
               </View>
 
-              {/* Action buttons — outside cardRef so excluded from exported image */}
+              {/* Action buttons - outside cardRef so excluded from exported image */}
               <View style={{ flexDirection: 'row', justifyContent: 'center', gap: 8, marginTop: 12 }}>
                 <Pressable
                   onPress={handleShare}

@@ -127,7 +127,7 @@ export default function QuickWorkoutScreen() {
   useEffect(() => { loggedExercisesRef.current = loggedExercises; }, [loggedExercises]);
 
   // Force-save workout state when app goes to background (covers force-close)
-  // Timer keeps running via epoch-based elapsed calculation — no pause/resume needed
+  // Timer keeps running via epoch-based elapsed calculation - no pause/resume needed
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'background' || nextState === 'inactive') {
@@ -714,7 +714,7 @@ export default function QuickWorkoutScreen() {
       restartTimerRef.current = setTimeout(() => setConfirmRestart(false), 3000);
       return;
     }
-    // Second tap — restart
+    // Second tap - restart
     setConfirmRestart(false);
     if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
     const initial: LoggedExercise[] = loggedExercises.map((ex) => ({
@@ -1291,7 +1291,7 @@ export default function QuickWorkoutScreen() {
                 <Pressable onPress={() => setAddExerciseOpen(true)} hitSlop={12} style={{ padding: 4 }}>
                   <Ionicons name="add-outline" size={24} color={theme.chrome} />
                 </Pressable>
-                {/* Restart — two-tap confirm */}
+                {/* Restart - two-tap confirm */}
                 <Pressable onPress={handleRestart} hitSlop={12} style={{ padding: 4 }}>
                   <Ionicons name="refresh-outline" size={22} color={confirmRestart ? SemanticColors.danger : theme.chrome} />
                 </Pressable>
@@ -1364,7 +1364,7 @@ export default function QuickWorkoutScreen() {
               }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
                   <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>
-                    Warm-Up — 10 min
+                    Warm-Up · 10 min
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                     <Pressable onPress={startFromWarmup} disabled={workoutStarted} hitSlop={8} style={{ backgroundColor: workoutStarted ? theme.chrome : theme.text, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 }}>
@@ -1379,7 +1379,7 @@ export default function QuickWorkoutScreen() {
                   5 min cardio + dynamic stretching
                 </Text>
                 <Text style={{ fontSize: 12, fontWeight: '600', color: theme.chrome, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
-                  Cardio — 5 min
+                  Cardio · 5 min
                 </Text>
                 {warmup.cardio.map((w, i) => {
                   const key = `c-${i}`;
@@ -1396,7 +1396,7 @@ export default function QuickWorkoutScreen() {
                   );
                 })}
                 <Text style={{ fontSize: 12, fontWeight: '600', color: theme.chrome, textTransform: 'uppercase', letterSpacing: 1, marginTop: 8, marginBottom: 8 }}>
-                  Dynamic Stretching — 5 min
+                  Dynamic Stretching · 5 min
                 </Text>
                 {warmup.mobility.map((w, i) => {
                   const key = `m-${i}`;
@@ -1457,7 +1457,7 @@ export default function QuickWorkoutScreen() {
                   </Pressable>
                 )}
                 <View style={{ flex: 1, opacity: isActive ? 0.85 : 1 }}>
-                {/* Superset vertical connector — left-aligned under exercise number */}
+                {/* Superset vertical connector - left-aligned under exercise number */}
                 {!isFirstOfSuperset && isInSuperset && !reorderMode && (
                   <Pressable
                     onPress={() => {
@@ -1623,7 +1623,7 @@ export default function QuickWorkoutScreen() {
         {/* Bottom bar: Play | Timer (abs center) | Rest + Finish */}
         <View style={{ backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border, paddingHorizontal: 24, paddingTop: 10, paddingBottom: 28 }}>
           <View style={{ position: 'relative', height: 36 }}>
-            {/* Timer — absolutely centered, never moves */}
+            {/* Timer - absolutely centered, never moves */}
             <Pressable
               onPress={() => {
                 if (!workoutStarted && countdown === null) {
@@ -1713,7 +1713,7 @@ export default function QuickWorkoutScreen() {
               </Pressable>
             </View>
 
-            {/* Rest timer pill — only when workout started */}
+            {/* Rest timer pill - only when workout started */}
             {workoutStarted && <Pressable
               onPress={() => {
                 if (isResting) {

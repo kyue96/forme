@@ -157,7 +157,7 @@ export default function SocialScreen() {
         }
       />
 
-      {/* FAB — create post */}
+      {/* FAB - create post */}
       <Pressable
         onPress={() => router.push('/create-post')}
         style={{

@@ -42,7 +42,7 @@ export default function ShareCardScreen() {
       const asset = await MediaLibrary.createAssetAsync(uri);
       await Share.share({
         url: asset.uri,
-        message: `Just finished ${dayName} — ${exercises.length} exercises, ${sessionTotalSets} sets in ${durationMinutes} min`,
+        message: `Just finished ${dayName}: ${exercises.length} exercises, ${sessionTotalSets} sets in ${durationMinutes} min`,
       });
     } catch {}
   }, [dayName, exercises.length, sessionTotalSets, durationMinutes]);

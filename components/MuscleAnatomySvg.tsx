@@ -22,7 +22,7 @@ const VIEWBOX_WIDTH = 200;
 const VIEWBOX_HEIGHT = 360;
 
 const MUSCLE_REGIONS: MuscleRegion[] = [
-  // Chest — two rounded rects across upper torso
+  // Chest - two rounded rects across upper torso
   {
     name: 'Chest',
     type: 'path',
@@ -30,7 +30,7 @@ const MUSCLE_REGIONS: MuscleRegion[] = [
       d: 'M70,105 Q75,95 100,95 Q125,95 130,105 L130,130 Q125,138 100,140 Q75,138 70,130 Z',
     },
   },
-  // Shoulders — left
+  // Shoulders - left
   {
     name: 'Shoulders',
     type: 'path',
@@ -38,7 +38,7 @@ const MUSCLE_REGIONS: MuscleRegion[] = [
       d: 'M55,90 Q50,85 48,95 L48,115 Q50,120 58,118 L65,105 Q65,95 55,90 Z',
     },
   },
-  // Shoulders — right (mirrored)
+  // Shoulders - right (mirrored)
   {
     name: 'Shoulders',
     type: 'path',
@@ -46,7 +46,7 @@ const MUSCLE_REGIONS: MuscleRegion[] = [
       d: 'M145,90 Q150,85 152,95 L152,115 Q150,120 142,118 L135,105 Q135,95 145,90 Z',
     },
   },
-  // Arms — left upper arm
+  // Arms - left upper arm
   {
     name: 'Arms',
     type: 'path',
@@ -54,7 +54,7 @@ const MUSCLE_REGIONS: MuscleRegion[] = [
       d: 'M45,118 L38,170 Q37,178 43,178 L55,178 Q60,178 58,170 L58,118 Z',
     },
   },
-  // Arms — right upper arm
+  // Arms - right upper arm
   {
     name: 'Arms',
     type: 'path',
@@ -62,7 +62,7 @@ const MUSCLE_REGIONS: MuscleRegion[] = [
       d: 'M155,118 L162,170 Q163,178 157,178 L145,178 Q140,178 142,170 L142,118 Z',
     },
   },
-  // Arms — left forearm
+  // Arms - left forearm
   {
     name: 'Arms',
     type: 'path',
@@ -70,7 +70,7 @@ const MUSCLE_REGIONS: MuscleRegion[] = [
       d: 'M36,180 L30,230 Q29,236 35,236 L47,236 Q52,236 50,230 L46,180 Z',
     },
   },
-  // Arms — right forearm
+  // Arms - right forearm
   {
     name: 'Arms',
     type: 'path',
@@ -86,7 +86,7 @@ const MUSCLE_REGIONS: MuscleRegion[] = [
       d: 'M78,142 Q80,140 100,140 Q120,140 122,142 L122,195 Q120,200 100,202 Q80,200 78,195 Z',
     },
   },
-  // Back — shown as two strips along the sides of the torso (visible from front as lats)
+  // Back - shown as two strips along the sides of the torso (visible from front as lats)
   {
     name: 'Back',
     type: 'path',
@@ -101,7 +101,7 @@ const MUSCLE_REGIONS: MuscleRegion[] = [
       d: 'M138,108 L140,115 L138,170 Q135,175 130,170 L130,130 L132,108 Z',
     },
   },
-  // Legs — left thigh
+  // Legs - left thigh
   {
     name: 'Legs',
     type: 'path',
@@ -109,7 +109,7 @@ const MUSCLE_REGIONS: MuscleRegion[] = [
       d: 'M75,205 L70,280 Q69,288 78,288 L95,288 Q100,288 99,280 L100,205 Z',
     },
   },
-  // Legs — right thigh
+  // Legs - right thigh
   {
     name: 'Legs',
     type: 'path',
@@ -117,7 +117,7 @@ const MUSCLE_REGIONS: MuscleRegion[] = [
       d: 'M125,205 L130,280 Q131,288 122,288 L105,288 Q100,288 101,280 L100,205 Z',
     },
   },
-  // Legs — left shin
+  // Legs - left shin
   {
     name: 'Legs',
     type: 'path',
@@ -125,7 +125,7 @@ const MUSCLE_REGIONS: MuscleRegion[] = [
       d: 'M72,292 L70,345 Q70,352 78,352 L92,352 Q98,352 97,345 L95,292 Z',
     },
   },
-  // Legs — right shin
+  // Legs - right shin
   {
     name: 'Legs',
     type: 'path',

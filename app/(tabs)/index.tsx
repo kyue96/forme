@@ -33,7 +33,7 @@ import { useHealthKit } from '@/hooks/useHealthKit';
 const MOTIVATIONAL = [
   'Your muscles grow during rest, not during the workout.',
   'Sleep is the most underrated performance enhancer.',
-  'Hydrate well — your body needs it for recovery.',
+  'Hydrate well. Your body needs it for recovery.',
   'Stretching today prevents injury tomorrow.',
   'Recovery is not optional. It is part of the program.',
 ];
@@ -104,7 +104,7 @@ export default function HomeScreen() {
   const avatarColor = useUserStore((s) => s.avatarColor);
   const focusCardColor = avatarColor || '#F59E0B';
 
-  // Theme switcher removed — use Settings screen instead
+  // Theme switcher removed - use Settings screen instead
 
   const weekDates = getWeekDates();
   const now = new Date();
@@ -239,7 +239,7 @@ export default function HomeScreen() {
 
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
-  // Stale session check — prompt user if active workout is older than 24 hours
+  // Stale session check - prompt user if active workout is older than 24 hours
   const staleCheckDone = useRef(false);
   useEffect(() => {
     if (staleCheckDone.current || !activeWorkout) return;
@@ -354,7 +354,7 @@ export default function HomeScreen() {
       const totalSets = todaySession.exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).length, 0);
       await Share.share({
         url: asset.uri,
-        message: `Just finished ${todaySession.day_name} — ${todaySession.exercises.length} exercises, ${totalSets} sets in ${todaySession.duration_minutes} min`,
+        message: `Just finished ${todaySession.day_name}: ${todaySession.exercises.length} exercises, ${totalSets} sets in ${todaySession.duration_minutes} min`,
       });
     } catch {}
   };
@@ -527,7 +527,7 @@ export default function HomeScreen() {
 
           ) : (
             <View>
-              {/* Focus card — shows resume state when workout is active */}
+              {/* Focus card - shows resume state when workout is active */}
               {activeWorkout && !todayCompleted ? (() => {
                 const completedSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.filter((s) => s.completed).length, 0);
                 const totalSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.length, 0);
@@ -642,7 +642,7 @@ export default function HomeScreen() {
             >
               <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text, marginBottom: 4 }}>Total Cal</Text>
               <Text allowFontScaling style={{ fontSize: 24, fontWeight: '800', color: theme.text }}>
-                {todayCalories != null ? `${todayCalories}` : '—'}
+                {todayCalories != null ? `${todayCalories}` : '-'}
               </Text>
             </Pressable>
             <Pressable
@@ -664,7 +664,7 @@ export default function HomeScreen() {
             >
               <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text, marginBottom: 4 }}>Steps</Text>
               <Text allowFontScaling style={{ fontSize: 24, fontWeight: '800', color: theme.text }}>
-                {steps != null ? formatNumber(steps) : '—'}
+                {steps != null ? formatNumber(steps) : '-'}
               </Text>
             </View>
           </View>
@@ -685,7 +685,7 @@ export default function HomeScreen() {
                   <Ionicons name="checkmark-circle" size={16} color="#22C55E" />
                   <Text style={{ fontSize: 13, color: theme.text, flex: 1 }}>
                     {act.type}{act.duration_minutes ? ` · ${act.duration_minutes} min` : ''}
-                    {act.notes ? ` — ${act.notes}` : ''}
+                    {act.notes ? ` · ${act.notes}` : ''}
                   </Text>
                 </View>
               ))}

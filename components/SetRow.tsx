@@ -12,7 +12,7 @@ const activeNextHandler: { current: (() => void) | null } = { current: null };
 
 export const SET_ROW_ACCESSORY_ID = 'setRowKeyboard';
 
-/** Render once in the parent screen — shared across all SetRow inputs */
+/** Render once in the parent screen - shared across all SetRow inputs */
 export function SetRowKeyboardAccessory() {
   if (Platform.OS !== 'ios') return null;
   return (

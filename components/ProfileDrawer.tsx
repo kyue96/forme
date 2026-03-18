@@ -234,7 +234,7 @@ export function ProfileDrawer() {
     { label: 'Workouts', value: String(totalWorkouts), icon: 'barbell-outline' as const },
     { label: 'Streak', value: `${streak}d`, icon: 'flame-outline' as const },
     { label: `Vol (${weightUnit})`, value: formatVolume(totalVolume), icon: 'trending-up-outline' as const },
-    { label: 'Avg cal', value: avgCalories != null ? String(avgCalories) : '—', icon: 'nutrition-outline' as const },
+    { label: 'Avg cal', value: avgCalories != null ? String(avgCalories) : '-', icon: 'nutrition-outline' as const },
   ];
 
   if (!visible) return null;
@@ -424,7 +424,7 @@ export function ProfileDrawer() {
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingVertical: 16 }}>
                 <View>
                   <Text style={{ fontSize: 16, fontWeight: '800', color: theme.background }}>Forme Pro</Text>
-                  <Text style={{ fontSize: 12, color: theme.background + '80', marginTop: 1 }}>$9.99/month — unlock all features</Text>
+                  <Text style={{ fontSize: 12, color: theme.background + '80', marginTop: 1 }}>$9.99/month · unlock all features</Text>
                 </View>
                 <Ionicons name={proExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={theme.background + '80'} />
               </View>

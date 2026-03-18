@@ -61,7 +61,7 @@ export default function SessionViewScreen() {
       const asset = await MediaLibrary.createAssetAsync(uri);
       await Share.share({
         url: asset.uri,
-        message: `Just finished ${params.dayName ?? 'my workout'} — ${exercises.length} exercises, ${sessionTotalSets} sets in ${durationMinutes} min`,
+        message: `Just finished ${params.dayName ?? 'my workout'}: ${exercises.length} exercises, ${sessionTotalSets} sets in ${durationMinutes} min`,
       });
     } catch {}
   }, [params.dayName, exercises.length, sessionTotalSets, durationMinutes]);

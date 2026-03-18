@@ -12,7 +12,7 @@ interface ActiveWorkout {
   elapsedMs: number; // ms elapsed before last pause
   isPaused: boolean;
   warmupDone: boolean;
-  createdAt: number; // epoch ms — when the session was first created
+  createdAt: number; // epoch ms - when the session was first created
 }
 
 interface WorkoutStore {
