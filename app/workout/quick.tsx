@@ -81,9 +81,9 @@ export default function QuickWorkoutScreen() {
   const [countdown, setCountdown] = useState<number | null>(null);
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [reorderMode, setReorderMode] = useState(false);
-  const [supersetMode, setSupersetMode] = useState(false);
-  const [selectedForSuperset, setSelectedForSuperset] = useState<number[]>([]);
   const [confirmRestart, setConfirmRestart] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedForSuperset, setSelectedForSuperset] = useState<number[]>([]);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -374,29 +374,17 @@ export default function QuickWorkoutScreen() {
     else if (activeExercise !== null && activeExercise > exIdx) setActiveExercise(activeExercise - 1);
   };
 
-  const toggleSupersetSelection = (exIdx: number) => {
-    setSelectedForSuperset((prev) =>
-      prev.includes(exIdx) ? prev.filter((i) => i !== exIdx) : prev.length < 2 ? [...prev, exIdx] : prev
-    );
-  };
-
-  const confirmSuperset = () => {
-    if (selectedForSuperset.length !== 2) return;
+  const linkSelectedSuperset = (idxA: number, idxB: number) => {
     const groupId = String(Date.now());
-    const [first, second] = [...selectedForSuperset].sort((a, b) => a - b);
     animateLayout();
     setLoggedExercises((prev) => {
-      const tagged = prev.map((ex, i) =>
-        i === first || i === second ? { ...ex, supersetGroupId: groupId } : ex
-      );
-      if (second === first + 1) return tagged;
-      const secondEx = tagged[second];
-      const without = tagged.filter((_, i) => i !== second);
-      without.splice(first + 1, 0, secondEx);
-      return without;
+      const updated = [...prev];
+      updated[idxA] = { ...updated[idxA], supersetGroupId: groupId };
+      updated[idxB] = { ...updated[idxB], supersetGroupId: groupId };
+      return updated;
     });
+    setSelectionMode(false);
     setSelectedForSuperset([]);
-    setSupersetMode(false);
   };
 
   const unlinkSuperset = (exIdx: number) => {
@@ -957,25 +945,18 @@ export default function QuickWorkoutScreen() {
               >
                 <Ionicons name="checkmark-circle" size={26} color={SemanticColors.success} />
               </Pressable>
-            ) : supersetMode ? (
-              <>
-                <Pressable
-                  onPress={() => { setSupersetMode(false); setSelectedForSuperset([]); }}
-                  hitSlop={12}
-                  style={{ padding: 4 }}
-                >
-                  <Ionicons name="close-outline" size={26} color={theme.chrome} />
-                </Pressable>
-                {selectedForSuperset.length === 2 && (
-                  <Pressable onPress={confirmSuperset} hitSlop={12} style={{ padding: 4 }}>
-                    <Ionicons name="checkmark-circle" size={26} color={SemanticColors.success} />
-                  </Pressable>
-                )}
-              </>
+            ) : selectionMode ? (
+              <Pressable
+                onPress={() => { setSelectionMode(false); setSelectedForSuperset([]); animateLayout(); }}
+                hitSlop={12}
+                style={{ padding: 4 }}
+              >
+                <Ionicons name="close-outline" size={26} color={theme.chrome} />
+              </Pressable>
             ) : (
               <>
-                {/* Link superset */}
-                <Pressable onPress={() => { setSupersetMode(true); animateLayout(); }} hitSlop={12} style={{ padding: 4 }}>
+                {/* Superset link */}
+                <Pressable onPress={() => { setSelectionMode(true); animateLayout(); }} hitSlop={12} style={{ padding: 4 }}>
                   <Ionicons name="link-outline" size={22} color={theme.chrome} />
                 </Pressable>
                 {/* Add exercise */}
@@ -1024,6 +1005,25 @@ export default function QuickWorkoutScreen() {
                     <Ionicons name="menu" size={22} color={theme.chrome} />
                   </Pressable>
                 )}
+                {selectionMode && (
+                  <Pressable
+                    onPress={() => {
+                      setSelectedForSuperset((prev) => {
+                        if (prev.includes(exIdx)) return prev.filter((i) => i !== exIdx);
+                        if (prev.length >= 2) return prev;
+                        return [...prev, exIdx];
+                      });
+                    }}
+                    hitSlop={8}
+                    style={{ paddingRight: 10, paddingVertical: 12 }}
+                  >
+                    <Ionicons
+                      name={selectedForSuperset.includes(exIdx) ? 'checkmark-circle' : 'ellipse-outline'}
+                      size={22}
+                      color={selectedForSuperset.includes(exIdx) ? SemanticColors.success : theme.textSecondary}
+                    />
+                  </Pressable>
+                )}
                 <View style={{ flex: 1, opacity: isActive ? 0.85 : 1 }}>
                 {/* Superset vertical connector between exercises */}
                 {!isFirstOfSuperset && isInSuperset && !reorderMode && (
@@ -1061,15 +1061,6 @@ export default function QuickWorkoutScreen() {
                       disabled={isActive}
                       style={{ flexDirection: 'row', alignItems: 'center', marginBottom: isExpanded ? 12 : 0 }}
                     >
-                      {supersetMode && (
-                        <Pressable onPress={() => toggleSupersetSelection(exIdx)} style={{ marginRight: 8 }}>
-                          <Ionicons
-                            name={selectedForSuperset.includes(exIdx) ? 'checkbox' : 'square-outline'}
-                            size={20}
-                            color={selectedForSuperset.includes(exIdx) ? theme.chrome : theme.textSecondary}
-                          />
-                        </Pressable>
-                      )}
                       <Text style={{
                         fontSize: 14,
                         fontWeight: '700',
@@ -1174,6 +1165,29 @@ export default function QuickWorkoutScreen() {
           }}
         />
         </KeyboardAvoidingView>
+
+        {/* Superset selection confirm button */}
+        {selectionMode && selectedForSuperset.length === 2 && (
+          <Pressable
+            onPress={() => linkSelectedSuperset(selectedForSuperset[0], selectedForSuperset[1])}
+            style={{
+              position: 'absolute',
+              bottom: 110,
+              alignSelf: 'center',
+              backgroundColor: SemanticColors.success,
+              borderRadius: 24,
+              paddingHorizontal: 24,
+              paddingVertical: 12,
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              zIndex: 10,
+            }}
+          >
+            <Ionicons name="checkmark" size={18} color="#fff" />
+            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Link as Superset</Text>
+          </Pressable>
+        )}
 
         {/* Bottom bar: Play | Timer (abs center) | Rest + Finish */}
         <View style={{ backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border, paddingHorizontal: 24, paddingTop: 10, paddingBottom: 28 }}>
