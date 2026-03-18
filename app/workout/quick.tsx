@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
+  ActivityIndicator,
   Alert,
+  AppState,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -17,6 +19,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
@@ -32,7 +35,9 @@ import {
   isBodyweightExercise,
   getInstructions,
 } from '@/lib/exercise-data';
-import { formatTimeMs, formatTime, animateLayout } from '@/lib/utils';
+import { formatTimeMs, formatTime, animateLayout, animateLayoutSlow } from '@/lib/utils';
+import { getWarmupRoutine } from '@/lib/warmup-data';
+import * as Notifications from 'expo-notifications';
 
 type Phase = 'pick' | 'workout';
 
@@ -49,6 +54,7 @@ export default function QuickWorkoutScreen() {
     resumeWorkout,
     clearWorkout,
     getElapsedMs,
+    setWarmupDone: storeSetWarmupDone,
   } = useWorkoutStore();
 
   const [phase, setPhase] = useState<Phase>(() => {
@@ -58,7 +64,11 @@ export default function QuickWorkoutScreen() {
 
   // --- Exercise picker state ---
   const [search, setSearch] = useState('');
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
+  const confirmStartRef = useRef(false);
+  const [confirmStartTick, setConfirmStartTick] = useState(0);
   const [workoutName, setWorkoutName] = useState(activeWorkout?.dayName ?? 'My Workout');
   const [editingName, setEditingName] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
@@ -84,6 +94,9 @@ export default function QuickWorkoutScreen() {
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedForSuperset, setSelectedForSuperset] = useState<number[]>([]);
+  const [unlinkConfirmIdx, setUnlinkConfirmIdx] = useState<number | null>(null);
+  const [warmupChecked, setWarmupChecked] = useState<Record<string, boolean>>({});
+  const [warmupCollapsed, setWarmupCollapsed] = useState(activeWorkout?.warmupDone ?? false);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -92,16 +105,44 @@ export default function QuickWorkoutScreen() {
   const [customName, setCustomName] = useState('');
   const [customMuscleGroup, setCustomMuscleGroup] = useState('Chest');
   const [customEquipment, setCustomEquipment] = useState('');
+  const [scanning, setScanning] = useState(false);
 
   // Rest timer state
   const [restRemaining, setRestRemaining] = useState(0);
   const restIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const startedRef = useRef(false);
+  const isResuming = useRef(activeWorkout?.dayIndex === -1 && getElapsedMs() > 0);
   const swipeableRefs = useRef<Record<number, Swipeable | null>>({});
   const inputRefs = useRef<Record<string, TextInput | null>>({});
+  const listRef = useRef<any>(null);
+  const warmupAutoDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restNotificationIdRef = useRef<string | null>(null);
   const isPaused = activeWorkout?.isPaused ?? false;
   const isResting = restRemaining > 0;
+  const warmupDone = activeWorkout?.warmupDone ?? false;
+
+  // Keep a ref to loggedExercises so the AppState listener always has fresh data
+  const loggedExercisesRef = useRef(loggedExercises);
+  useEffect(() => { loggedExercisesRef.current = loggedExercises; }, [loggedExercises]);
+
+  // Force-save workout state when app goes to background (covers force-close)
+  // Timer keeps running via epoch-based elapsed calculation — no pause/resume needed
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        // Sync latest local loggedExercises to the store before the OS suspends us
+        const current = loggedExercisesRef.current;
+        if (current.length > 0) {
+          updateExercises(current);
+        }
+      } else if (nextState === 'active') {
+        // Recalculate display immediately when returning to foreground
+        setDisplayMs(getElapsedMs());
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // Timer tick
   useEffect(() => {
@@ -138,6 +179,89 @@ export default function QuickWorkoutScreen() {
     };
   }, []);
 
+  // --- Warm-up helpers ---
+  const dismissWarmup = () => {
+    if (warmupAutoDismissRef.current) clearTimeout(warmupAutoDismissRef.current);
+    animateLayoutSlow();
+    setWarmupCollapsed(true);
+  };
+
+  const startFromWarmup = () => {
+    if (!workoutStarted && countdown === null) {
+      setCountdown(3);
+      const countdownInterval = setInterval(() => {
+        setCountdown((prev) => {
+          if (prev === null || prev <= 1) {
+            clearInterval(countdownInterval);
+            setWorkoutStarted(true);
+            setCountdown(null);
+            resumeWorkout();
+            return null;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    }
+    if (warmupAutoDismissRef.current) clearTimeout(warmupAutoDismissRef.current);
+    warmupAutoDismissRef.current = setTimeout(() => {
+      dismissWarmup();
+    }, 11 * 60 * 1000);
+  };
+
+  // Auto-collapse warmup when all items checked
+  useEffect(() => {
+    if (phase !== 'workout' || warmupCollapsed) return;
+    const warmup = getWarmupRoutine('full');
+    const totalItems = warmup.cardio.length + warmup.mobility.length;
+    const checkedCount = Object.values(warmupChecked).filter(Boolean).length;
+    if (totalItems > 0 && checkedCount >= totalItems) {
+      const timer = setTimeout(() => {
+        dismissWarmup();
+        setTimeout(() => {
+          setActiveExercise(0);
+          animateLayout();
+          setTimeout(() => {
+            const ref = inputRefs.current['0-0-w'];
+            if (ref) ref.focus();
+          }, 400);
+        }, 350);
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [warmupChecked, warmupCollapsed, phase]);
+
+  // --- Notification helpers ---
+  const requestNotificationPermissions = async () => {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') {
+      await Notifications.requestPermissionsAsync();
+    }
+  };
+
+  const scheduleRestNotification = async (seconds: number) => {
+    try {
+      await requestNotificationPermissions();
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Rest Timer',
+          body: 'Rest is over.',
+          sound: true,
+        },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds, repeats: false },
+      });
+      restNotificationIdRef.current = id;
+    } catch {}
+  };
+
+  const cancelRestNotification = async () => {
+    if (restNotificationIdRef.current) {
+      try {
+        await Notifications.cancelScheduledNotificationAsync(restNotificationIdRef.current);
+      } catch {}
+      restNotificationIdRef.current = null;
+    }
+  };
+
   const loadPreviousSets = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -168,22 +292,83 @@ export default function QuickWorkoutScreen() {
     if (completedSets.length === 0) return null;
     const lastWeight = completedSets[0].weight!;
     const lastReps = completedSets[0].reps;
-    if (lastReps > 12) return Math.round((lastWeight * 1.05) / 2.5) * 2.5;
-    if (lastReps < 6) return Math.round((lastWeight * 0.9) / 2.5) * 2.5;
+
+    // Determine weight increment based on exercise name
+    let increment = 5; // default
+    const lower = exerciseName.toLowerCase();
+    if (lower.includes('cable') || lower.includes('machine')) {
+      increment = 10;
+    } else if (lower.includes('dumbbell') || lower.includes('barbell')) {
+      increment = 5;
+    }
+
+    if (lastReps > 12) return Math.round((lastWeight * 1.05) / increment) * increment;
+    if (lastReps < 6) return Math.round((lastWeight * 0.9) / increment) * increment;
     return lastWeight;
   };
 
+  const handleCameraScan = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Camera access is required to scan equipment.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        quality: 0.5,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets?.[0]?.base64) return;
+
+      setScanning(true);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/identify-machine`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({ image: result.assets[0].base64 }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.name) {
+        // Pre-fill the custom exercise form with the identified info
+        setCustomName(data.name);
+        setCustomMuscleGroup(data.muscleGroup || 'Chest');
+        setCustomEquipment(data.equipment || '');
+        setShowCreateCustom(true);
+      } else {
+        Alert.alert('Could not identify', 'Unable to identify the equipment. Try taking a clearer photo or create a custom exercise manually.');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to scan equipment. Please try again.');
+    } finally {
+      setScanning(false);
+    }
+  };
 
   const startRestTimer = (manual = false) => {
     if (!manual && !restTimerEnabled) return;
     if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+    cancelRestNotification();
     setRestRemaining(restTimerDuration);
+    scheduleRestNotification(restTimerDuration);
     restIntervalRef.current = setInterval(() => {
       setRestRemaining((prev) => {
         if (prev <= 1) {
           if (restIntervalRef.current) clearInterval(restIntervalRef.current);
           restIntervalRef.current = null;
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          restNotificationIdRef.current = null; // Already fired
           return 0;
         }
         return prev - 1;
@@ -195,12 +380,15 @@ export default function QuickWorkoutScreen() {
     if (restIntervalRef.current) clearInterval(restIntervalRef.current);
     restIntervalRef.current = null;
     setRestRemaining(0);
+    cancelRestNotification();
   };
 
   // --- Exercise picker logic ---
-  const filteredExercises = search.trim()
-    ? EXERCISE_DATABASE.filter((e) => e.name.toLowerCase().includes(search.toLowerCase()))
-    : EXERCISE_DATABASE;
+  const filteredExercises = EXERCISE_DATABASE.filter((e) => {
+    if (activeFilters.size > 0 && !activeFilters.has(e.category)) return false;
+    if (search.trim() && !e.name.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
 
   const toggleExercise = (name: string) => {
     animateLayout();
@@ -213,7 +401,7 @@ export default function QuickWorkoutScreen() {
     if (selectedNames.length === 0) return;
     const initial: LoggedExercise[] = selectedNames.map((name) => ({
       name,
-      sets: [{ weight: null, reps: 0, completed: false }],
+      sets: Array.from({ length: 3 }, () => ({ weight: null, reps: 0, completed: false })),
     }));
     startWorkout(-1, workoutName.trim() || 'My Workout', 'Custom', initial);
     setLoggedExercises(initial);
@@ -221,6 +409,15 @@ export default function QuickWorkoutScreen() {
     setPhase('workout');
     // Start paused
     setTimeout(() => pauseWorkout(), 50);
+  };
+
+  // Scroll expanded card to top of visible area
+  const scrollToExercise = (exIdx: number) => {
+    setTimeout(() => {
+      try {
+        listRef.current?.scrollToIndex({ index: exIdx, animated: true, viewOffset: 0 });
+      } catch {}
+    }, 350);
   };
 
   // --- Workout logic ---
@@ -233,21 +430,74 @@ export default function QuickWorkoutScreen() {
     }
     setLoggedExercises((prev) => {
       const updated = [...prev];
-      updated[exIdx] = {
-        ...updated[exIdx],
-        sets: updated[exIdx].sets.map((s, i) => (i === setIdx ? data : s)),
-      };
+      const oldSet = updated[exIdx].sets[setIdx];
+      const weightChanged = data.weight !== oldSet.weight && data.weight !== null;
+      const newSets = updated[exIdx].sets.map((s, i) => (i === setIdx ? data : s));
+
+      // Auto-flow weight forward to subsequent unfilled sets (no reps entered yet)
+      if (weightChanged) {
+        for (let i = setIdx + 1; i < newSets.length; i++) {
+          if (newSets[i].reps === 0 && !newSets[i].completed) {
+            newSets[i] = { ...newSets[i], weight: data.weight };
+          }
+        }
+      }
+
+      updated[exIdx] = { ...updated[exIdx], sets: newSets };
       return updated;
     });
+  };
+
+  // Auto-complete filled-but-unchecked sets when collapsing an exercise card
+  const autoCompleteSetsOnCollapse = (exIdx: number) => {
+    const exercise = loggedExercises[exIdx];
+    if (!exercise) return;
+    const isBW = isBodyweightExercise(exercise.name);
+    let anyChanged = false;
+    const updatedSets = exercise.sets.map((s) => {
+      if (s.completed) return s;
+      const hasWeight = isBW || (s.weight != null && s.weight > 0);
+      const hasReps = s.reps > 0;
+      if (hasWeight && hasReps) {
+        anyChanged = true;
+        return { ...s, completed: true };
+      }
+      return s;
+    });
+    if (anyChanged) {
+      setLoggedExercises((prev) => {
+        const updated = [...prev];
+        updated[exIdx] = { ...updated[exIdx], sets: updatedSets };
+        return updated;
+      });
+    }
   };
 
   const completeSet = (exIdx: number, setIdx: number) => {
     const currentSet = loggedExercises[exIdx].sets[setIdx];
     updateSet(exIdx, setIdx, { ...currentSet, completed: true });
-    // Prefill next set's weight if it's still empty
+    // Smart weight suggestion for next set based on current set's reps
     const nextSet = loggedExercises[exIdx].sets[setIdx + 1];
-    if (nextSet && nextSet.weight == null && currentSet.weight != null) {
-      updateSet(exIdx, setIdx + 1, { ...nextSet, weight: currentSet.weight });
+    if (nextSet && currentSet.weight != null) {
+      let suggestedWeight = currentSet.weight;
+      const weightStep = weightUnit === 'lbs' ? 5 : 2.5;
+
+      // Apply smart suggestions based on rep range
+      if (currentSet.reps < 5) {
+        // Low reps: decrease weight by one plate
+        suggestedWeight = Math.max(0, currentSet.weight - weightStep);
+      } else if (currentSet.reps > 12) {
+        // High reps: increase weight by one plate
+        suggestedWeight = currentSet.weight + weightStep;
+      }
+      // Otherwise (5-12 reps): keep same weight
+
+      // Prefill weight if still empty, otherwise set as suggestion
+      if (nextSet.weight == null) {
+        updateSet(exIdx, setIdx + 1, { ...nextSet, weight: suggestedWeight, suggestedWeight });
+      } else {
+        updateSet(exIdx, setIdx + 1, { ...nextSet, suggestedWeight });
+      }
     }
     // Auto-advance to next exercise when all sets complete
     const updatedSets = loggedExercises[exIdx].sets.map((s, i) =>
@@ -318,6 +568,7 @@ export default function QuickWorkoutScreen() {
       setTimeout(() => inputRefs.current[`${exIdx}-${newSetIdx}-r`]?.focus(), 100);
       return updated;
     });
+    scrollToExercise(exIdx);
   };
 
   const addDropSet = (exIdx: number) => {
@@ -400,7 +651,7 @@ export default function QuickWorkoutScreen() {
 
   const addExerciseDuringWorkout = (name: string) => {
     animateLayout();
-    const newEx: LoggedExercise = { name, sets: [{ weight: null, reps: 0, completed: false }] };
+    const newEx: LoggedExercise = { name, sets: Array.from({ length: 3 }, () => ({ weight: null, reps: 0, completed: false })) };
     setLoggedExercises((prev) => [...prev, newEx]);
     setAddExerciseOpen(false);
     setExerciseSearch('');
@@ -482,6 +733,10 @@ export default function QuickWorkoutScreen() {
     setConfirmFinish(false);
     setActiveExercise(0);
     skipRestTimer();
+    // Reset warmup
+    setWarmupCollapsed(false);
+    setWarmupChecked({});
+    storeSetWarmupDone(false);
     setTimeout(() => pauseWorkout(), 50);
   };
 
@@ -519,16 +774,35 @@ export default function QuickWorkoutScreen() {
           alignItems: 'center',
           justifyContent: 'space-between',
           paddingHorizontal: 20,
-          paddingVertical: 14,
-          backgroundColor: theme.surface,
+          paddingVertical: 10,
+          backgroundColor: theme.background,
           borderBottomWidth: 1,
           borderBottomColor: theme.border,
         }}>
           <Pressable onPress={handleExit} hitSlop={12} style={{ padding: 4 }}>
             <Ionicons name="chevron-back" size={24} color={theme.text} />
           </Pressable>
-          <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text }}>Choose Exercises</Text>
-          <View style={{ width: 32 }} />
+          <Text style={{ fontSize: 17, fontWeight: '800', color: theme.text }}>Choose Exercises</Text>
+          <Pressable
+            onPress={() => {
+              if (confirmStartRef.current) {
+                startQuickWorkout();
+              } else {
+                if (selectedNames.length === 0) return;
+                confirmStartRef.current = true;
+                setTimeout(() => { confirmStartRef.current = false; setConfirmStartTick((t) => t + 1); }, 3000);
+                setConfirmStartTick((t) => t + 1);
+              }
+            }}
+            hitSlop={12}
+            style={{ padding: 4 }}
+          >
+            <Ionicons
+              name={confirmStartRef.current ? 'checkmark-circle' : 'checkmark'}
+              size={26}
+              color={confirmStartRef.current ? '#22C55E' : (selectedNames.length > 0 ? theme.text : theme.textSecondary)}
+            />
+          </Pressable>
         </View>
 
         {/* Workout name */}
@@ -599,7 +873,33 @@ export default function QuickWorkoutScreen() {
                 <Ionicons name="close-circle" size={18} color={theme.textSecondary} />
               </Pressable>
             )}
+            <Pressable
+              onPress={() => { animateLayout(); setShowFilterMenu(!showFilterMenu); }}
+              hitSlop={8}
+              style={{ paddingLeft: 8 }}
+            >
+              <Ionicons name="filter" size={18} color={activeFilters.size > 0 ? '#F59E0B' : theme.textSecondary} />
+            </Pressable>
           </View>
+          {showFilterMenu && (
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                {EXERCISE_CATEGORIES.map((cat) => (
+                  <Pressable
+                    key={cat}
+                    onPress={() => { animateLayout(); setActiveFilters((prev) => { const next = new Set(prev); if (next.has(cat)) next.delete(cat); else next.add(cat); return next; }); }}
+                    style={{
+                      paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
+                      backgroundColor: activeFilters.has(cat) ? theme.text : theme.surface,
+                      borderWidth: 1, borderColor: activeFilters.has(cat) ? theme.text : theme.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '600', color: activeFilters.has(cat) ? theme.background : theme.textSecondary }}>{cat}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            </ScrollView>
+          )}
         </View>
 
 
@@ -609,18 +909,38 @@ export default function QuickWorkoutScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
-          {/* Create Custom Exercise button */}
-          <Pressable
-            onPress={() => setShowCreateCustom(true)}
-            style={{
-              flexDirection: 'row', alignItems: 'center', gap: 8,
-              paddingVertical: 12, paddingHorizontal: 12, marginBottom: 12,
-              borderRadius: 12, borderWidth: 1, borderColor: theme.border, borderStyle: 'dashed',
-            }}
-          >
-            <Ionicons name="add-circle-outline" size={20} color={theme.chrome} />
-            <Text style={{ fontSize: 14, fontWeight: '600', color: theme.chrome }}>Create Custom Exercise</Text>
-          </Pressable>
+          {/* Camera + Custom buttons */}
+          <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+            <Pressable
+              onPress={handleCameraScan}
+              style={{
+                flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                paddingVertical: 12,
+                borderRadius: 12, borderWidth: 1, borderColor: theme.border, borderStyle: 'dashed',
+              }}
+            >
+              <Ionicons name="camera-outline" size={20} color={theme.chrome} />
+              <Text style={{ fontSize: 14, fontWeight: '600', color: theme.chrome }}>Camera</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setShowCreateCustom(true)}
+              style={{
+                flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                paddingVertical: 12,
+                borderRadius: 12, borderWidth: 1, borderColor: theme.border, borderStyle: 'dashed',
+              }}
+            >
+              <Ionicons name="add-circle-outline" size={20} color={theme.chrome} />
+              <Text style={{ fontSize: 14, fontWeight: '600', color: theme.chrome }}>Custom</Text>
+            </Pressable>
+          </View>
+
+          {scanning && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}>
+              <ActivityIndicator size="small" color={theme.chrome} />
+              <Text style={{ fontSize: 13, color: theme.textSecondary }}>Identifying equipment...</Text>
+            </View>
+          )}
 
           {/* Custom exercises */}
           {customExercises.length > 0 && (
@@ -803,7 +1123,7 @@ export default function QuickWorkoutScreen() {
         </View>
 
         <BottomSheet visible={showCreateCustom} onClose={() => { setShowCreateCustom(false); setCustomName(''); setCustomEquipment(''); }}>
-          <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text, marginBottom: 16 }}>Create Custom Exercise</Text>
+          <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text, marginBottom: 16 }}>Custom Exercise</Text>
           <TextInput
             style={{ fontSize: 16, color: theme.text, backgroundColor: theme.background, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderColor: theme.border, marginBottom: 12 }}
             placeholder="Exercise name"
@@ -947,11 +1267,19 @@ export default function QuickWorkoutScreen() {
               </Pressable>
             ) : selectionMode ? (
               <Pressable
-                onPress={() => { setSelectionMode(false); setSelectedForSuperset([]); animateLayout(); }}
+                onPress={() => {
+                  if (selectedForSuperset.length === 2) {
+                    linkSelectedSuperset(selectedForSuperset[0], selectedForSuperset[1]);
+                  } else {
+                    setSelectionMode(false);
+                    setSelectedForSuperset([]);
+                    animateLayout();
+                  }
+                }}
                 hitSlop={12}
                 style={{ padding: 4 }}
               >
-                <Ionicons name="close-outline" size={26} color={theme.chrome} />
+                <Ionicons name="checkmark-circle" size={26} color={SemanticColors.success} />
               </Pressable>
             ) : (
               <>
@@ -977,12 +1305,116 @@ export default function QuickWorkoutScreen() {
 
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
         <DraggableFlatList
+          ref={listRef}
           data={loggedExercises}
-          keyExtractor={(_, i) => String(i)}
-          onDragEnd={({ data }) => { setLoggedExercises(data); animateLayout(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
+          keyExtractor={(item, i) => `${item.name}-${i}`}
+          onDragEnd={({ data }) => { setLoggedExercises(data); setActiveExercise(null); animateLayout(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
           contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 120 }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={() => { if (unlinkConfirmIdx !== null) setUnlinkConfirmIdx(null); }}
+          ListHeaderComponent={(() => {
+            const warmup = getWarmupRoutine('full');
+            const totalItems = warmup.cardio.length + warmup.mobility.length;
+            const checkedCount = Object.values(warmupChecked).filter(Boolean).length;
+            const allWarmupDone = totalItems > 0 && checkedCount >= totalItems;
+            const anySetCompleted = loggedExercises.some(ex => ex.sets.some(s => s.completed));
+
+            if (warmupCollapsed) {
+              return (
+                <Pressable
+                  onPress={() => { animateLayoutSlow(); setWarmupCollapsed(false); }}
+                  style={{
+                    marginBottom: 12,
+                    backgroundColor: theme.surface,
+                    borderRadius: 12,
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                    <Text style={{
+                      fontSize: 15,
+                      fontWeight: '700',
+                      color: theme.text,
+                      textDecorationLine: (!allWarmupDone && anySetCompleted) ? 'line-through' : 'none',
+                    }}>Warm-Up</Text>
+                    <Text style={{ fontSize: 12, color: allWarmupDone ? SemanticColors.success : theme.textSecondary }}>
+                      {checkedCount}/{totalItems}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-down" size={18} color={theme.textSecondary} />
+                </Pressable>
+              );
+            }
+
+            return (
+              <View style={{
+                marginBottom: 20,
+                backgroundColor: theme.surface,
+                borderRadius: 16,
+                padding: 16,
+                borderWidth: 1,
+                borderColor: theme.border,
+              }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                  <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>
+                    Warm-Up — 10 min
+                  </Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                    <Pressable onPress={startFromWarmup} disabled={workoutStarted} hitSlop={8} style={{ backgroundColor: workoutStarted ? theme.chrome : theme.text, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 }}>
+                      <Text style={{ color: theme.background, fontWeight: '600', fontSize: 13 }}>{workoutStarted ? 'In progress' : 'Start'}</Text>
+                    </Pressable>
+                    <Pressable onPress={() => { dismissWarmup(); }} hitSlop={8}>
+                      <Ionicons name="chevron-up" size={20} color={theme.textSecondary} />
+                    </Pressable>
+                  </View>
+                </View>
+                <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>
+                  5 min cardio + dynamic stretching
+                </Text>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: theme.chrome, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 8 }}>
+                  Cardio — 5 min
+                </Text>
+                {warmup.cardio.map((w, i) => {
+                  const key = `c-${i}`;
+                  const done = warmupChecked[key] ?? false;
+                  return (
+                    <View key={key} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: done ? SemanticColors.success : theme.chrome, marginRight: 10 }} />
+                      <Text style={{ fontSize: 14, color: done ? theme.textSecondary : theme.text, flex: 1, textDecorationLine: done ? 'line-through' : 'none' }}>{w.name}</Text>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginRight: 10 }}>{w.duration}</Text>
+                      <Pressable onPress={() => setWarmupChecked((prev) => ({ ...prev, [key]: !prev[key] }))} hitSlop={6}>
+                        <Ionicons name={done ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={done ? SemanticColors.success : theme.border} />
+                      </Pressable>
+                    </View>
+                  );
+                })}
+                <Text style={{ fontSize: 12, fontWeight: '600', color: theme.chrome, textTransform: 'uppercase', letterSpacing: 1, marginTop: 8, marginBottom: 8 }}>
+                  Dynamic Stretching — 5 min
+                </Text>
+                {warmup.mobility.map((w, i) => {
+                  const key = `m-${i}`;
+                  const done = warmupChecked[key] ?? false;
+                  return (
+                    <View key={key} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: done ? SemanticColors.success : theme.chrome, marginRight: 10 }} />
+                      <Text style={{ fontSize: 14, color: done ? theme.textSecondary : theme.text, flex: 1, textDecorationLine: done ? 'line-through' : 'none' }}>{w.name}</Text>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginRight: 10 }}>{w.duration}</Text>
+                      <Pressable onPress={() => setWarmupChecked((prev) => ({ ...prev, [key]: !prev[key] }))} hitSlop={6}>
+                        <Ionicons name={done ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={done ? SemanticColors.success : theme.border} />
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </View>
+            );
+          })()}
           renderItem={({ item: logged, getIndex, drag, isActive }: RenderItemParams<LoggedExercise>) => {
             const exIdx = getIndex()!;
             const isExpanded = reorderMode ? false : activeExercise === exIdx;
@@ -1025,11 +1457,28 @@ export default function QuickWorkoutScreen() {
                   </Pressable>
                 )}
                 <View style={{ flex: 1, opacity: isActive ? 0.85 : 1 }}>
-                {/* Superset vertical connector between exercises */}
+                {/* Superset vertical connector — left-aligned under exercise number */}
                 {!isFirstOfSuperset && isInSuperset && !reorderMode && (
-                  <View style={{ alignItems: 'center', marginBottom: 4 }}>
-                    <View style={{ width: 2, height: 16, backgroundColor: theme.chrome, borderRadius: 1 }} />
-                  </View>
+                  <Pressable
+                    onPress={() => {
+                      if (unlinkConfirmIdx === exIdx) {
+                        unlinkSuperset(exIdx);
+                        setUnlinkConfirmIdx(null);
+                      } else {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        setUnlinkConfirmIdx(exIdx);
+                      }
+                    }}
+                    hitSlop={16}
+                    style={{ width: 24, marginRight: 10, alignItems: 'center', paddingVertical: 4, marginLeft: 8 }}
+                  >
+                    <Ionicons
+                      name="link"
+                      size={16}
+                      color={unlinkConfirmIdx === exIdx ? SemanticColors.danger : theme.chrome}
+                      style={{ transform: [{ rotate: '90deg' }] }}
+                    />
+                  </Pressable>
                 )}
                 <Swipeable
                   ref={(ref) => { swipeableRefs.current[exIdx] = ref; }}
@@ -1043,13 +1492,22 @@ export default function QuickWorkoutScreen() {
                     borderRadius: 16,
                     backgroundColor: isExpanded ? theme.surface : 'transparent',
                     borderWidth: isExpanded ? 1 : 0, borderColor: theme.border,
-                    paddingVertical: 12,
+                    paddingTop: isInSuperset && !isFirstOfSuperset ? 4 : 12,
+                    paddingBottom: isInSuperset && !isLastOfSuperset ? 4 : 12,
                     paddingHorizontal: 12,
                   }}>
                     <Pressable
                       onPress={() => {
+                        if (isExpanded) {
+                          autoCompleteSetsOnCollapse(exIdx);
+                        } else if (activeExercise !== null) {
+                          // Collapsing the previously active exercise
+                          autoCompleteSetsOnCollapse(activeExercise);
+                        }
                         animateLayout();
                         setActiveExercise(isExpanded ? null : exIdx);
+                        if (!isExpanded) scrollToExercise(exIdx);
+                        if (unlinkConfirmIdx !== null) setUnlinkConfirmIdx(null);
                       }}
                       onLongPress={() => {
                         if (!reorderMode) {
@@ -1078,15 +1536,10 @@ export default function QuickWorkoutScreen() {
                         </Text>
                         {suggested != null && (
                           <Text style={{ fontSize: 12, color: theme.chrome, marginTop: 2 }}>
-                            Suggested: {suggested} {unitLabel}
+                            Suggested: {suggested} {unitLabel} based on last session
                           </Text>
                         )}
                       </View>
-                      {isExpanded && logged.supersetGroupId && (
-                        <Pressable onPress={() => unlinkSuperset(exIdx)} hitSlop={8} style={{ padding: 4, marginLeft: 4 }}>
-                          <Ionicons name="git-compare-outline" size={14} color={theme.textSecondary} />
-                        </Pressable>
-                      )}
                       {isExpanded && loggedExercises.length > 1 && (
                         <Pressable onPress={() => removeExercise(exIdx)} hitSlop={8} style={{ padding: 4, marginLeft: 8 }}>
                           <Ionicons name="trash-outline" size={16} color={SemanticColors.danger} />
@@ -1109,7 +1562,7 @@ export default function QuickWorkoutScreen() {
                           </Text>
                         </Pressable>
                         {detailsOpen && (
-                          <View style={{ backgroundColor: theme.background, borderRadius: 12, padding: 12, marginBottom: 4, borderWidth: 1, borderColor: theme.border }}>
+                          <View style={{ backgroundColor: theme.background, borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: theme.border }}>
                             <Text style={{ fontSize: 11, fontWeight: '700', color: theme.chrome, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 1 }}>Form Tips</Text>
                             <Text style={{ fontSize: 14, color: theme.text, lineHeight: 20 }}>{instructions}</Text>
                           </View>
@@ -1166,28 +1619,6 @@ export default function QuickWorkoutScreen() {
         />
         </KeyboardAvoidingView>
 
-        {/* Superset selection confirm button */}
-        {selectionMode && selectedForSuperset.length === 2 && (
-          <Pressable
-            onPress={() => linkSelectedSuperset(selectedForSuperset[0], selectedForSuperset[1])}
-            style={{
-              position: 'absolute',
-              bottom: 110,
-              alignSelf: 'center',
-              backgroundColor: SemanticColors.success,
-              borderRadius: 24,
-              paddingHorizontal: 24,
-              paddingVertical: 12,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              zIndex: 10,
-            }}
-          >
-            <Ionicons name="checkmark" size={18} color="#fff" />
-            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Link as Superset</Text>
-          </Pressable>
-        )}
 
         {/* Bottom bar: Play | Timer (abs center) | Rest + Finish */}
         <View style={{ backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border, paddingHorizontal: 24, paddingTop: 10, paddingBottom: 28 }}>
@@ -1219,11 +1650,7 @@ export default function QuickWorkoutScreen() {
                 color: countdown !== null ? SemanticColors.warning : isPaused ? theme.chrome : theme.text,
                 fontVariant: ['tabular-nums'], letterSpacing: 1,
               }}>
-                {!workoutStarted && countdown === null
-                  ? 'START'
-                  : countdown !== null
-                  ? String(countdown)
-                  : formatTimeMs(displayMs)}
+                {countdown !== null ? String(countdown) : (!workoutStarted ? (isResuming.current ? 'RESUME' : 'START') : formatTimeMs(displayMs))}
               </Text>
             </Pressable>
 
@@ -1267,22 +1694,19 @@ export default function QuickWorkoutScreen() {
                 onPress={() => {
                   if (confirmFinish) {
                     if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
-                    confirmTimerRef.current = null;
                     setConfirmFinish(false);
                     handleFinish();
                   } else {
                     setConfirmFinish(true);
-                    confirmTimerRef.current = setTimeout(() => {
-                      setConfirmFinish(false);
-                      confirmTimerRef.current = null;
-                    }, 3000);
+                    confirmTimerRef.current = setTimeout(() => setConfirmFinish(false), 3000);
                   }
                 }}
                 hitSlop={12}
                 style={{ padding: 8 }}
+                disabled={saving}
               >
                 <Ionicons
-                  name={confirmFinish ? 'checkmark' : 'flag-outline'}
+                  name={confirmFinish ? 'checkmark' : 'flag'}
                   size={22}
                   color={confirmFinish ? SemanticColors.success : theme.text}
                 />

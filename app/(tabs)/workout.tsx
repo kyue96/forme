@@ -12,14 +12,18 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
+import { BadgesTab } from '@/components/BadgesTab';
 
 import { usePlan } from '@/lib/plan-context';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
+import { useUserStore } from '@/lib/user-store';
 import { AppHeader } from '@/components/AppHeader';
 import { WeeklyCalendar, getWeekDates, dateKey, DAY_NAMES_FULL } from '@/components/WeeklyCalendar';
+import { MuscleGroupPills } from '@/components/MuscleGroupPills';
 import { LoggedExercise } from '@/lib/types';
 import { animateLayout } from '@/lib/utils';
+import { getExerciseCategories } from '@/lib/exercise-utils';
 
 interface WorkoutLog {
   id: string;
@@ -63,9 +67,11 @@ export default function WorkoutScreen() {
   const router = useRouter();
   const { plan, loading } = usePlan();
   const { theme, weightUnit } = useSettings();
+  const avatarColor = useUserStore((s) => s.avatarColor);
+  const focusCardColor = avatarColor || '#F59E0B';
   const { logId } = useLocalSearchParams<{ logId?: string }>();
 
-  const [showHistory, setShowHistory] = useState(false);
+  const [activeTab, setActiveTab] = useState<'plan' | 'history' | 'badges'>('plan');
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   // selectedLog state removed — now navigates to session-view
@@ -80,13 +86,14 @@ export default function WorkoutScreen() {
       const match = logs.find((l) => l.id === logId);
       if (match) {
         consumedLogId.current = logId;
-        setShowHistory(true);
+        setActiveTab('history');
+        const matchPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === match.day_name.toLowerCase());
         router.push({
           pathname: '/workout/session-view',
           params: {
             exercises: JSON.stringify(match.exercises),
             dayName: match.day_name,
-            focus: match.day_name,
+            focus: matchPlanDay?.focus ?? match.day_name,
             durationMinutes: String(match.duration_minutes ?? 0),
             completedAt: match.completed_at,
             logId: match.id,
@@ -159,6 +166,17 @@ export default function WorkoutScreen() {
     (plan?.weeklyPlan ?? []).map((d) => d.dayName.toLowerCase())
   );
 
+  // Compute next workout day
+  const jsDow = new Date().getDay();
+  const jsDayName = DAY_NAMES_FULL[jsDow].toLowerCase();
+  const todayPlanIdx = plan?.weeklyPlan.findIndex(d => d.dayName.toLowerCase() === jsDayName) ?? -1;
+  const nextPlanIdx = todayPlanIdx >= 0 && !todayLoggedDays.has(plan?.weeklyPlan[todayPlanIdx]?.dayName.toLowerCase() ?? '')
+    ? todayPlanIdx
+    : (plan?.weeklyPlan.findIndex((d, i) => {
+        const dIdx = DAY_NAMES_FULL.findIndex(n => n.toLowerCase() === d.dayName.toLowerCase());
+        return dIdx > jsDow && !todayLoggedDays.has(d.dayName.toLowerCase());
+      }) ?? -1);
+
   const handleCalendarDayPress = (date: Date, dayIndex: number) => {
     if (!plan) return;
     // Find the plan day matching this calendar day
@@ -166,7 +184,7 @@ export default function WorkoutScreen() {
     const planIdx = plan.weeklyPlan.findIndex((d) => d.dayName.toLowerCase() === dayName);
     if (planIdx >= 0) {
       animateLayout();
-      setShowHistory(false);
+      setActiveTab('plan');
       setExpandedDay(expandedDay === planIdx ? null : planIdx);
     }
   };
@@ -225,7 +243,7 @@ export default function WorkoutScreen() {
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
           <View>
             <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text, marginBottom: 2 }}>
-              My Plan
+              {activeTab === 'plan' ? 'Workout Plan' : activeTab === 'history' ? 'Workout History' : 'Achievements'}
             </Text>
             <Text allowFontScaling style={{ fontSize: 13, color: theme.textSecondary }}>
               Today is {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
@@ -235,48 +253,63 @@ export default function WorkoutScreen() {
             <Pressable
               onPress={() => {
                 animateLayout();
-                setShowHistory(false);
+                setActiveTab('plan');
               }}
               style={{
                 width: 40,
                 height: 40,
                 borderRadius: 20,
-                backgroundColor: !showHistory ? theme.text : theme.surface,
+                backgroundColor: activeTab === 'plan' ? theme.text : theme.surface,
                 alignItems: 'center',
                 justifyContent: 'center',
                 borderWidth: 1,
-                borderColor: !showHistory ? theme.text : theme.border,
+                borderColor: activeTab === 'plan' ? theme.text : theme.border,
               }}
             >
-              <Ionicons name="barbell" size={20} color={!showHistory ? theme.background : theme.chrome} />
+              <Ionicons name="barbell" size={20} color={activeTab === 'plan' ? theme.background : theme.chrome} />
             </Pressable>
             <Pressable
               onPress={() => {
                 animateLayout();
-                setShowHistory(true);
+                setActiveTab('history');
               }}
               style={{
                 width: 40,
                 height: 40,
                 borderRadius: 20,
-                backgroundColor: showHistory ? theme.text : theme.surface,
+                backgroundColor: activeTab === 'history' ? theme.text : theme.surface,
                 alignItems: 'center',
                 justifyContent: 'center',
                 borderWidth: 1,
-                borderColor: showHistory ? theme.text : theme.border,
+                borderColor: activeTab === 'history' ? theme.text : theme.border,
               }}
             >
-              <Ionicons name="calendar-outline" size={20} color={showHistory ? theme.background : theme.chrome} />
+              <Ionicons name="calendar-outline" size={20} color={activeTab === 'history' ? theme.background : theme.chrome} />
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                animateLayout();
+                setActiveTab('badges');
+              }}
+              style={{
+                width: 40,
+                height: 40,
+                borderRadius: 20,
+                backgroundColor: activeTab === 'badges' ? theme.text : theme.surface,
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderWidth: 1,
+                borderColor: activeTab === 'badges' ? theme.text : theme.border,
+              }}
+            >
+              <Ionicons name="trophy-outline" size={20} color={activeTab === 'badges' ? theme.background : theme.chrome} />
             </Pressable>
           </View>
         </View>
 
-        {showHistory ? (
+        {activeTab === 'history' ? (
           /* Past workout history */
           <View>
-            <Text allowFontScaling style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 16 }}>
-              Workout history
-            </Text>
             {logsLoading ? (
               <ActivityIndicator color={theme.chrome} />
             ) : logs.length === 0 ? (
@@ -287,59 +320,97 @@ export default function WorkoutScreen() {
                 </Text>
               </View>
             ) : (
-              logs.map((log) => {
-                const date = new Date(log.completed_at).toLocaleDateString('en-US', {
-                  weekday: 'short', month: 'short', day: 'numeric',
+              (() => {
+                // Group logs by date
+                const dateGroups: { [key: string]: typeof logs } = {};
+                logs.forEach((log) => {
+                  const dateStr = log.completed_at.split('T')[0];
+                  if (!dateGroups[dateStr]) {
+                    dateGroups[dateStr] = [];
+                  }
+                  dateGroups[dateStr].push(log);
                 });
-                const totalSets = log.exercises.reduce((s, ex) => s + ex.sets.filter((se) => se.completed).length, 0);
-                return (
-                  <Swipeable
-                    key={log.id}
-                    renderRightActions={renderHistoryRightActions(log.id)}
-                    overshootRight={false}
-                    friction={2}
-                  >
-                    <Pressable
-                      onPress={() => {
-                        router.push({
-                          pathname: '/workout/session-view',
-                          params: {
-                            exercises: JSON.stringify(log.exercises),
-                            dayName: log.day_name,
-                            focus: log.day_name,
-                            durationMinutes: String(log.duration_minutes ?? 0),
-                            completedAt: log.completed_at,
-                            logId: log.id,
-                          },
-                        });
-                      }}
-                      style={{
-                        backgroundColor: theme.surface,
-                        borderRadius: 16,
-                        padding: 16,
-                        marginBottom: 10,
-                        borderWidth: 1,
-                        borderColor: theme.border,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                      }}
-                    >
-                      <View>
-                        <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>
-                          {log.day_name}
+                const sortedDates = Object.keys(dateGroups).sort();
+
+                return sortedDates.map((dateStr) => {
+                  const dateObj = new Date(dateStr);
+                  const dayAbbr = dateObj.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
+                  const monthDay = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+                  return (
+                    <View key={dateStr} style={{ flexDirection: 'row', marginBottom: 16 }}>
+                      {/* Left column with date */}
+                      <View style={{ width: 60, paddingRight: 12, alignItems: 'center', paddingTop: 4, position: 'relative' }}>
+                        <Text allowFontScaling style={{ fontSize: 13, fontWeight: '700', color: theme.textSecondary }}>
+                          {dayAbbr}
                         </Text>
                         <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>
-                          {date} · {totalSets} sets · {log.duration_minutes} min
+                          {monthDay}
                         </Text>
+                        {/* Vertical connector line */}
+                        <View style={{ position: 'absolute', left: 29, top: 40, bottom: -16, width: 1, backgroundColor: theme.border }} />
                       </View>
-                      <Ionicons name="chevron-forward" size={18} color={theme.chrome} />
-                    </Pressable>
-                  </Swipeable>
-                );
-              })
+
+                      {/* Right column with cards */}
+                      <View style={{ flex: 1 }}>
+                        {dateGroups[dateStr].map((log) => {
+                          const totalSets = log.exercises.reduce((s, ex) => s + ex.sets.filter((se) => se.completed).length, 0);
+                          return (
+                            <Swipeable
+                              key={log.id}
+                              renderRightActions={renderHistoryRightActions(log.id)}
+                              overshootRight={false}
+                              friction={2}
+                            >
+                              <Pressable
+                                onPress={() => {
+                                  const logPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
+                                  router.push({
+                                    pathname: '/workout/session-view',
+                                    params: {
+                                      exercises: JSON.stringify(log.exercises),
+                                      dayName: log.day_name,
+                                      focus: logPlanDay?.focus ?? log.day_name,
+                                      durationMinutes: String(log.duration_minutes ?? 0),
+                                      completedAt: log.completed_at,
+                                      logId: log.id,
+                                    },
+                                  });
+                                }}
+                                style={{
+                                  backgroundColor: theme.surface,
+                                  borderRadius: 16,
+                                  padding: 16,
+                                  marginBottom: 10,
+                                  borderWidth: 1,
+                                  borderColor: theme.border,
+                                }}
+                              >
+                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                                  <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>
+                                    {plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase())?.focus ?? log.day_name}
+                                  </Text>
+                                  <Ionicons name="chevron-forward" size={18} color={theme.chrome} />
+                                </View>
+                                <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary }}>
+                                  {totalSets} sets · {log.duration_minutes} min
+                                </Text>
+                                <View style={{ marginTop: 4 }}>
+                                  <MuscleGroupPills categories={getExerciseCategories(log.exercises)} size="small" />
+                                </View>
+                              </Pressable>
+                            </Swipeable>
+                          );
+                        })}
+                      </View>
+                    </View>
+                  );
+                });
+              })()
             )}
           </View>
+        ) : activeTab === 'badges' ? (
+          <BadgesTab />
         ) : (
           /* Weekly plan — accordion */
           <View>
@@ -356,7 +427,16 @@ export default function WorkoutScreen() {
                 </Pressable>
               </View>
             ) : (
-              plan.weeklyPlan.map((day, i) => {
+              <>
+              <Pressable
+                onPress={() => router.push('/workout/quick')}
+                style={{ marginBottom: 12, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
+              >
+                <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
+                  Create workout
+                </Text>
+              </Pressable>
+              {plan.weeklyPlan.map((day, i) => {
                 const isOpen = expandedDay === i;
                 const dayLogged = todayLoggedDays.has(day.dayName.toLowerCase());
                 return (
@@ -367,7 +447,8 @@ export default function WorkoutScreen() {
                       borderRadius: 16,
                       backgroundColor: theme.surface,
                       borderWidth: 1,
-                      borderColor: theme.border,
+                      borderColor: dayLogged ? '#22C55E' : (i === nextPlanIdx ? focusCardColor : theme.border),
+                      ...(i === nextPlanIdx && { borderLeftWidth: 3, borderLeftColor: focusCardColor }),
                       overflow: 'hidden',
                     }}
                   >
@@ -395,6 +476,9 @@ export default function WorkoutScreen() {
                         <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
                           {day.exercises.length} exercises
                         </Text>
+                        <View style={{ marginTop: 4 }}>
+                          <MuscleGroupPills categories={getExerciseCategories(day.exercises)} size="small" />
+                        </View>
                       </View>
                       <Ionicons
                         name={isOpen ? 'chevron-up' : 'chevron-down'}
@@ -447,7 +531,8 @@ export default function WorkoutScreen() {
                     )}
                   </View>
                 );
-              })
+              })}
+              </>
             )}
           </View>
         )}

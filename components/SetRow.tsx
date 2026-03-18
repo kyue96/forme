@@ -68,6 +68,8 @@ export function SetRow({
 }: SetRowProps) {
   const { theme, weightUnit } = useSettings();
   const prevCompleted = useRef(data.completed);
+  // Track whether weight/reps changed via user input (not from set add/remove re-render)
+  const userEdited = useRef(false);
   const weightStep = weightUnit === 'lbs' ? 5 : 2.5;
   const focusedField = useRef<'weight' | 'reps' | null>(null);
   const isBarbellExercise = !isBodyweight && exerciseName !== '' && isBarbell(exerciseName);
@@ -78,21 +80,29 @@ export function SetRow({
   const repsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Auto-check: when both weight and reps have values, auto-complete
-  // For the last set, delay 3s so user can blur to complete immediately
+  // For the last set, delay 2s so user can blur to complete immediately
   const autoCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (autoCompleteTimerRef.current) clearTimeout(autoCompleteTimerRef.current);
+
+    // Guard: never re-fire on already-completed sets
     if (data.completed || prevCompleted.current) {
       prevCompleted.current = data.completed;
       return;
     }
+
+    // Guard: only auto-complete when the change came from actual user input,
+    // not from data shifting due to set add/remove causing re-render
+    if (!userEdited.current) return;
+    userEdited.current = false;
+
     const hasWeight = isBodyweight || (data.weight != null && data.weight > 0);
     const hasReps = data.reps > 0;
     if (hasWeight && hasReps) {
       if (isLastSet || isSuperset) {
         autoCompleteTimerRef.current = setTimeout(() => {
           onComplete();
-        }, 3000);
+        }, 2000);
       } else {
         requestAnimationFrame(() => {
           onComplete();
@@ -116,13 +126,13 @@ export function SetRow({
     }
   };
 
-  // After reps typing stops for 3s, auto-focus next set's reps
+  // After reps typing stops for 2s, auto-focus next set's reps
   useEffect(() => {
     if (repsTimerRef.current) clearTimeout(repsTimerRef.current);
     if (data.reps > 0 && onRepsSubmit) {
       repsTimerRef.current = setTimeout(() => {
         onRepsSubmit();
-      }, 3000);
+      }, 2000);
     }
     return () => { if (repsTimerRef.current) clearTimeout(repsTimerRef.current); };
   }, [data.reps]);
@@ -137,18 +147,20 @@ export function SetRow({
   };
 
   const handleWeightChange = (v: string) => {
+    userEdited.current = true;
     // Allow decimals: keep trailing dot and partial decimals
     if (v === '' || v === '.') {
-      onChange({ ...data, weight: v === '' ? null : 0 });
+      onChange({ ...data, weight: v === '' ? null : 0, suggestedWeight: undefined });
       return;
     }
     const weight = parseFloat(v);
     if (!isNaN(weight)) {
-      onChange({ ...data, weight });
+      onChange({ ...data, weight, suggestedWeight: undefined });
     }
   };
 
   const handleRepsChange = (v: string) => {
+    userEdited.current = true;
     const reps = parseInt(v) || 0;
     onChange({ ...data, reps });
   };
@@ -205,46 +217,54 @@ export function SetRow({
       <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
         {!isBodyweight && (
           <>
-            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }}>
-              {showIncrement && (
-                <Pressable
-                  onPress={() => {
-                    const w = Math.max(0, (data.weight ?? 0) - weightStep);
-                    onChange({ ...data, weight: w > 0 ? w : null });
-                  }}
-                  hitSlop={8}
-                  style={{ alignItems: 'center', justifyContent: 'center', marginRight: 4, padding: 4 }}
-                >
-                  <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textSecondary, lineHeight: 20 }}>−</Text>
-                </Pressable>
-              )}
-              <TextInput
-                ref={weightInputRef}
-                style={{ flex: 1, fontSize: 16, fontWeight: '600', color: theme.text, backgroundColor: theme.surface, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 }}
-                keyboardType="decimal-pad"
-                returnKeyType={isLastSet ? 'done' : 'next'}
-                placeholder={showLabels ? (weightUnit === 'lbs' ? 'lb' : 'kg') : ''}
-                placeholderTextColor={theme.textSecondary}
-                underlineColorAndroid="transparent"
-                value={data.weight != null ? String(data.weight) : ''}
-                onChangeText={handleWeightChange}
-                onSubmitEditing={onWeightSubmit}
-                onFocus={() => { focusedField.current = 'weight'; activeNextHandler.current = () => onWeightSubmit?.(); handleFocusUncheck(); }}
-                {...(Platform.OS === 'ios' ? { inputAccessoryViewID: SET_ROW_ACCESSORY_ID } : {})}
-              />
-              {showIncrement && (
-                <Pressable
-                  onPress={() => onChange({ ...data, weight: (data.weight ?? 0) + weightStep })}
-                  hitSlop={8}
-                  style={{ alignItems: 'center', justifyContent: 'center', marginLeft: 4, padding: 4 }}
-                >
-                  <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textSecondary, lineHeight: 20 }}>+</Text>
-                </Pressable>
-              )}
-              {showCalcIcon && (
-                <Pressable onPress={() => setShowPlateCalc(true)} hitSlop={6} style={{ marginLeft: 6 }}>
-                  <Ionicons name="calculator-outline" size={16} color={theme.chrome} />
-                </Pressable>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {showIncrement && (
+                  <Pressable
+                    onPress={() => {
+                      userEdited.current = true;
+                      const w = Math.max(0, (data.weight ?? 0) - weightStep);
+                      onChange({ ...data, weight: w > 0 ? w : null, suggestedWeight: undefined });
+                    }}
+                    hitSlop={8}
+                    style={{ alignItems: 'center', justifyContent: 'center', marginRight: 4, padding: 4 }}
+                  >
+                    <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textSecondary, lineHeight: 20 }}>−</Text>
+                  </Pressable>
+                )}
+                <TextInput
+                  ref={weightInputRef}
+                  style={{ flex: 1, fontSize: 16, fontWeight: '600', color: theme.text, backgroundColor: theme.surface, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 }}
+                  keyboardType="decimal-pad"
+                  returnKeyType={isLastSet ? 'done' : 'next'}
+                  placeholder={showLabels ? (weightUnit === 'lbs' ? 'lb' : 'kg') : ''}
+                  placeholderTextColor={theme.textSecondary}
+                  underlineColorAndroid="transparent"
+                  value={data.weight != null ? String(data.weight) : ''}
+                  onChangeText={handleWeightChange}
+                  onSubmitEditing={onWeightSubmit}
+                  onFocus={() => { focusedField.current = 'weight'; activeNextHandler.current = () => onWeightSubmit?.(); handleFocusUncheck(); }}
+                  {...(Platform.OS === 'ios' ? { inputAccessoryViewID: SET_ROW_ACCESSORY_ID } : {})}
+                />
+                {showIncrement && (
+                  <Pressable
+                    onPress={() => { userEdited.current = true; onChange({ ...data, weight: (data.weight ?? 0) + weightStep, suggestedWeight: undefined }); }}
+                    hitSlop={8}
+                    style={{ alignItems: 'center', justifyContent: 'center', marginLeft: 4, padding: 4 }}
+                  >
+                    <Text style={{ fontSize: 18, fontWeight: '700', color: theme.textSecondary, lineHeight: 20 }}>+</Text>
+                  </Pressable>
+                )}
+                {showCalcIcon && (
+                  <Pressable onPress={() => setShowPlateCalc(true)} hitSlop={6} style={{ marginLeft: 6 }}>
+                    <Ionicons name="calculator-outline" size={16} color={theme.chrome} />
+                  </Pressable>
+                )}
+              </View>
+              {data.suggestedWeight != null && data.suggestedWeight !== data.weight && (
+                <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4, marginLeft: 2 }}>
+                  {data.suggestedWeight > (data.weight ?? 0) ? '↑' : '↓'} {Math.abs((data.suggestedWeight ?? 0) - (data.weight ?? 0))} {weightUnit === 'lbs' ? 'lbs' : 'kg'} {data.suggestedWeight > (data.weight ?? 0) ? '(high reps)' : '(low reps)'}
+                </Text>
               )}
             </View>
             <View style={{ width: 1, height: 32, backgroundColor: theme.border }} />
@@ -274,7 +294,7 @@ export function SetRow({
         <PlateCalculatorSheet
           visible={showPlateCalc}
           onClose={() => setShowPlateCalc(false)}
-          onConfirm={(weight) => onChange({ ...data, weight })}
+          onConfirm={(weight) => { userEdited.current = true; onChange({ ...data, weight, suggestedWeight: undefined }); }}
           initialWeight={data.weight}
           exerciseName={exerciseName}
         />

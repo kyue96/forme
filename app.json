@@ -39,7 +39,16 @@
           }
         }
       ],
-      "expo-secure-store"
+      "expo-secure-store",
+      "expo-notifications",
+      [
+        "react-native-health",
+        {
+          "healthSharePermission": "Allow $(PRODUCT_NAME) to read your health data for step counting",
+          "healthUpdatePermission": "Allow $(PRODUCT_NAME) to update your health data",
+          "isClinicalDataEnabled": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

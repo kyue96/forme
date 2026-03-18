@@ -1,21 +1,26 @@
-import { useState } from 'react';
+import { useState, useRef, useCallback } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
+  Alert,
   Pressable,
   ScrollView,
+  Share,
   Text,
   TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { captureRef } from 'react-native-view-shot';
+import * as MediaLibrary from 'expo-media-library';
 
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
+import { useUserStore } from '@/lib/user-store';
 import { LoggedExercise } from '@/lib/types';
 import { SemanticColors } from '@/constants/theme';
 import { isBodyweightExercise, getInstructions } from '@/lib/exercise-data';
-import { formatTime, animateLayout } from '@/lib/utils';
+import { formatTime, animateLayout, formatNumber } from '@/lib/utils';
 import { isBarbell } from '@/lib/plate-calculator';
 import { PlateCalculatorSheet } from '@/components/PlateCalculatorSheet';
 
@@ -31,10 +36,35 @@ export default function SessionViewScreen() {
     logId: string;
   }>();
 
+  const avatarColor = useUserStore((s) => s.avatarColor);
+  const sessionCardRef = useRef<View>(null);
+
   const exercises: LoggedExercise[] = params.exercises ? JSON.parse(params.exercises) : [];
   const durationMinutes = parseInt(params.durationMinutes ?? '0', 10);
   const durationSeconds = durationMinutes * 60;
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
+
+  const sessionTotalSets = exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).length, 0);
+  const sessionVolume = exercises.reduce(
+    (sum, ex) => sum + ex.sets.filter(s => s.completed && s.weight != null).reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0), 0
+  );
+
+  const handleShareSession = useCallback(async () => {
+    if (!sessionCardRef.current) return;
+    try {
+      const { status } = await MediaLibrary.requestPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Allow photo library access to share.');
+        return;
+      }
+      const uri = await captureRef(sessionCardRef.current, { format: 'png', quality: 1 });
+      const asset = await MediaLibrary.createAssetAsync(uri);
+      await Share.share({
+        url: asset.uri,
+        message: `Just finished ${params.dayName ?? 'my workout'} — ${exercises.length} exercises, ${sessionTotalSets} sets in ${durationMinutes} min`,
+      });
+    } catch {}
+  }, [params.dayName, exercises.length, sessionTotalSets, durationMinutes]);
 
   const completedDate = params.completedAt
     ? new Date(params.completedAt).toLocaleDateString('en-US', {
@@ -46,7 +76,7 @@ export default function SessionViewScreen() {
       })
     : '';
 
-  const [activeExercise, setActiveExercise] = useState<number | null>(null);
+  const [activeExercise, setActiveExercise] = useState<number | 'all' | null>('all');
   const [expandedDetails, setExpandedDetails] = useState<Record<number, boolean>>({});
 
   // Editable exercises (Step 13)
@@ -54,7 +84,7 @@ export default function SessionViewScreen() {
   const [editingExIdx, setEditingExIdx] = useState<number | null>(null);
 
   // Editable workout name (Step 14)
-  const [workoutName, setWorkoutName] = useState(params.dayName ?? 'Workout');
+  const [workoutName, setWorkoutName] = useState(params.focus ?? params.dayName ?? 'Workout');
   const [editingName, setEditingName] = useState(false);
 
   // Plate calculator
@@ -97,7 +127,7 @@ export default function SessionViewScreen() {
   };
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
+    <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
       {/* Header */}
       <View style={{
         flexDirection: 'row',
@@ -111,7 +141,7 @@ export default function SessionViewScreen() {
         <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 4, marginRight: 8 }}>
           <Ionicons name="chevron-back" size={24} color={theme.text} />
         </Pressable>
-        <View style={{ flex: 1, marginRight: 12 }}>
+        <View style={{ flex: 1, marginRight: 8 }}>
           {editingName ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
               <TextInput
@@ -151,9 +181,12 @@ export default function SessionViewScreen() {
             </Pressable>
           )}
           <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
-            {params.focus ?? ''} {completedDate ? `· ${completedDate}` : ''}
+            {params.dayName ?? ''} {completedDate ? `· ${completedDate}` : ''}
           </Text>
         </View>
+        <Pressable onPress={handleShareSession} hitSlop={12} style={{ padding: 4 }}>
+          <Ionicons name="share-social" size={22} color={theme.text} />
+        </Pressable>
       </View>
 
       <ScrollView
@@ -161,9 +194,46 @@ export default function SessionViewScreen() {
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
       >
+        {/* Shareable session card */}
+        <Pressable
+          onPress={() => router.push({
+            pathname: '/workout/share-card',
+            params: {
+              exercises: params.exercises ?? '[]',
+              dayName: params.dayName ?? '',
+              focus: params.focus ?? params.dayName ?? '',
+              durationMinutes: params.durationMinutes ?? '0',
+              logId: params.logId ?? '',
+            },
+          })}
+        >
+          <View
+            ref={sessionCardRef}
+            collapsable={false}
+            style={{ backgroundColor: avatarColor || theme.text, borderRadius: 16, padding: 12, marginBottom: 16 }}
+          >
+            <Text style={{ fontSize: 12, fontWeight: '800', color: '#FFFFFF', letterSpacing: 2, marginBottom: 8 }}>FORME</Text>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>{params.dayName ?? 'Workout'}</Text>
+            <View style={{ flexDirection: 'row', gap: 16, marginTop: 10 }}>
+              <View>
+                <Text style={{ fontSize: 18, fontWeight: '800', color: '#FFFFFF' }}>{sessionTotalSets}</Text>
+                <Text style={{ fontSize: 9, color: '#FFFFFF60' }}>SETS</Text>
+              </View>
+              <View>
+                <Text style={{ fontSize: 18, fontWeight: '800', color: '#FFFFFF' }}>{sessionVolume > 0 ? formatNumber(Math.round(sessionVolume)) : '\u2014'}</Text>
+                <Text style={{ fontSize: 9, color: '#FFFFFF60' }}>VOLUME</Text>
+              </View>
+              <View>
+                <Text style={{ fontSize: 18, fontWeight: '800', color: '#FFFFFF' }}>{durationMinutes}</Text>
+                <Text style={{ fontSize: 9, color: '#FFFFFF60' }}>MIN</Text>
+              </View>
+            </View>
+          </View>
+        </Pressable>
+
         {/* Exercises */}
         {editableExercises.map((logged, exIdx) => {
-          const isExpanded = activeExercise === exIdx;
+          const isExpanded = activeExercise === 'all' || activeExercise === exIdx;
           const detailsOpen = expandedDetails[exIdx] ?? false;
           const instructions = getInstructions(logged.name);
           const isBW = isBodyweightExercise(logged.name);
@@ -187,7 +257,12 @@ export default function SessionViewScreen() {
               <Pressable
                 onPress={() => {
                   animateLayout();
-                  setActiveExercise(isExpanded ? null : exIdx);
+                  if (activeExercise === 'all') {
+                    // Collapse to only this card
+                    setActiveExercise(exIdx);
+                  } else {
+                    setActiveExercise(isExpanded ? null : exIdx);
+                  }
                 }}
                 style={{ flexDirection: 'row', alignItems: 'center', marginBottom: isExpanded ? 12 : 0 }}
               >

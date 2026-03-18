@@ -12,6 +12,7 @@ interface ActiveWorkout {
   elapsedMs: number; // ms elapsed before last pause
   isPaused: boolean;
   warmupDone: boolean;
+  createdAt: number; // epoch ms — when the session was first created
 }
 
 interface WorkoutStore {
@@ -43,6 +44,7 @@ export const useWorkoutStore = create<WorkoutStore>()(
             elapsedMs: 0,
             isPaused: false,
             warmupDone: false,
+            createdAt: Date.now(),
           },
         });
       },

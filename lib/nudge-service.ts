@@ -59,11 +59,33 @@ export async function checkAndScheduleNudges(userId: string): Promise<void> {
 /**
  * Compare this week's volume with last week's.
  * Returns an insight string or null.
+ *
+ * When the user has fewer than 2 full weeks of workout history,
+ * percentage comparisons are misleading (e.g. "up 261%") so we
+ * show absolute stats instead.
  */
 export function checkVolumeInsight(
   thisWeekVolume: number,
   lastWeekVolume: number,
+  options?: { thisWeekSessions?: number; hasEnoughHistory?: boolean },
 ): string | null {
+  const { thisWeekSessions = 0, hasEnoughHistory = true } = options ?? {};
+
+  // Not enough history for percentage comparisons — show absolute numbers
+  if (!hasEnoughHistory) {
+    if (thisWeekSessions > 0 && thisWeekVolume > 0) {
+      const formatted = thisWeekVolume >= 1000
+        ? `${(thisWeekVolume / 1000).toFixed(1)}k`
+        : String(Math.round(thisWeekVolume));
+      return `Logged ${thisWeekSessions} session${thisWeekSessions === 1 ? '' : 's'} this week — ${formatted} lbs total volume`;
+    }
+    if (thisWeekSessions > 0) {
+      return `Logged ${thisWeekSessions} session${thisWeekSessions === 1 ? '' : 's'} this week — keep it up!`;
+    }
+    return null;
+  }
+
+  // Need data in both weeks for a meaningful comparison
   if (lastWeekVolume === 0 || thisWeekVolume === 0) return null;
 
   const pct = Math.round(((thisWeekVolume - lastWeekVolume) / lastWeekVolume) * 100);

@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { useUserStore } from '@/lib/user-store';
+import { usePlan } from '@/lib/plan-context';
 import { ProGateSheet } from '@/components/ProGateSheet';
 import { LoggedExercise, LoggedSet } from '@/lib/types';
 
@@ -39,6 +40,7 @@ interface WorkoutLog {
 export default function HistoryScreen() {
   const router = useRouter();
   const { theme, weightUnit } = useSettings();
+  const { plan } = usePlan();
   const isPro = useUserStore((s) => s.isPro);
   const [showProGate, setShowProGate] = useState(false);
 
@@ -257,17 +259,20 @@ export default function HistoryScreen() {
                     </View>
                   ))}
                   <Pressable
-                    onPress={() => router.push({
-                      pathname: '/workout/session-view',
-                      params: {
-                        exercises: JSON.stringify(log.exercises),
-                        dayName: log.day_name,
-                        focus: log.day_name,
-                        durationMinutes: String(log.duration_minutes),
-                        completedAt: log.completed_at,
-                        logId: log.id,
-                      },
-                    })}
+                    onPress={() => {
+                      const histPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
+                      router.push({
+                        pathname: '/workout/session-view',
+                        params: {
+                          exercises: JSON.stringify(log.exercises),
+                          dayName: log.day_name,
+                          focus: histPlanDay?.focus ?? log.day_name,
+                          durationMinutes: String(log.duration_minutes),
+                          completedAt: log.completed_at,
+                          logId: log.id,
+                        },
+                      });
+                    }}
                     style={{ backgroundColor: theme.text, paddingVertical: 12, borderRadius: 12, alignItems: 'center', marginTop: 12 }}
                   >
                     <Text style={{ color: theme.background, fontWeight: '700', fontSize: 14 }}>View Session →</Text>

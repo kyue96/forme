@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
@@ -28,6 +28,7 @@ import { WeeklyCalendar, getWeekDates, dateKey, DAY_NAMES_FULL } from '@/compone
 import { LoggedExercise } from '@/lib/types';
 import { formatNumber } from '@/lib/utils';
 import { checkAndScheduleNudges, checkVolumeInsight } from '@/lib/nudge-service';
+import { useHealthKit } from '@/hooks/useHealthKit';
 
 const MOTIVATIONAL = [
   'Your muscles grow during rest, not during the workout.',
@@ -64,6 +65,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const { plan, loading } = usePlan();
   const { theme } = useSettings();
+  const { steps } = useHealthKit();
 
   const [completedDays, setCompletedDays] = useState<Set<string>>(new Set());
   const [todayCompleted, setTodayCompleted] = useState(false);
@@ -191,6 +193,21 @@ export default function HomeScreen() {
         const lastWeekSun = new Date(weekDates[0]);
         lastWeekSun.setDate(lastWeekSun.getDate() - 1);
 
+        // Check if user has at least 2 full weeks of workout history
+        const twoWeeksAgo = new Date(weekDates[0]);
+        twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
+        const { data: earliestLog } = await supabase
+          .from('workout_logs')
+          .select('completed_at')
+          .eq('user_id', user.id)
+          .order('completed_at', { ascending: true })
+          .limit(1)
+          .single();
+
+        const hasEnoughHistory = earliestLog
+          ? new Date(earliestLog.completed_at) <= twoWeeksAgo
+          : false;
+
         const { data: thisWeekLogs } = await supabase
           .from('workout_logs')
           .select('exercises')
@@ -214,12 +231,47 @@ export default function HomeScreen() {
 
         const thisVol = calcVolume(thisWeekLogs ?? []);
         const lastVol = calcVolume(lastWeekLogs ?? []);
-        setVolumeInsight(checkVolumeInsight(thisVol, lastVol));
+        const thisWeekSessions = (thisWeekLogs ?? []).length;
+        setVolumeInsight(checkVolumeInsight(thisVol, lastVol, { thisWeekSessions, hasEnoughHistory }));
       } catch {}
     } catch {}
   }, [todayStr]);
 
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
+
+  // Stale session check — prompt user if active workout is older than 24 hours
+  const staleCheckDone = useRef(false);
+  useEffect(() => {
+    if (staleCheckDone.current || !activeWorkout) return;
+    const TWENTY_FOUR_HOURS = 24 * 60 * 60 * 1000;
+    const createdAt = activeWorkout.createdAt ?? activeWorkout.startTime;
+    const age = Date.now() - createdAt;
+    if (age > TWENTY_FOUR_HOURS) {
+      staleCheckDone.current = true;
+      Alert.alert(
+        'Stale Workout Found',
+        `You have an unfinished "${activeWorkout.dayName}" workout from over 24 hours ago. Would you like to resume or discard it?`,
+        [
+          {
+            text: 'Discard',
+            style: 'destructive',
+            onPress: () => clearWorkout(),
+          },
+          {
+            text: 'Resume',
+            style: 'default',
+            onPress: () => {
+              if (activeWorkout.dayIndex === -1) {
+                router.push('/workout/quick');
+              } else {
+                router.push(`/workout/${activeWorkout.dayIndex}`);
+              }
+            },
+          },
+        ],
+      );
+    }
+  }, [activeWorkout]);
 
   const handleDayPress = async (date: Date, i: number) => {
     setSelectedDay({ date, dayIdx: i });
@@ -359,46 +411,81 @@ export default function HomeScreen() {
                 style={{ marginTop: 16, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  Create your own workout
+                  Create workout
                 </Text>
               </Pressable>
             </View>
 
           ) : todayCompleted ? (
-            <View>
-              <View style={{ backgroundColor: theme.surface, borderRadius: 24, padding: 16, alignItems: 'center', marginBottom: 12, borderWidth: 1, borderColor: theme.border }}>
-                <Ionicons name="checkmark-circle" size={48} color="#22C55E" />
-                <Text allowFontScaling style={{ fontSize: 20, fontWeight: '800', color: theme.text, marginTop: 12, marginBottom: 4 }}>
+            <View style={{ gap: 12 }}>
+              {/* Shareable session card */}
+              {todaySession && (
+                <Pressable
+                  onPress={() => router.push({
+                    pathname: '/workout/share-card',
+                    params: {
+                      exercises: JSON.stringify(todaySession.exercises),
+                      dayName: todaySession.day_name,
+                      focus: todayWorkout?.focus ?? todaySession.day_name,
+                      durationMinutes: String(todaySession.duration_minutes ?? 0),
+                      logId: todaySession.id,
+                    },
+                  })}
+                >
+                  <View
+                    ref={sessionCardRef}
+                    collapsable={false}
+                    style={{ backgroundColor: theme.text, borderRadius: 16, padding: 12 }}
+                  >
+                    <Text style={{ fontSize: 12, fontWeight: '800', color: theme.background, letterSpacing: 2, marginBottom: 8 }}>FORME</Text>
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: theme.background }}>{todaySession.day_name}</Text>
+                    <View style={{ flexDirection: 'row', gap: 16, marginTop: 10 }}>
+                      <View>
+                        <Text style={{ fontSize: 18, fontWeight: '800', color: theme.background }}>{sessionTotalSets}</Text>
+                        <Text style={{ fontSize: 9, color: theme.background + '60' }}>SETS</Text>
+                      </View>
+                      <View>
+                        <Text style={{ fontSize: 18, fontWeight: '800', color: theme.background }}>{sessionVolume > 0 ? formatNumber(Math.round(sessionVolume)) : '\u2014'}</Text>
+                        <Text style={{ fontSize: 9, color: theme.background + '60' }}>VOLUME</Text>
+                      </View>
+                      <View>
+                        <Text style={{ fontSize: 18, fontWeight: '800', color: theme.background }}>{todaySession.duration_minutes}</Text>
+                        <Text style={{ fontSize: 9, color: theme.background + '60' }}>MIN</Text>
+                      </View>
+                    </View>
+                  </View>
+                </Pressable>
+              )}
+              {/* Workout complete card */}
+              <Pressable
+                onPress={() => router.push({
+                  pathname: '/workout/session-view',
+                  params: {
+                    exercises: JSON.stringify(todaySession?.exercises ?? []),
+                    dayName: todaySession?.day_name ?? '',
+                    focus: todayWorkout?.focus ?? todaySession?.day_name ?? '',
+                    durationMinutes: String(todaySession?.duration_minutes ?? 0),
+                    completedAt: new Date().toISOString(),
+                    logId: todaySession?.id ?? '',
+                  },
+                })}
+                style={{ backgroundColor: focusCardColor, borderRadius: 24, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: focusCardColor }}
+              >
+                <Text style={{ position: 'absolute', top: 14, right: 16, fontSize: 11, fontWeight: '700', color: '#FFFFFFAA', letterSpacing: 1 }}>VIEW</Text>
+                <Ionicons name="checkmark-circle" size={48} color="#FFFFFF" />
+                <Text allowFontScaling style={{ fontSize: 20, fontWeight: '800', color: '#FFFFFF', marginTop: 12, marginBottom: 4 }}>
                   Workout complete
                 </Text>
-                <Text allowFontScaling style={{ fontSize: 13, color: theme.textSecondary, textAlign: 'center' }}>
+                <Text allowFontScaling style={{ fontSize: 13, color: '#FFFFFFAA', textAlign: 'center' }}>
                   Great work today. Recovery starts now.
                 </Text>
-                {todaySession && (
-                  <Pressable
-                    onPress={() => router.push({
-                      pathname: '/workout/session-view',
-                      params: {
-                        exercises: JSON.stringify(todaySession.exercises),
-                        dayName: todaySession.day_name,
-                        focus: todaySession.day_name,
-                        durationMinutes: String(todaySession.duration_minutes ?? 0),
-                        completedAt: new Date().toISOString(),
-                        logId: todaySession.id,
-                      },
-                    })}
-                    style={{ marginTop: 16, backgroundColor: theme.text, paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12 }}
-                  >
-                    <Text allowFontScaling style={{ color: theme.background, fontWeight: '600', fontSize: 13 }}>View Session</Text>
-                  </Pressable>
-                )}
-              </View>
+              </Pressable>
               <Pressable
                 onPress={() => router.push('/workout/quick')}
-                style={{ marginTop: 12, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
+                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  Create your own workout
+                  Create workout
                 </Text>
               </Pressable>
             </View>
@@ -433,7 +520,7 @@ export default function HomeScreen() {
                 style={{ marginTop: 12, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  Create your own workout
+                  Create workout
                 </Text>
               </Pressable>
             </View>
@@ -540,63 +627,22 @@ export default function HomeScreen() {
                 style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center', marginBottom: 12 }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  Create your own workout
+                  Create workout
                 </Text>
               </Pressable>
             </View>
           )}
 
-          {/* Today's Session card (post-workout share) */}
-          {todaySession && (
-            <View style={{ marginTop: 8, marginBottom: 16 }}>
-              <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.textSecondary, marginBottom: 8 }}>Today's Session</Text>
-              <View
-                ref={sessionCardRef}
-                collapsable={false}
-                style={{ backgroundColor: theme.text, borderRadius: 16, padding: 12 }}
-              >
-                <Text style={{ fontSize: 12, fontWeight: '800', color: theme.background, letterSpacing: 2, marginBottom: 8 }}>FORME</Text>
-                <Text style={{ fontSize: 16, fontWeight: '700', color: theme.background }}>{todaySession.day_name}</Text>
-                <View style={{ flexDirection: 'row', gap: 16, marginTop: 10 }}>
-                  <View>
-                    <Text style={{ fontSize: 18, fontWeight: '800', color: theme.background }}>{sessionTotalSets}</Text>
-                    <Text style={{ fontSize: 9, color: theme.background + '60' }}>SETS</Text>
-                  </View>
-                  <View>
-                    <Text style={{ fontSize: 18, fontWeight: '800', color: theme.background }}>{sessionVolume > 0 ? formatNumber(Math.round(sessionVolume)) : '\u2014'}</Text>
-                    <Text style={{ fontSize: 9, color: theme.background + '60' }}>VOLUME</Text>
-                  </View>
-                  <View>
-                    <Text style={{ fontSize: 18, fontWeight: '800', color: theme.background }}>{todaySession.duration_minutes}</Text>
-                    <Text style={{ fontSize: 9, color: theme.background + '60' }}>MIN</Text>
-                  </View>
-                </View>
-              </View>
-            </View>
-          )}
 
-          {/* Quick actions: activity (after completed workout) */}
-          {plan && todayCompleted && (
-            <View style={{ flexDirection: 'row', gap: 12, marginBottom: 12 }}>
-              <Pressable
-                onPress={() => setShowActivitySheet(true)}
-                style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: theme.surface, borderRadius: 16, paddingVertical: 12, borderWidth: 1, borderColor: theme.border }}
-              >
-                <Ionicons name="walk-outline" size={20} color={theme.chrome} />
-                <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>Add Activity</Text>
-              </Pressable>
-            </View>
-          )}
-
-          {/* Today's meals + Add meal (side by side) */}
-          <View style={{ flexDirection: 'row', gap: 8 }}>
+          {/* Today's stats + Add meal + Add cardio + Steps (four across) */}
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 16 }}>
             <Pressable
               onPress={() => router.push('/(tabs)/meals')}
               style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: theme.border }}
             >
-              <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text, marginBottom: 4 }}>Today's meals</Text>
+              <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text, marginBottom: 4 }}>Total Cal</Text>
               <Text allowFontScaling style={{ fontSize: 24, fontWeight: '800', color: theme.text }}>
-                {todayCalories != null ? `${todayCalories} cal` : '—'}
+                {todayCalories != null ? `${todayCalories}` : '—'}
               </Text>
             </Pressable>
             <Pressable
@@ -604,14 +650,29 @@ export default function HomeScreen() {
               style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center', justifyContent: 'center', gap: 6 }}
             >
               <Ionicons name="restaurant-outline" size={22} color={theme.chrome} />
-              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Add meal</Text>
+              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Add Meal</Text>
             </Pressable>
+            <Pressable
+              onPress={() => setShowActivitySheet(true)}
+              style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center', justifyContent: 'center', gap: 6 }}
+            >
+              <Ionicons name="walk-outline" size={22} color={theme.chrome} />
+              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Add Cardio</Text>
+            </Pressable>
+            <View
+              style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: theme.border }}
+            >
+              <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text, marginBottom: 4 }}>Steps</Text>
+              <Text allowFontScaling style={{ fontSize: 24, fontWeight: '800', color: theme.text }}>
+                {steps != null ? formatNumber(steps) : '—'}
+              </Text>
+            </View>
           </View>
 
           {/* Volume insight */}
           {volumeInsight && (
             <View style={{ backgroundColor: theme.surface, borderRadius: 12, padding: 12, marginTop: 12, borderWidth: 1, borderColor: theme.border, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <Ionicons name="trending-up" size={18} color={theme.chrome} />
+              <Ionicons name={volumeInsight.includes('%') ? 'trending-up' : 'barbell-outline'} size={18} color={theme.chrome} />
               <Text style={{ fontSize: 13, color: theme.text, flex: 1 }}>{volumeInsight}</Text>
             </View>
           )}

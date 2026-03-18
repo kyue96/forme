@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
+  ActivityIndicator,
   Animated,
+  AppState,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -18,6 +20,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import DraggableFlatList, { RenderItemParams } from 'react-native-draggable-flatlist';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 
 import { usePlan } from '@/lib/plan-context';
 import { useCustomExerciseStore } from '@/lib/custom-exercise-store';
@@ -25,11 +28,13 @@ import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { useWorkoutStore } from '@/lib/workout-store';
 import { SetRow, SetRowKeyboardAccessory } from '@/components/SetRow';
+import { BottomSheet } from '@/components/BottomSheet';
 import { LoggedExercise, LoggedSet } from '@/lib/types';
 import { SemanticColors } from '@/constants/theme';
-import { isBodyweightExercise, getInstructions, EXERCISE_DATABASE } from '@/lib/exercise-data';
+import { isBodyweightExercise, getInstructions, EXERCISE_DATABASE, EXERCISE_CATEGORIES } from '@/lib/exercise-data';
 import { formatTimeMs, formatTime, animateLayout, animateLayoutSlow } from '@/lib/utils';
 import { getWarmupRoutine } from '@/lib/warmup-data';
+import * as Notifications from 'expo-notifications';
 
 
 export default function WorkoutScreen() {
@@ -78,6 +83,10 @@ export default function WorkoutScreen() {
   const [saving, setSaving] = useState(false);
   const [addExerciseOpen, setAddExerciseOpen] = useState(false);
   const [exerciseSearch, setExerciseSearch] = useState('');
+  const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
+  const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const confirmAddDoneRef = useRef(false);
+  const [confirmAddDoneTick, setConfirmAddDoneTick] = useState(0);
   const [workoutStarted, setWorkoutStarted] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [confirmFinish, setConfirmFinish] = useState(false);
@@ -85,13 +94,19 @@ export default function WorkoutScreen() {
   const [confirmRestart, setConfirmRestart] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedForSuperset, setSelectedForSuperset] = useState<number[]>([]);
+  const [unlinkConfirmIdx, setUnlinkConfirmIdx] = useState<number | null>(null);
   const [warmupChecked, setWarmupChecked] = useState<Record<string, boolean>>({});
   const [warmupCollapsed, setWarmupCollapsed] = useState(activeWorkout?.warmupDone ?? false);
+  const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { exercises: customExercises, loaded: customLoaded, load: loadCustomExercises } = useCustomExerciseStore();
-
+  const { exercises: customExercises, loaded: customLoaded, load: loadCustomExercises, create: createCustomExercise } = useCustomExerciseStore();
+  const [scanning, setScanning] = useState(false);
+  const [showCreateCustom, setShowCreateCustom] = useState(false);
+  const [customName, setCustomName] = useState('');
+  const [customMuscleGroup, setCustomMuscleGroup] = useState('Chest');
+  const [customEquipment, setCustomEquipment] = useState('');
 
   // Rest timer state — integrated into main timer
   const [restRemaining, setRestRemaining] = useState(0);
@@ -101,10 +116,34 @@ export default function WorkoutScreen() {
   const isResuming = useRef(activeWorkout?.dayIndex === dayIdx && getElapsedMs() > 0);
   const swipeableRefs = useRef<Record<number, Swipeable | null>>({});
   const inputRefs = useRef<Record<string, TextInput | null>>({});
+  const listRef = useRef<any>(null);
 
   const warmupAnim = useRef(new Animated.Value(1)).current;
 
   const warmupAutoDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const restNotificationIdRef = useRef<string | null>(null);
+
+  // Keep a ref to loggedExercises so the AppState listener always has fresh data
+  const loggedExercisesRef = useRef(loggedExercises);
+  useEffect(() => { loggedExercisesRef.current = loggedExercises; }, [loggedExercises]);
+
+  // Force-save workout state when app goes to background (covers force-close)
+  // Timer keeps running via epoch-based elapsed calculation — no pause/resume needed
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        // Sync latest local loggedExercises to the store before the OS suspends us
+        const current = loggedExercisesRef.current;
+        if (current.length > 0) {
+          updateExercises(current);
+        }
+      } else if (nextState === 'active') {
+        // Recalculate display immediately when returning to foreground
+        setDisplayMs(getElapsedMs());
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   const dismissWarmup = () => {
     if (warmupAutoDismissRef.current) clearTimeout(warmupAutoDismissRef.current);
@@ -250,25 +289,118 @@ export default function WorkoutScreen() {
     if (completedSets.length === 0) return null;
     const lastWeight = completedSets[0].weight!;
     const lastReps = completedSets[0].reps;
-    if (lastReps > 12) return Math.round((lastWeight * 1.05) / 2.5) * 2.5;
-    if (lastReps < 6) return Math.round((lastWeight * 0.9) / 2.5) * 2.5;
+
+    // Determine weight increment based on exercise name
+    let increment = 5; // default
+    const lower = exerciseName.toLowerCase();
+    if (lower.includes('cable') || lower.includes('machine')) {
+      increment = 10;
+    } else if (lower.includes('dumbbell') || lower.includes('barbell')) {
+      increment = 5;
+    }
+
+    if (lastReps > 12) return Math.round((lastWeight * 1.05) / increment) * increment;
+    if (lastReps < 6) return Math.round((lastWeight * 0.9) / increment) * increment;
     return lastWeight;
   };
 
+  const handleCameraScan = async () => {
+    try {
+      const { status } = await ImagePicker.requestCameraPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Camera access is required to scan equipment.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        quality: 0.5,
+        base64: true,
+      });
+
+      if (result.canceled || !result.assets?.[0]?.base64) return;
+
+      setScanning(true);
+
+      const { data: { session } } = await supabase.auth.getSession();
+      const response = await fetch(
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1/identify-machine`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}`,
+          },
+          body: JSON.stringify({ image: result.assets[0].base64 }),
+        }
+      );
+
+      const data = await response.json();
+
+      if (data.name) {
+        // Pre-fill the custom exercise form with the identified info
+        setCustomName(data.name);
+        setCustomMuscleGroup(data.muscleGroup || 'Chest');
+        setCustomEquipment(data.equipment || '');
+        setShowCreateCustom(true);
+      } else {
+        Alert.alert('Could not identify', 'Unable to identify the equipment. Try taking a clearer photo or create a custom exercise manually.');
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to scan equipment. Please try again.');
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  // --- Notification helpers ---
+  const requestNotificationPermissions = async () => {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== 'granted') {
+      await Notifications.requestPermissionsAsync();
+    }
+  };
+
+  const scheduleRestNotification = async (seconds: number) => {
+    try {
+      await requestNotificationPermissions();
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Rest Timer',
+          body: 'Rest is over.',
+          sound: true,
+        },
+        trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds, repeats: false },
+      });
+      restNotificationIdRef.current = id;
+    } catch {}
+  };
+
+  const cancelRestNotification = async () => {
+    if (restNotificationIdRef.current) {
+      try {
+        await Notifications.cancelScheduledNotificationAsync(restNotificationIdRef.current);
+      } catch {}
+      restNotificationIdRef.current = null;
+    }
+  };
 
   // Start rest timer (yellow timer + haptics on end)
   const startRestTimer = (manual = false) => {
     if (!manual && !restTimerEnabled) return;
     // Clear existing rest timer if any
     if (restIntervalRef.current) clearInterval(restIntervalRef.current);
+    cancelRestNotification();
 
     setRestRemaining(restTimerDuration);
+    scheduleRestNotification(restTimerDuration);
     restIntervalRef.current = setInterval(() => {
       setRestRemaining((prev) => {
         if (prev <= 1) {
           if (restIntervalRef.current) clearInterval(restIntervalRef.current);
           restIntervalRef.current = null;
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+          restNotificationIdRef.current = null; // Already fired
           return 0;
         }
         return prev - 1;
@@ -280,6 +412,7 @@ export default function WorkoutScreen() {
     if (restIntervalRef.current) clearInterval(restIntervalRef.current);
     restIntervalRef.current = null;
     setRestRemaining(0);
+    cancelRestNotification();
   };
 
   // Cleanup rest timer on unmount
@@ -351,6 +484,15 @@ export default function WorkoutScreen() {
     );
   }
 
+  // Scroll expanded card to top of visible area
+  const scrollToExercise = (exIdx: number) => {
+    setTimeout(() => {
+      try {
+        listRef.current?.scrollToIndex({ index: exIdx, animated: true, viewOffset: 0 });
+      } catch {}
+    }, 350);
+  };
+
   const updateSet = (exIdx: number, setIdx: number, data: LoggedSet) => {
     // Auto-start clock on first data entry
     if (!workoutStarted && (data.weight !== null || data.reps > 0)) {
@@ -360,21 +502,74 @@ export default function WorkoutScreen() {
     }
     setLoggedExercises((prev) => {
       const updated = [...prev];
-      updated[exIdx] = {
-        ...updated[exIdx],
-        sets: updated[exIdx].sets.map((s, i) => (i === setIdx ? data : s)),
-      };
+      const oldSet = updated[exIdx].sets[setIdx];
+      const weightChanged = data.weight !== oldSet.weight && data.weight !== null;
+      const newSets = updated[exIdx].sets.map((s, i) => (i === setIdx ? data : s));
+
+      // Auto-flow weight forward to subsequent unfilled sets (no reps entered yet)
+      if (weightChanged) {
+        for (let i = setIdx + 1; i < newSets.length; i++) {
+          if (newSets[i].reps === 0 && !newSets[i].completed) {
+            newSets[i] = { ...newSets[i], weight: data.weight };
+          }
+        }
+      }
+
+      updated[exIdx] = { ...updated[exIdx], sets: newSets };
       return updated;
     });
+  };
+
+  // Auto-complete filled-but-unchecked sets when collapsing an exercise card
+  const autoCompleteSetsOnCollapse = (exIdx: number) => {
+    const exercise = loggedExercises[exIdx];
+    if (!exercise) return;
+    const isBW = isBodyweightExercise(exercise.name);
+    let anyChanged = false;
+    const updatedSets = exercise.sets.map((s) => {
+      if (s.completed) return s;
+      const hasWeight = isBW || (s.weight != null && s.weight > 0);
+      const hasReps = s.reps > 0;
+      if (hasWeight && hasReps) {
+        anyChanged = true;
+        return { ...s, completed: true };
+      }
+      return s;
+    });
+    if (anyChanged) {
+      setLoggedExercises((prev) => {
+        const updated = [...prev];
+        updated[exIdx] = { ...updated[exIdx], sets: updatedSets };
+        return updated;
+      });
+    }
   };
 
   const completeSet = (exIdx: number, setIdx: number) => {
     const currentSet = loggedExercises[exIdx].sets[setIdx];
     updateSet(exIdx, setIdx, { ...currentSet, completed: true });
-    // Prefill next set's weight if it's still empty
+    // Smart weight suggestion for next set based on current set's reps
     const nextSet = loggedExercises[exIdx].sets[setIdx + 1];
-    if (nextSet && nextSet.weight == null && currentSet.weight != null) {
-      updateSet(exIdx, setIdx + 1, { ...nextSet, weight: currentSet.weight });
+    if (nextSet && currentSet.weight != null) {
+      let suggestedWeight = currentSet.weight;
+      const weightStep = weightUnit === 'lbs' ? 5 : 2.5;
+
+      // Apply smart suggestions based on rep range
+      if (currentSet.reps < 5) {
+        // Low reps: decrease weight by one plate
+        suggestedWeight = Math.max(0, currentSet.weight - weightStep);
+      } else if (currentSet.reps > 12) {
+        // High reps: increase weight by one plate
+        suggestedWeight = currentSet.weight + weightStep;
+      }
+      // Otherwise (5-12 reps): keep same weight
+
+      // Prefill weight if still empty, otherwise set as suggestion
+      if (nextSet.weight == null) {
+        updateSet(exIdx, setIdx + 1, { ...nextSet, weight: suggestedWeight, suggestedWeight });
+      } else {
+        updateSet(exIdx, setIdx + 1, { ...nextSet, suggestedWeight });
+      }
     }
     // Auto-advance to next exercise when all sets complete
     const updatedSets = loggedExercises[exIdx].sets.map((s, i) =>
@@ -447,6 +642,7 @@ export default function WorkoutScreen() {
       setTimeout(() => inputRefs.current[`${exIdx}-${newSetIdx}-r`]?.focus(), 100);
       return updated;
     });
+    scrollToExercise(exIdx);
   };
 
   const addDropSet = (exIdx: number) => {
@@ -595,11 +791,17 @@ export default function WorkoutScreen() {
   const currentExIdx = loggedExercises.findIndex((ex) => ex.sets.some((s) => !s.completed));
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
 
-  // Filter exercises for add modal
-  const filteredExercises = EXERCISE_DATABASE.filter((e) =>
-    e.name.toLowerCase().includes(exerciseSearch.toLowerCase()) &&
-    !loggedExercises.some((le) => le.name.toLowerCase() === e.name.toLowerCase())
-  );
+  // Group exercises by category for add modal
+  const groupedByCategory = EXERCISE_CATEGORIES
+    .filter((cat) => activeFilters.size === 0 || activeFilters.has(cat))
+    .map((cat) => ({
+      category: cat,
+      exercises: EXERCISE_DATABASE.filter((e) =>
+        e.category === cat &&
+        e.name.toLowerCase().includes(exerciseSearch.toLowerCase()) &&
+        !loggedExercises.some((le) => le.name.toLowerCase() === e.name.toLowerCase())
+      ),
+    })).filter((g) => g.exercises.length > 0);
 
   // Swipeable render — swipe left to reveal image + trash buttons
   const renderRightActions = (exIdx: number) => () => (
@@ -671,11 +873,19 @@ export default function WorkoutScreen() {
               </Pressable>
             ) : selectionMode ? (
               <Pressable
-                onPress={() => { setSelectionMode(false); setSelectedForSuperset([]); animateLayout(); }}
+                onPress={() => {
+                  if (selectedForSuperset.length === 2) {
+                    linkSelectedSuperset(selectedForSuperset[0], selectedForSuperset[1]);
+                  } else {
+                    setSelectionMode(false);
+                    setSelectedForSuperset([]);
+                    animateLayout();
+                  }
+                }}
                 hitSlop={12}
                 style={{ padding: 4 }}
               >
-                <Ionicons name="close-outline" size={26} color={theme.chrome} />
+                <Ionicons name="checkmark-circle" size={26} color={SemanticColors.success} />
               </Pressable>
             ) : (
               <>
@@ -702,17 +912,20 @@ export default function WorkoutScreen() {
 
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined} keyboardVerticalOffset={0}>
         <DraggableFlatList
+          ref={listRef}
           data={loggedExercises}
           keyExtractor={(_, i) => String(i)}
           onDragEnd={({ data }) => { setLoggedExercises(data); animateLayout(); Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light); }}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
+          onScrollBeginDrag={() => { if (unlinkConfirmIdx !== null) setUnlinkConfirmIdx(null); }}
           contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 120 }}
           ListHeaderComponent={(() => {
             const warmup = getWarmupRoutine(day?.focus ?? '');
             const totalItems = warmup.cardio.length + warmup.mobility.length;
             const checkedCount = Object.values(warmupChecked).filter(Boolean).length;
             const allWarmupDone = totalItems > 0 && checkedCount >= totalItems;
+            const anySetCompleted = loggedExercises.some(ex => ex.sets.some(s => s.completed));
 
             if (warmupCollapsed) {
               // Collapsed: tappable bar to re-expand
@@ -733,7 +946,12 @@ export default function WorkoutScreen() {
                   }}
                 >
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                    <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>Warm-Up</Text>
+                    <Text style={{
+                      fontSize: 15,
+                      fontWeight: '700',
+                      color: theme.text,
+                      textDecorationLine: (!allWarmupDone && anySetCompleted) ? 'line-through' : 'none',
+                    }}>Warm-Up</Text>
                     <Text style={{ fontSize: 12, color: allWarmupDone ? SemanticColors.success : theme.textSecondary }}>
                       {checkedCount}/{totalItems}
                     </Text>
@@ -849,11 +1067,28 @@ export default function WorkoutScreen() {
                   </Pressable>
                 )}
                 <View style={{ flex: 1, opacity: isActive ? 0.85 : 1 }}>
-                {/* Superset vertical connector between exercises */}
+                {/* Superset vertical connector — left-aligned under exercise number */}
                 {!isFirstOfSuperset && isInSuperset && !reorderMode && (
-                  <View style={{ alignItems: 'center', marginBottom: 4 }}>
-                    <View style={{ width: 2, height: 16, backgroundColor: theme.chrome, borderRadius: 1 }} />
-                  </View>
+                  <Pressable
+                    onPress={() => {
+                      if (unlinkConfirmIdx === exIdx) {
+                        unlinkSuperset(exIdx);
+                        setUnlinkConfirmIdx(null);
+                      } else {
+                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                        setUnlinkConfirmIdx(exIdx);
+                      }
+                    }}
+                    hitSlop={16}
+                    style={{ width: 24, marginRight: 10, alignItems: 'center', paddingVertical: 4, marginLeft: 8 }}
+                  >
+                    <Ionicons
+                      name="link"
+                      size={16}
+                      color={unlinkConfirmIdx === exIdx ? SemanticColors.danger : theme.chrome}
+                      style={{ transform: [{ rotate: '90deg' }] }}
+                    />
+                  </Pressable>
                 )}
                 <Swipeable
                   ref={(ref) => { swipeableRefs.current[exIdx] = ref; }}
@@ -869,14 +1104,23 @@ export default function WorkoutScreen() {
                       backgroundColor: isExpanded ? theme.surface : 'transparent',
                       borderWidth: isExpanded ? 1 : 0,
                       borderColor: theme.border,
-                      paddingVertical: 12,
+                      paddingTop: isInSuperset && !isFirstOfSuperset ? 4 : 12,
+                      paddingBottom: isInSuperset && !isLastOfSuperset ? 4 : 12,
                       paddingHorizontal: 12,
                     }}
                   >
                     <Pressable
                       onPress={() => {
+                        if (isExpanded) {
+                          autoCompleteSetsOnCollapse(exIdx);
+                        } else if (activeExercise !== null) {
+                          // Collapsing the previously active exercise
+                          autoCompleteSetsOnCollapse(activeExercise);
+                        }
                         animateLayout();
                         setActiveExercise(isExpanded ? null : exIdx);
+                        if (!isExpanded) scrollToExercise(exIdx);
+                        if (unlinkConfirmIdx !== null) setUnlinkConfirmIdx(null);
                       }}
                       onLongPress={() => {
                         if (!reorderMode) {
@@ -912,11 +1156,6 @@ export default function WorkoutScreen() {
                           </Text>
                         )}
                       </View>
-                      {isExpanded && logged.supersetGroupId && (
-                        <Pressable onPress={() => unlinkSuperset(exIdx)} hitSlop={8} style={{ padding: 4, marginLeft: 4 }}>
-                          <Ionicons name="git-compare-outline" size={14} color={theme.textSecondary} />
-                        </Pressable>
-                      )}
                       {isExpanded && loggedExercises.length > 1 && (
                         <Pressable onPress={() => removeExercise(exIdx)} hitSlop={8} style={{ padding: 4, marginLeft: 8 }}>
                           <Ionicons name="trash-outline" size={16} color={SemanticColors.danger} />
@@ -1026,28 +1265,6 @@ export default function WorkoutScreen() {
         />
         </KeyboardAvoidingView>
 
-        {/* Superset selection confirm button */}
-        {selectionMode && selectedForSuperset.length === 2 && (
-          <Pressable
-            onPress={() => linkSelectedSuperset(selectedForSuperset[0], selectedForSuperset[1])}
-            style={{
-              position: 'absolute',
-              bottom: 110,
-              alignSelf: 'center',
-              backgroundColor: SemanticColors.success,
-              borderRadius: 24,
-              paddingHorizontal: 24,
-              paddingVertical: 12,
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 8,
-              zIndex: 10,
-            }}
-          >
-            <Ionicons name="checkmark" size={18} color="#fff" />
-            <Text style={{ color: '#fff', fontWeight: '700', fontSize: 15 }}>Link as Superset</Text>
-          </Pressable>
-        )}
 
         {/* Bottom bar: Play | Timer + Rest | Finish — single row */}
         <View style={{ backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border, paddingHorizontal: 24, paddingTop: 10, paddingBottom: 28 }}>
@@ -1193,36 +1410,109 @@ export default function WorkoutScreen() {
               alignItems: 'center',
               justifyContent: 'space-between',
               paddingHorizontal: 20,
-              paddingVertical: 14,
+              paddingVertical: 10,
+              backgroundColor: theme.background,
               borderBottomWidth: 1,
               borderBottomColor: theme.border,
             }}>
-              <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text }}>
+              <Text style={{ fontSize: 17, fontWeight: '800', color: theme.text }}>
                 Add Exercise
               </Text>
-              <Pressable onPress={() => { setAddExerciseOpen(false); setExerciseSearch(''); }} hitSlop={12}>
-                <Ionicons name="close" size={24} color={theme.chrome} />
+              <Pressable
+                onPress={() => {
+                  if (confirmAddDoneRef.current) {
+                    confirmAddDoneRef.current = false;
+                    setAddExerciseOpen(false);
+                    setExerciseSearch('');
+                  } else {
+                    confirmAddDoneRef.current = true;
+                    setTimeout(() => { confirmAddDoneRef.current = false; setConfirmAddDoneTick((t) => t + 1); }, 3000);
+                    setConfirmAddDoneTick((t) => t + 1);
+                  }
+                }}
+                hitSlop={12}
+              >
+                <Ionicons
+                  name={confirmAddDoneRef.current ? 'checkmark-circle' : 'checkmark'}
+                  size={26}
+                  color={confirmAddDoneRef.current ? '#22C55E' : theme.chrome}
+                />
               </Pressable>
             </View>
 
             <View style={{ paddingHorizontal: 20, paddingVertical: 12 }}>
-              <TextInput
-                style={{
-                  fontSize: 16,
-                  color: theme.text,
-                  backgroundColor: theme.surface,
-                  borderRadius: 12,
-                  paddingHorizontal: 16,
-                  paddingVertical: 12,
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                }}
-                placeholder="Search exercises…"
-                placeholderTextColor={theme.textSecondary}
-                value={exerciseSearch}
-                onChangeText={setExerciseSearch}
-                autoFocus
-              />
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: theme.surface,
+                borderWidth: 1,
+                borderColor: theme.border,
+                borderRadius: 12,
+                paddingHorizontal: 12,
+              }}>
+                <Ionicons name="search-outline" size={18} color={theme.textSecondary} />
+                <TextInput
+                  style={{ flex: 1, paddingVertical: 12, paddingHorizontal: 8, fontSize: 16, color: theme.text }}
+                  placeholder="Search exercises…"
+                  placeholderTextColor={theme.textSecondary}
+                  value={exerciseSearch}
+                  onChangeText={setExerciseSearch}
+                  autoFocus
+                />
+                {exerciseSearch.length > 0 && (
+                  <Pressable onPress={() => setExerciseSearch('')} hitSlop={8}>
+                    <Ionicons name="close-circle" size={18} color={theme.textSecondary} />
+                  </Pressable>
+                )}
+                <Pressable
+                  onPress={() => { animateLayout(); setShowFilterMenu(!showFilterMenu); }}
+                  hitSlop={8}
+                  style={{ paddingLeft: 8 }}
+                >
+                  <Ionicons name="filter" size={18} color={activeFilters.size > 0 ? '#F59E0B' : theme.textSecondary} />
+                </Pressable>
+              </View>
+              {showFilterMenu && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    {EXERCISE_CATEGORIES.map((cat) => (
+                      <Pressable
+                        key={cat}
+                        onPress={() => { animateLayout(); setActiveFilters((prev) => { const next = new Set(prev); if (next.has(cat)) next.delete(cat); else next.add(cat); return next; }); }}
+                        style={{
+                          paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
+                          backgroundColor: activeFilters.has(cat) ? theme.text : theme.surface,
+                          borderWidth: 1, borderColor: activeFilters.has(cat) ? theme.text : theme.border,
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: activeFilters.has(cat) ? theme.background : theme.textSecondary }}>{cat}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </ScrollView>
+              )}
+
+              {/* Camera + Custom buttons */}
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 12 }}>
+                <Pressable
+                  onPress={handleCameraScan}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    paddingVertical: 12,
+                    borderRadius: 12, borderWidth: 1, borderColor: theme.border, borderStyle: 'dashed',
+                  }}
+                >
+                  <Ionicons name="camera-outline" size={20} color={theme.chrome} />
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: theme.chrome }}>Camera</Text>
+                </Pressable>
+              </View>
+
+              {scanning && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}>
+                  <ActivityIndicator size="small" color={theme.chrome} />
+                  <Text style={{ fontSize: 13, color: theme.textSecondary }}>Identifying equipment...</Text>
+                </View>
+              )}
             </View>
 
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
@@ -1241,27 +1531,71 @@ export default function WorkoutScreen() {
                     <Ionicons name="add-circle-outline" size={22} color={theme.chrome} />
                   </Pressable>
                 ))}
-              {filteredExercises.map((exercise, i) => (
-                <Pressable
-                  key={i}
-                  onPress={() => addExercise(exercise.name)}
-                  style={{
-                    paddingVertical: 14,
-                    borderBottomWidth: 1,
-                    borderBottomColor: theme.border,
-                    flexDirection: 'row',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                  }}
-                >
-                  <View>
-                    <Text style={{ fontSize: 16, color: theme.text, fontWeight: '500' }}>{exercise.name}</Text>
-                    <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>{exercise.category}</Text>
+              {groupedByCategory.map(({ category, exercises: catExercises }) => {
+                const isSearching = exerciseSearch.trim().length > 0;
+                const isCatExpanded = isSearching || expandedCategories.has(category);
+                return (
+                  <View key={category} style={{ marginBottom: 12 }}>
+                    <Pressable
+                      onPress={() => {
+                        animateLayout();
+                        setExpandedCategories((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(category)) next.delete(category);
+                          else next.add(category);
+                          return next;
+                        });
+                      }}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        paddingVertical: 8,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Ionicons
+                          name={isCatExpanded ? 'chevron-down' : 'chevron-forward'}
+                          size={16}
+                          color={theme.chrome}
+                        />
+                        <Text style={{
+                          fontSize: 12,
+                          fontWeight: '700',
+                          color: theme.chrome,
+                          textTransform: 'uppercase',
+                          letterSpacing: 1.5,
+                        }}>
+                          {category}
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary }}>{catExercises.length}</Text>
+                    </Pressable>
+                    {isCatExpanded && catExercises.map((ex) => (
+                      <Pressable
+                        key={ex.name}
+                        onPress={() => addExercise(ex.name)}
+                        style={{
+                          paddingVertical: 12,
+                          paddingHorizontal: 12,
+                          marginBottom: 4,
+                          borderRadius: 12,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        <View>
+                          <Text style={{ fontSize: 16, color: theme.text, fontWeight: '500' }}>{ex.name}</Text>
+                          <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>{ex.category}</Text>
+                        </View>
+                        <Ionicons name="add-circle-outline" size={22} color={theme.chrome} />
+                      </Pressable>
+                    ))}
                   </View>
-                  <Ionicons name="add-circle-outline" size={22} color={theme.chrome} />
-                </Pressable>
-              ))}
-              {filteredExercises.length === 0 && (
+                );
+              })}
+              {groupedByCategory.length === 0 && (
                 <Text style={{ color: theme.textSecondary, fontSize: 14, textAlign: 'center', marginTop: 40 }}>
                   No exercises found
                 </Text>
@@ -1269,6 +1603,65 @@ export default function WorkoutScreen() {
             </ScrollView>
           </SafeAreaView>
         </Modal>
+
+        {/* Custom Exercise Modal */}
+        <BottomSheet visible={showCreateCustom} onClose={() => { setShowCreateCustom(false); setCustomName(''); setCustomEquipment(''); }}>
+          <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text, marginBottom: 16 }}>Custom Exercise</Text>
+          <TextInput
+            style={{ fontSize: 16, color: theme.text, backgroundColor: theme.background, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderColor: theme.border, marginBottom: 12 }}
+            placeholder="Exercise name"
+            placeholderTextColor={theme.textSecondary}
+            value={customName}
+            onChangeText={setCustomName}
+            autoFocus
+          />
+          <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textSecondary, marginBottom: 8 }}>Muscle Group</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 12 }}>
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              {EXERCISE_CATEGORIES.map((cat) => (
+                <Pressable
+                  key={cat}
+                  onPress={() => setCustomMuscleGroup(cat)}
+                  style={{
+                    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
+                    backgroundColor: customMuscleGroup === cat ? theme.text : theme.background,
+                    borderWidth: 1, borderColor: customMuscleGroup === cat ? theme.text : theme.border,
+                  }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: customMuscleGroup === cat ? theme.background : theme.text }}>{cat}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </ScrollView>
+          <TextInput
+            style={{ fontSize: 16, color: theme.text, backgroundColor: theme.background, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, borderWidth: 1, borderColor: theme.border, marginBottom: 16 }}
+            placeholder="Equipment (optional)"
+            placeholderTextColor={theme.textSecondary}
+            value={customEquipment}
+            onChangeText={setCustomEquipment}
+          />
+          <View style={{ flexDirection: 'row', gap: 12 }}>
+            <Pressable
+              onPress={() => { setShowCreateCustom(false); setCustomName(''); setCustomEquipment(''); }}
+              style={{ flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: theme.border }}
+            >
+              <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text }}>Cancel</Text>
+            </Pressable>
+            <Pressable
+              onPress={async () => {
+                if (!customName.trim()) return;
+                await createCustomExercise(customName.trim(), customMuscleGroup, customEquipment.trim() || undefined);
+                addExercise(customName.trim());
+                setShowCreateCustom(false);
+                setCustomName('');
+                setCustomEquipment('');
+              }}
+              style={{ flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center', backgroundColor: theme.text }}
+            >
+              <Text style={{ fontSize: 16, fontWeight: '700', color: theme.background }}>Create</Text>
+            </Pressable>
+          </View>
+        </BottomSheet>
       </SafeAreaView>
     </GestureHandlerRootView>
   );
