@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   Pressable,
@@ -8,57 +8,142 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import * as Notifications from 'expo-notifications';
-
 import { useSettings } from '@/lib/settings-context';
 import { LoggedExercise } from '@/lib/types';
-import { EXERCISE_DATABASE } from '@/lib/exercise-data';
 import { formatNumber } from '@/lib/utils';
 import {
-  computeTotalVolume,
   computeTopE1RMs,
   computeVolumeByMuscle,
-  computeDensity,
-  computeAvgIntensity,
-  formatVolumeHeadline,
-  formatDensity,
-  formatIntensity,
-  getIntensityZone,
 } from '@/lib/workout-metrics';
+import { MuscleGroupPills } from '@/components/MuscleGroupPills';
+import { getExerciseCategories } from '@/lib/exercise-utils';
+import { supabase } from '@/lib/supabase';
+import { useUserStore } from '@/lib/user-store';
 
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: false,
-    shouldSetBadge: false,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
-
-function getMusclesWorked(exercises: LoggedExercise[]): string[] {
-  const muscles = new Set<string>();
-  for (const ex of exercises) {
-    const match = EXERCISE_DATABASE.find(
-      (e) => e.name.toLowerCase() === ex.name.toLowerCase()
-    );
-    if (match) muscles.add(match.category);
-    else {
-      const lower = ex.name.toLowerCase();
-      if (lower.includes('bench') || lower.includes('chest') || lower.includes('push') || lower.includes('fly')) muscles.add('Chest');
-      else if (lower.includes('row') || lower.includes('pull') || lower.includes('lat') || lower.includes('deadlift')) muscles.add('Back');
-      else if (lower.includes('squat') || lower.includes('leg') || lower.includes('lunge') || lower.includes('calf') || lower.includes('hip')) muscles.add('Legs');
-      else if (lower.includes('shoulder') || lower.includes('press') || lower.includes('raise') || lower.includes('delt')) muscles.add('Shoulders');
-      else if (lower.includes('curl') || lower.includes('tricep') || lower.includes('bicep')) muscles.add('Arms');
-      else if (lower.includes('plank') || lower.includes('crunch') || lower.includes('ab') || lower.includes('core')) muscles.add('Core');
-    }
-  }
-  return Array.from(muscles);
+interface VolumeChartProps {
+  data: Array<{ volume: number; date: string; label: string }>;
+  theme: any;
+  avatarColor: string | null;
+  currentIndex: number;
 }
+
+function VolumeChart({ data, theme, avatarColor, currentIndex }: VolumeChartProps) {
+  const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
+  const highlightColor = avatarColor || '#F59E0B';
+  const chartHeight = 160;
+  const barMinHeight = 4;
+  const yAxisWidth = 40;
+
+  // Y-axis: scale in increments of 5,000, max 100,000
+  const rawMax = Math.max(...data.map(d => d.volume), 1);
+  const scaleMax = Math.min(Math.ceil(rawMax / 5000) * 5000, 100000) || 5000;
+  const tickCount = Math.min(scaleMax / 5000, 5);
+  const ticks: number[] = [];
+  for (let i = 0; i <= tickCount; i++) {
+    ticks.push(Math.round((scaleMax / tickCount) * (tickCount - i)));
+  }
+
+  // Which bar to show label for
+  const activeIdx = selectedIdx ?? currentIndex;
+
+  return (
+    <View>
+      {/* Volume label for selected/current bar */}
+      <View style={{ height: 20, alignItems: 'center', marginBottom: 4 }}>
+        <Text style={{ fontSize: 12, fontWeight: '700', color: activeIdx === currentIndex ? highlightColor : theme.text }}>
+          {formatNumber(data[activeIdx]?.volume ?? 0)} {activeIdx === currentIndex ? '(today)' : ''}
+        </Text>
+      </View>
+
+      <View style={{ flexDirection: 'row' }}>
+        {/* Y-axis */}
+        <View style={{ width: yAxisWidth, height: chartHeight, justifyContent: 'space-between', paddingRight: 6 }}>
+          {ticks.map((tick, i) => (
+            <Text key={i} style={{ fontSize: 9, color: theme.textSecondary, textAlign: 'right' }}>
+              {tick >= 1000 ? `${Math.round(tick / 1000)}k` : tick}
+            </Text>
+          ))}
+        </View>
+
+        {/* Chart area */}
+        <View style={{ flex: 1, height: chartHeight, position: 'relative' }}>
+          {/* Grid lines */}
+          {ticks.map((_, i) => (
+            <View
+              key={`grid-${i}`}
+              style={{
+                position: 'absolute',
+                top: (chartHeight / (ticks.length - 1)) * i,
+                left: 0,
+                right: 0,
+                height: 1,
+                backgroundColor: theme.border,
+                opacity: 0.4,
+              }}
+            />
+          ))}
+
+          {/* Bars */}
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: chartHeight, gap: 4, paddingHorizontal: 2 }}>
+            {data.map((item, idx) => {
+              const isCurrent = idx === currentIndex;
+              const isSelected = idx === selectedIdx;
+              const heightPercent = scaleMax > 0 ? (item.volume / scaleMax) * 100 : 0;
+              const barHeight = Math.max(heightPercent * (chartHeight / 100), barMinHeight);
+              const isActive = isCurrent || isSelected;
+
+              return (
+                <Pressable
+                  key={idx}
+                  onPress={() => setSelectedIdx(selectedIdx === idx ? null : idx)}
+                  style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end', height: chartHeight }}
+                >
+                  <View style={{
+                    width: '80%',
+                    height: barHeight,
+                    backgroundColor: isCurrent ? highlightColor : (isSelected ? theme.text : theme.chrome + '30'),
+                    borderRadius: 4,
+                    ...(isActive && {
+                      shadowColor: isCurrent ? highlightColor : theme.text,
+                      shadowOffset: { width: 0, height: 2 },
+                      shadowOpacity: 0.3,
+                      shadowRadius: 4,
+                      elevation: 3,
+                    }),
+                  }} />
+                </Pressable>
+              );
+            })}
+          </View>
+        </View>
+      </View>
+
+      {/* X-axis: Date labels */}
+      <View style={{ flexDirection: 'row', gap: 4, marginTop: 6, marginLeft: yAxisWidth, paddingHorizontal: 2 }}>
+        {data.map((item, idx) => (
+          <Text
+            key={idx}
+            style={{
+              flex: 1,
+              fontSize: 9,
+              fontWeight: idx === currentIndex || idx === selectedIdx ? '700' : '400',
+              color: idx === currentIndex ? highlightColor : (idx === selectedIdx ? theme.text : theme.textSecondary),
+              textAlign: 'center',
+            }}
+          >
+            {item.label}
+          </Text>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 
 export default function PostWorkoutScreen() {
   const router = useRouter();
   const { weightUnit, theme } = useSettings();
+  const { avatarColor } = useUserStore();
   const params = useLocalSearchParams<{
     exercises: string;
     dayName: string;
@@ -66,7 +151,7 @@ export default function PostWorkoutScreen() {
     durationMinutes: string;
   }>();
 
-  const notificationSent = useRef(false);
+  const [historicalVolumes, setHistoricalVolumes] = useState<Array<{ volume: number; date: string; label: string }>>([]);
 
   const exercises: LoggedExercise[] = params.exercises ? JSON.parse(params.exercises) : [];
   const durationMinutes = parseInt(params.durationMinutes ?? '0', 10);
@@ -84,31 +169,47 @@ export default function PostWorkoutScreen() {
   );
   const displayVolume = weightUnit === 'lbs' ? Math.round(totalVolume * 2.205) : totalVolume;
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
-  const musclesWorked = getMusclesWorked(exercises);
+  const exerciseCategories = getExerciseCategories(exercises);
 
   // Advanced metrics
   const topE1RMs = computeTopE1RMs(exercises, 3);
   const volumeByMuscle = computeVolumeByMuscle(exercises);
-  const density = computeDensity(exercises, durationMinutes);
-  const avgIntensity = computeAvgIntensity(exercises);
-  const intensityZone = getIntensityZone(avgIntensity);
 
   useEffect(() => {
-    if (!notificationSent.current) {
-      notificationSent.current = true;
-      sendNotification();
-    }
+    fetchHistoricalVolumes();
   }, []);
 
-  const sendNotification = async () => {
+  const fetchHistoricalVolumes = async () => {
     try {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status !== 'granted') return;
-      await Notifications.scheduleNotificationAsync({
-        content: { title: 'Great workout!', body: 'Time to refuel \u2014 log your meal.' },
-        trigger: null,
-      });
-    } catch {}
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      const { data: logs } = await supabase
+        .from('workout_logs')
+        .select('exercises, completed_at, duration_minutes')
+        .eq('user_id', user.id)
+        .order('completed_at', { ascending: false })
+        .limit(8);
+
+      if (logs && logs.length > 0) {
+        const volumes = logs.map((log) => {
+          const logExercises = Array.isArray(log.exercises) ? log.exercises : JSON.parse(log.exercises || '[]');
+          const logVolume = logExercises.reduce(
+            (sum: number, ex: LoggedExercise) =>
+              sum + ex.sets.filter((s: any) => s.completed && s.weight != null)
+                .reduce((s: number, set: any) => s + (set.weight ?? 0) * set.reps, 0),
+            0
+          );
+          const convertedVolume = weightUnit === 'lbs' ? Math.round(logVolume * 2.205) : logVolume;
+          const date = new Date(log.completed_at);
+          const label = `${date.getMonth() + 1}/${date.getDate()}`;
+          return { volume: convertedVolume, date: log.completed_at, label };
+        });
+        setHistoricalVolumes(volumes.reverse());
+      }
+    } catch (error) {
+      console.error('Failed to fetch historical volumes:', error);
+    }
   };
 
   const formatDuration = (mins: number): string => {
@@ -140,71 +241,60 @@ export default function PostWorkoutScreen() {
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
         {/* Header */}
         <View style={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: 24 }}>
-          <Text style={{ fontSize: 28, fontWeight: '800', color: theme.text, marginBottom: 4 }}>Workout complete</Text>
-          <Text style={{ fontSize: 14, color: theme.textSecondary }}>{params.focus} · {params.dayName}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+            <Text style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>Workout Summary</Text>
+            <Pressable
+              onPress={() => router.push({
+                pathname: '/workout/card-picker',
+                params: {
+                  exercises: params.exercises ?? '[]',
+                  dayName: params.dayName ?? '',
+                  focus: params.focus ?? '',
+                  durationMinutes: params.durationMinutes ?? '0',
+                },
+              })}
+              hitSlop={12}
+            >
+              <Ionicons name="share-outline" size={22} color={theme.chrome} />
+            </Pressable>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+            <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text }}>{params.dayName || params.focus}</Text>
+            <MuscleGroupPills categories={exerciseCategories} size="normal" />
+          </View>
         </View>
 
         {/* Summary metrics */}
         <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
+          {/* Volume hero card */}
+          {displayVolume > 0 && (
+            <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 24, marginBottom: 12, alignItems: 'center' }}>
+              <Text style={{ fontSize: 42, fontWeight: '800', color: theme.text }}>{formatNumber(displayVolume)}</Text>
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 6 }}>{weightUnit === 'lbs' ? 'pounds moved' : 'kilograms moved'}</Text>
+            </View>
+          )}
+
+          {/* Three smaller cards: Sets, Reps, Time */}
           <View style={{ flexDirection: 'row', gap: 12 }}>
             <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
               <Text style={{ fontSize: 26, fontWeight: '700', color: theme.text }}>{totalSets}</Text>
-              <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>Sets</Text>
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>sets</Text>
             </View>
             <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
               <Text style={{ fontSize: 26, fontWeight: '700', color: theme.text }}>{totalReps}</Text>
-              <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>Reps</Text>
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>reps</Text>
             </View>
-            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
-              <Text style={{ fontSize: 26, fontWeight: '700', color: theme.text }}>{formatNumber(displayVolume)}</Text>
-              <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>{unitLabel} Moved</Text>
-            </View>
-          </View>
-          <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
             <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
               <Text style={{ fontSize: 26, fontWeight: '700', color: theme.text }}>{formatDuration(durationMinutes)}</Text>
-              <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>Time</Text>
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>time</Text>
             </View>
           </View>
-          {musclesWorked.length > 0 && (
+
+          {/* Volume Trend Chart */}
+          {historicalVolumes.length > 1 && (
             <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginTop: 12 }}>
-              <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 8 }}>Muscles Worked</Text>
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
-                {musclesWorked.map((m) => (
-                  <View key={m} style={{ backgroundColor: theme.background, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: theme.border }}>
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>{m}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-          )}
-
-          {/* Volume headline */}
-          {displayVolume > 0 && (
-            <View style={{ backgroundColor: theme.text, borderRadius: 16, padding: 16, marginTop: 12 }}>
-              <Text style={{ fontSize: 16, fontWeight: '700', color: theme.background, textAlign: 'center' }}>
-                {formatVolumeHeadline(displayVolume, unitLabel)}
-              </Text>
-            </View>
-          )}
-
-          {/* Density + Intensity row */}
-          {(density > 0 || avgIntensity > 0) && (
-            <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
-              {density > 0 && (
-                <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
-                  <Ionicons name="flash-outline" size={20} color={theme.chrome} style={{ marginBottom: 6 }} />
-                  <Text style={{ fontSize: 20, fontWeight: '700', color: theme.text }}>{formatDensity(density, unitLabel)}</Text>
-                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>Density</Text>
-                </View>
-              )}
-              {avgIntensity > 0 && (
-                <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
-                  <Ionicons name="speedometer-outline" size={20} color={theme.chrome} style={{ marginBottom: 6 }} />
-                  <Text style={{ fontSize: 20, fontWeight: '700', color: theme.text }}>{formatIntensity(avgIntensity)}</Text>
-                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>{intensityZone} Zone</Text>
-                </View>
-              )}
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>Volume Trend</Text>
+              <VolumeChart data={historicalVolumes} theme={theme} avatarColor={avatarColor} currentIndex={historicalVolumes.length - 1} />
             </View>
           )}
 
@@ -240,33 +330,8 @@ export default function PostWorkoutScreen() {
           )}
         </View>
 
-        {/* Share & Post buttons */}
+        {/* Post button */}
         <View style={{ paddingHorizontal: 24, marginBottom: 24, gap: 10 }}>
-          <Pressable
-            onPress={() => router.push({
-              pathname: '/workout/card-picker',
-              params: {
-                exercises: params.exercises ?? '[]',
-                dayName: params.dayName ?? '',
-                focus: params.focus ?? '',
-                durationMinutes: params.durationMinutes ?? '0',
-              },
-            })}
-            style={{
-              backgroundColor: theme.surface,
-              borderRadius: 16,
-              paddingVertical: 16,
-              alignItems: 'center',
-              borderWidth: 1,
-              borderColor: theme.border,
-              flexDirection: 'row',
-              justifyContent: 'center',
-              gap: 8,
-            }}
-          >
-            <Ionicons name="share-outline" size={20} color={theme.text} />
-            <Text style={{ fontSize: 15, fontWeight: '600', color: theme.text }}>Share Workout</Text>
-          </Pressable>
           <Pressable
             onPress={() => {
               const cardDataJson = JSON.stringify({
@@ -277,7 +342,7 @@ export default function PostWorkoutScreen() {
                 volume: displayVolume,
                 unitLabel,
                 durationMinutes,
-                muscles: musclesWorked,
+                muscles: exerciseCategories,
               });
               router.push({ pathname: '/create-post', params: { cardData: cardDataJson } });
             }}

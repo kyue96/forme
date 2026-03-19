@@ -228,7 +228,7 @@ export default function HistoryScreen() {
         {selectedDate && (
           <View style={{ paddingHorizontal: 24, marginTop: 16 }}>
             <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textSecondary, marginBottom: 12 }}>
-              {new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
+              {new Date(selectedDate + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
             </Text>
             {dayLogsLoading ? (
               <ActivityIndicator color={theme.chrome} />

@@ -104,7 +104,7 @@ export default function SettingsScreen() {
             label="Weight unit"
             right={
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                {(['kg', 'lbs'] as const).map(u => (
+                {(['lbs', 'kg'] as const).map(u => (
                   <Pressable
                     key={u}
                     onPress={() => setWeightUnit(u)}
@@ -168,7 +168,7 @@ export default function SettingsScreen() {
             label="Appearance"
             right={
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                {(['light', 'dark'] as const).map(m => (
+                {(['system', 'light', 'dark'] as const).map(m => (
                   <Pressable
                     key={m}
                     onPress={() => setThemeMode(m)}

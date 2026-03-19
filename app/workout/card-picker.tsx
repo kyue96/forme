@@ -70,7 +70,7 @@ export default function CardPickerScreen() {
   // Parse data
   const exercises: LoggedExercise[] = params.exercises ? JSON.parse(params.exercises) : [];
   const durationMinutes = parseInt(params.durationMinutes ?? '0', 10);
-  const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  const dateStr = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
   const totalSets = exercises.reduce((sum, ex) => sum + ex.sets.filter((s) => s.completed).length, 0);
   const totalReps = exercises.reduce(

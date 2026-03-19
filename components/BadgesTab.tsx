@@ -116,12 +116,6 @@ export function BadgesTab() {
 
   return (
     <View>
-      {/* Summary */}
-      <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: theme.border, alignItems: 'center' }}>
-        <Text style={{ fontSize: 32, fontWeight: '800', color: theme.text }}>{earnedCount}</Text>
-        <Text style={{ fontSize: 13, color: theme.textSecondary }}>of {BADGES.length} badges earned</Text>
-      </View>
-
       {/* Badge grid by category */}
       {grouped.map((group) => (
         <View key={group.category} style={{ marginBottom: 20 }}>

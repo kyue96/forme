@@ -168,14 +168,14 @@ export function computeBestSet(exercises: LoggedExercise[]): BestSetResult | nul
 
 /** Returns a fun comparison string for the total volume lifted (in lbs). */
 export function getVolumeComparison(volumeLbs: number): string {
-  if (volumeLbs >= 100_000) return '= weight of a blue whale\u2019s heart \U0001F40B';
-  if (volumeLbs >= 50_000) return '= weight of a fighter jet \u2708\uFE0F';
-  if (volumeLbs >= 20_000) return '= weight of a school bus \U0001F68C';
-  if (volumeLbs >= 10_000) return '= weight of a baby elephant \U0001F418';
-  if (volumeLbs >= 5_000) return '= weight of a hippo\u2019s jaw \U0001F99B';
-  if (volumeLbs >= 2_000) return '= weight of a grand piano \U0001F3B9';
-  if (volumeLbs >= 500) return '= weight of a grizzly bear cub \U0001F43B';
-  return '= weight of a golden retriever \U0001F415';
+  if (volumeLbs >= 100_000) return 'weight of a blue whale\'s heart';
+  if (volumeLbs >= 50_000) return 'weight of a fighter jet';
+  if (volumeLbs >= 20_000) return 'weight of a school bus';
+  if (volumeLbs >= 10_000) return 'weight of a baby elephant';
+  if (volumeLbs >= 5_000) return 'weight of a hippo\'s jaw';
+  if (volumeLbs >= 2_000) return 'weight of a grand piano';
+  if (volumeLbs >= 500) return 'weight of a grizzly bear cub';
+  return 'weight of a golden retriever';
 }
 
 // ── Formatting helpers ──

@@ -58,9 +58,7 @@ function formatDayDate(dayName: string): string {
   const monBasedIdx = dayIdx === 0 ? 6 : dayIdx - 1;
   const dayDate = new Date(monday);
   dayDate.setDate(monday.getDate() + monBasedIdx);
-  const month = dayDate.getMonth() + 1;
-  const day = dayDate.getDate();
-  return `${dayName} ${month}/${day}`;
+  return dayDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 }
 
 export default function WorkoutScreen() {
@@ -241,68 +239,36 @@ export default function WorkoutScreen() {
       >
         {/* Header */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <View>
-            <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text, marginBottom: 2 }}>
-              {activeTab === 'plan' ? 'Workout Plan' : activeTab === 'history' ? 'Workout History' : 'Achievements'}
-            </Text>
-            <Text allowFontScaling style={{ fontSize: 13, color: theme.textSecondary }}>
-              Today is {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-            </Text>
-          </View>
-          <View style={{ flexDirection: 'row', gap: 8 }}>
+          <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>
+            {activeTab === 'plan' ? 'Plan' : activeTab === 'history' ? 'History' : 'Achievements'}
+          </Text>
+          <View style={{ flexDirection: 'row', gap: 16 }}>
             <Pressable
               onPress={() => {
                 animateLayout();
                 setActiveTab('plan');
               }}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                backgroundColor: activeTab === 'plan' ? theme.text : theme.surface,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 1,
-                borderColor: activeTab === 'plan' ? theme.text : theme.border,
-              }}
+              hitSlop={8}
             >
-              <Ionicons name="barbell" size={20} color={activeTab === 'plan' ? theme.background : theme.chrome} />
+              <Ionicons name="barbell" size={22} color={activeTab === 'plan' ? focusCardColor : theme.chrome} />
             </Pressable>
             <Pressable
               onPress={() => {
                 animateLayout();
                 setActiveTab('history');
               }}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                backgroundColor: activeTab === 'history' ? theme.text : theme.surface,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 1,
-                borderColor: activeTab === 'history' ? theme.text : theme.border,
-              }}
+              hitSlop={8}
             >
-              <Ionicons name="calendar-outline" size={20} color={activeTab === 'history' ? theme.background : theme.chrome} />
+              <Ionicons name="calendar-outline" size={22} color={activeTab === 'history' ? focusCardColor : theme.chrome} />
             </Pressable>
             <Pressable
               onPress={() => {
                 animateLayout();
                 setActiveTab('badges');
               }}
-              style={{
-                width: 40,
-                height: 40,
-                borderRadius: 20,
-                backgroundColor: activeTab === 'badges' ? theme.text : theme.surface,
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderWidth: 1,
-                borderColor: activeTab === 'badges' ? theme.text : theme.border,
-              }}
+              hitSlop={8}
             >
-              <Ionicons name="trophy-outline" size={20} color={activeTab === 'badges' ? theme.background : theme.chrome} />
+              <Ionicons name="trophy-outline" size={22} color={activeTab === 'badges' ? focusCardColor : theme.chrome} />
             </Pressable>
           </View>
         </View>
@@ -335,7 +301,7 @@ export default function WorkoutScreen() {
                 return sortedDates.map((dateStr) => {
                   const dateObj = new Date(dateStr);
                   const dayAbbr = dateObj.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
-                  const monthDay = dateObj.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                  const monthDay = dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
 
                   return (
                     <View key={dateStr} style={{ flexDirection: 'row', marginBottom: 16 }}>
@@ -439,16 +405,16 @@ export default function WorkoutScreen() {
               {plan.weeklyPlan.map((day, i) => {
                 const isOpen = expandedDay === i;
                 const dayLogged = todayLoggedDays.has(day.dayName.toLowerCase());
+                const isNext = i === nextPlanIdx && !dayLogged;
                 return (
                   <View
                     key={i}
                     style={{
                       marginBottom: 10,
                       borderRadius: 16,
-                      backgroundColor: theme.surface,
-                      borderWidth: 1,
-                      borderColor: dayLogged ? '#22C55E' : (i === nextPlanIdx ? focusCardColor : theme.border),
-                      ...(i === nextPlanIdx && { borderLeftWidth: 3, borderLeftColor: focusCardColor }),
+                      backgroundColor: i === nextPlanIdx && !dayLogged ? focusCardColor : theme.surface,
+                      borderWidth: dayLogged ? 1 : 0,
+                      borderColor: dayLogged ? '#22C55E' : 'transparent',
                       overflow: 'hidden',
                     }}
                   >
@@ -467,23 +433,23 @@ export default function WorkoutScreen() {
                       }}
                     >
                       <View style={{ flex: 1 }}>
-                        <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
+                        <Text allowFontScaling style={{ fontSize: 11, color: isNext ? '#FFFFFF99' : theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
                           {formatDayDate(day.dayName)}
                         </Text>
-                        <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>
-                          {day.focus}
-                        </Text>
-                        <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                          <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: isNext ? '#FFFFFF' : theme.text }}>
+                            {day.focus}
+                          </Text>
+                          {!isNext && <MuscleGroupPills categories={getExerciseCategories(day.exercises)} size="normal" />}
+                        </View>
+                        <Text allowFontScaling style={{ fontSize: 12, color: isNext ? '#FFFFFFCC' : theme.textSecondary, marginTop: 2 }}>
                           {day.exercises.length} exercises
                         </Text>
-                        <View style={{ marginTop: 4 }}>
-                          <MuscleGroupPills categories={getExerciseCategories(day.exercises)} size="small" />
-                        </View>
                       </View>
                       <Ionicons
                         name={isOpen ? 'chevron-up' : 'chevron-down'}
                         size={18}
-                        color={theme.chrome}
+                        color={isNext ? '#FFFFFFCC' : theme.chrome}
                       />
                     </Pressable>
 
@@ -499,7 +465,7 @@ export default function WorkoutScreen() {
                                 {ex.name}
                               </Text>
                               <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 1 }}>
-                                {ex.sets} sets · {ex.reps} reps · {ex.rest} rest
+                                {ex.sets} sets · {ex.reps} reps
                               </Text>
                             </View>
                           </View>

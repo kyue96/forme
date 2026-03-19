@@ -1,10 +1,11 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './supabase';
 import { Colors, ThemeColors } from '../constants/theme';
 
 export type WeightUnit = 'lbs' | 'kg';
-export type ThemeMode = 'light' | 'dark';
+export type ThemeMode = 'light' | 'dark' | 'system';
 export type RestTimerDuration = 30 | 45 | 60 | 90 | 120;
 
 const STORAGE_KEYS = {
@@ -40,7 +41,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [warmupEnabled, setWarmupEnabledState] = useState(true);
   const [restTimerEnabled, setRestTimerEnabledState] = useState(true);
   const [restTimerDuration, setRestTimerDurationState] = useState<RestTimerDuration>(60);
-  const [themeMode, setThemeModeState] = useState<ThemeMode>('dark');
+  const [themeMode, setThemeModeState] = useState<ThemeMode>('system');
+  const systemColorScheme = useColorScheme();
   const [loading, setLoading] = useState(true);
 
   useEffect(() => { loadSettings(); }, []);
@@ -56,7 +58,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         AsyncStorage.getItem(STORAGE_KEYS.warmupEnabled),
       ]);
 
-      if (storedTheme === 'light' || storedTheme === 'dark') setThemeModeState(storedTheme);
+      if (storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system') setThemeModeState(storedTheme);
       if (storedUnit === 'lbs' || storedUnit === 'kg') setWeightUnitState(storedUnit);
       if (storedTimer) {
         const d = parseInt(storedTimer) as RestTimerDuration;
@@ -122,7 +124,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     saveToProfile({ theme_mode: mode });
   };
 
-  const theme = Colors[themeMode];
+  const resolvedMode = themeMode === 'system' ? (systemColorScheme ?? 'dark') : themeMode;
+  const theme = Colors[resolvedMode];
 
   return (
     <SettingsContext.Provider

@@ -1,6 +1,7 @@
 import { useCallback, useRef, useState } from 'react';
 import { Animated, PanResponder, Pressable, Text, View } from 'react-native';
 import { useSettings } from '@/lib/settings-context';
+import { useUserStore } from '@/lib/user-store';
 
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const DAY_NAMES_FULL = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -44,6 +45,8 @@ interface WeeklyCalendarProps {
 
 export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, selectedDay }: WeeklyCalendarProps) {
   const { theme } = useSettings();
+  const avatarColor = useUserStore((s) => s.avatarColor);
+  const dotColor = avatarColor || '#F59E0B';
   const [weekOffset, setWeekOffset] = useState(0);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
@@ -144,33 +147,22 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
                   {DAY_LABELS[i]}
                 </Text>
                 <View style={{
-                  width: isToday ? 44 : 36,
-                  height: isToday ? 44 : 36,
-                  borderRadius: isToday ? 22 : 18,
+                  width: 36,
+                  height: 36,
+                  borderRadius: 18,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  borderWidth: isToday ? 1.5 : 0,
-                  borderColor: isToday ? theme.text : 'transparent',
-                  backgroundColor: 'transparent',
+                  backgroundColor: theme.surface,
+                  borderWidth: isToday ? 2 : (isSelected ? 1.5 : 1),
+                  borderColor: isToday ? dotColor : (isSelected ? theme.text : theme.border),
                 }}>
-                  <View style={{
-                    width: 36,
-                    height: 36,
-                    borderRadius: 18,
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    backgroundColor: theme.surface,
-                    borderWidth: isSelected ? 1.5 : 1,
-                    borderColor: isSelected ? theme.text : theme.border,
+                  <Text allowFontScaling style={{
+                    fontSize: 13,
+                    fontWeight: isToday ? '800' : '600',
+                    color: isToday ? dotColor : (done ? '#22C55E' : theme.textSecondary),
                   }}>
-                    <Text allowFontScaling style={{
-                      fontSize: 13,
-                      fontWeight: isToday ? '800' : '600',
-                      color: done ? '#22C55E' : theme.textSecondary,
-                    }}>
-                      {date.getDate()}
-                    </Text>
-                  </View>
+                    {date.getDate()}
+                  </Text>
                 </View>
               </Pressable>
             );

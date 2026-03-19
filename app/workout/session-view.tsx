@@ -71,8 +71,8 @@ export default function SessionViewScreen() {
 
   const completedDate = params.completedAt
     ? new Date(params.completedAt).toLocaleDateString('en-US', {
-        weekday: 'short',
-        month: 'short',
+        weekday: 'long',
+        month: 'long',
         day: 'numeric',
         hour: 'numeric',
         minute: '2-digit',
@@ -193,16 +193,15 @@ export default function SessionViewScreen() {
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Shareable session card */}
+        {/* Shareable session card — tap to view workout summary */}
         <Pressable
           onPress={() => router.push({
-            pathname: '/workout/card-picker',
+            pathname: '/workout/post-workout',
             params: {
               exercises: params.exercises ?? '[]',
               dayName: params.dayName ?? '',
               focus: params.focus ?? params.dayName ?? '',
               durationMinutes: params.durationMinutes ?? '0',
-              logId: params.logId ?? '',
             },
           })}
         >
@@ -272,7 +271,7 @@ export default function SessionViewScreen() {
                 <Text style={{
                   fontSize: 14,
                   fontWeight: '700',
-                  color: allSetsComplete ? SemanticColors.success : SemanticColors.warning,
+                  color: theme.textSecondary,
                   marginRight: 10,
                   minWidth: 16,
                   textAlign: 'center',
@@ -284,22 +283,9 @@ export default function SessionViewScreen() {
                     {logged.name}
                   </Text>
                   <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
-                    {logged.sets.length} sets · {logged.sets.filter(s => s.completed).length} completed
+                    {logged.sets.length} sets
                   </Text>
                 </View>
-                {/* Info icon - hidden until illustrations/thumbnails are ready */}
-                {isExpanded && params.logId && !isEditing && (
-                  <Pressable
-                    onPress={() => {
-                      animateLayout();
-                      setEditingExIdx(exIdx);
-                    }}
-                    hitSlop={8}
-                    style={{ marginLeft: 8 }}
-                  >
-                    <Ionicons name="pencil" size={16} color={theme.chrome} />
-                  </Pressable>
-                )}
                 <Ionicons
                   name={isExpanded ? 'chevron-up' : 'chevron-down'}
                   size={18}
@@ -344,9 +330,9 @@ export default function SessionViewScreen() {
                                       borderRadius: 8,
                                       borderWidth: 1,
                                       borderColor: theme.border,
-                                      paddingHorizontal: 10,
-                                      paddingVertical: 8,
-                                      fontSize: 16,
+                                      paddingHorizontal: 8,
+                                      paddingVertical: 4,
+                                      fontSize: 14,
                                       fontWeight: '600',
                                       color: theme.text,
                                     }}
@@ -369,19 +355,22 @@ export default function SessionViewScreen() {
                                   )}
                                 </View>
                               ) : (
-                                <View style={{
-                                  backgroundColor: theme.surface,
-                                  borderRadius: 8,
-                                  paddingHorizontal: 8,
-                                  paddingVertical: 4,
-                                }}>
+                                <Pressable
+                                  onPress={() => params.logId ? setEditingExIdx(exIdx) : undefined}
+                                  style={{
+                                    backgroundColor: theme.surface,
+                                    borderRadius: 8,
+                                    paddingHorizontal: 8,
+                                    paddingVertical: 4,
+                                  }}
+                                >
                                   <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>
                                     {set.weight != null ? `${set.weight} ${unitLabel}` : '\u2014'}
                                   </Text>
-                                </View>
+                                </Pressable>
                               )}
                             </View>
-                            <View style={{ width: 1, height: 32, backgroundColor: theme.border }} />
+                            <View style={{ width: 1, height: 24, backgroundColor: theme.border }} />
                           </>
                         )}
 
@@ -393,9 +382,9 @@ export default function SessionViewScreen() {
                                 borderRadius: 8,
                                 borderWidth: 1,
                                 borderColor: theme.border,
-                                paddingHorizontal: 10,
-                                paddingVertical: 8,
-                                fontSize: 16,
+                                paddingHorizontal: 8,
+                                paddingVertical: 4,
+                                fontSize: 14,
                                 fontWeight: '600',
                                 color: theme.text,
                               }}
@@ -412,16 +401,19 @@ export default function SessionViewScreen() {
                               }}
                             />
                           ) : (
-                            <View style={{
-                              backgroundColor: theme.surface,
-                              borderRadius: 8,
-                              paddingHorizontal: 8,
-                              paddingVertical: 4,
-                            }}>
+                            <Pressable
+                              onPress={() => params.logId ? setEditingExIdx(exIdx) : undefined}
+                              style={{
+                                backgroundColor: theme.surface,
+                                borderRadius: 8,
+                                paddingHorizontal: 8,
+                                paddingVertical: 4,
+                              }}
+                            >
                               <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>
                                 {set.reps > 0 ? `${set.reps} reps` : '\u2014'}
                               </Text>
-                            </View>
+                            </Pressable>
                           )}
                         </View>
                       </View>

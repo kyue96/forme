@@ -312,7 +312,7 @@ export default function CreatePostScreen() {
                       {item.day_name}
                     </Text>
                     <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
-                      {new Date(item.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                      {new Date(item.completed_at).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
                       {item.duration_minutes ? ` · ${item.duration_minutes}m` : ''}
                     </Text>
                   </View>
