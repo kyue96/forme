@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Modal, Pressable, Text, View } from 'react-native';
 import { Image as ExpoImage } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { getExerciseImageUrls } from '@/lib/exercise-images';
 
 interface ExerciseThumbnailProps {
@@ -13,16 +14,17 @@ interface ExerciseThumbnailProps {
 /**
  * Tappable exercise thumbnail that shows the start position image.
  * Tapping opens a modal with side-by-side start → end position images.
- * Shows a barbell placeholder if no image is available.
+ * If no image exists, tapping navigates to the exercise detail page.
  */
 export function ExerciseThumbnail({ exerciseName, size = 40, theme }: ExerciseThumbnailProps) {
   const [showModal, setShowModal] = useState(false);
+  const router = useRouter();
   const imgs = getExerciseImageUrls(exerciseName);
 
   return (
     <>
       <Pressable
-        onPress={imgs ? () => setShowModal(true) : undefined}
+        onPress={imgs ? () => setShowModal(true) : () => router.push({ pathname: '/exercise-detail', params: { exerciseName } })}
         style={{ width: size, height: size, borderRadius: 10, overflow: 'hidden', marginRight: 10, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border }}
       >
         {imgs ? (
