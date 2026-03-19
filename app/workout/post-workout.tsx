@@ -18,6 +18,17 @@ import { useSettings } from '@/lib/settings-context';
 import { LoggedExercise } from '@/lib/types';
 import { EXERCISE_DATABASE } from '@/lib/exercise-data';
 import { formatNumber } from '@/lib/utils';
+import {
+  computeTotalVolume,
+  computeTopE1RMs,
+  computeVolumeByMuscle,
+  computeDensity,
+  computeAvgIntensity,
+  formatVolumeHeadline,
+  formatDensity,
+  formatIntensity,
+  getIntensityZone,
+} from '@/lib/workout-metrics';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -80,6 +91,13 @@ export default function PostWorkoutScreen() {
   const displayVolume = weightUnit === 'lbs' ? Math.round(totalVolume * 2.205) : totalVolume;
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
   const musclesWorked = getMusclesWorked(exercises);
+
+  // Advanced metrics
+  const topE1RMs = computeTopE1RMs(exercises, 3);
+  const volumeByMuscle = computeVolumeByMuscle(exercises);
+  const density = computeDensity(exercises, durationMinutes);
+  const avgIntensity = computeAvgIntensity(exercises);
+  const intensityZone = getIntensityZone(avgIntensity);
 
   const [showCard, setShowCard] = useState(false);
 
@@ -186,6 +204,66 @@ export default function PostWorkoutScreen() {
               </View>
             </View>
           )}
+
+          {/* Volume headline */}
+          {displayVolume > 0 && (
+            <View style={{ backgroundColor: theme.text, borderRadius: 16, padding: 16, marginTop: 12 }}>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: theme.background, textAlign: 'center' }}>
+                {formatVolumeHeadline(displayVolume, unitLabel)}
+              </Text>
+            </View>
+          )}
+
+          {/* Density + Intensity row */}
+          {(density > 0 || avgIntensity > 0) && (
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 12 }}>
+              {density > 0 && (
+                <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
+                  <Ionicons name="flash-outline" size={20} color={theme.chrome} style={{ marginBottom: 6 }} />
+                  <Text style={{ fontSize: 20, fontWeight: '700', color: theme.text }}>{formatDensity(density, unitLabel)}</Text>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>Density</Text>
+                </View>
+              )}
+              {avgIntensity > 0 && (
+                <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 16, alignItems: 'center' }}>
+                  <Ionicons name="speedometer-outline" size={20} color={theme.chrome} style={{ marginBottom: 6 }} />
+                  <Text style={{ fontSize: 20, fontWeight: '700', color: theme.text }}>{formatIntensity(avgIntensity)}</Text>
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4 }}>{intensityZone} Zone</Text>
+                </View>
+              )}
+            </View>
+          )}
+
+          {/* Top e1RM estimates */}
+          {topE1RMs.length > 0 && (
+            <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginTop: 12 }}>
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 10 }}>Estimated 1-Rep Max</Text>
+              {topE1RMs.map((item, i) => (
+                <View key={item.exerciseName} style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 8, borderTopWidth: i > 0 ? 1 : 0, borderTopColor: theme.border }}>
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text, flex: 1 }} numberOfLines={1}>{item.exerciseName}</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{formatNumber(item.e1rm)} {unitLabel}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Volume by muscle group */}
+          {volumeByMuscle.length > 0 && (
+            <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginTop: 12 }}>
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 10 }}>Volume by Muscle</Text>
+              {volumeByMuscle.map((item) => (
+                <View key={item.muscle} style={{ marginBottom: 10 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>{item.muscle}</Text>
+                    <Text style={{ fontSize: 12, color: theme.textSecondary }}>{formatNumber(item.volume)} {unitLabel} ({item.percentage}%)</Text>
+                  </View>
+                  <View style={{ height: 6, backgroundColor: theme.border, borderRadius: 3, overflow: 'hidden' }}>
+                    <View style={{ height: 6, backgroundColor: theme.chrome, borderRadius: 3, width: `${item.percentage}%` }} />
+                  </View>
+                </View>
+              ))}
+            </View>
+          )}
         </View>
 
         {/* Share Workout button */}
@@ -248,6 +326,32 @@ export default function PostWorkoutScreen() {
                       </View>
                     ))}
                   </View>
+
+                  {/* Advanced metrics row */}
+                  {(density > 0 || topE1RMs.length > 0) && (
+                    <View style={{ marginTop: 14, paddingTop: 14, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.15)' }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
+                        {density > 0 && (
+                          <View style={{ alignItems: 'center', flex: 1 }}>
+                            <Text style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', fontVariant: ['tabular-nums'] }}>{formatNumber(density)}</Text>
+                            <Text style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', letterSpacing: 1.5, marginTop: 2 }}>{unitLabel.toUpperCase()}/MIN</Text>
+                          </View>
+                        )}
+                        {avgIntensity > 0 && (
+                          <View style={{ alignItems: 'center', flex: 1 }}>
+                            <Text style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', fontVariant: ['tabular-nums'] }}>{avgIntensity}%</Text>
+                            <Text style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', letterSpacing: 1.5, marginTop: 2 }}>INTENSITY</Text>
+                          </View>
+                        )}
+                        {topE1RMs.length > 0 && (
+                          <View style={{ alignItems: 'center', flex: 1 }}>
+                            <Text style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', fontVariant: ['tabular-nums'] }}>{formatNumber(topE1RMs[0].e1rm)}</Text>
+                            <Text style={{ fontSize: 9, color: 'rgba(255,255,255,0.4)', letterSpacing: 1.5, marginTop: 2 }}>TOP e1RM</Text>
+                          </View>
+                        )}
+                      </View>
+                    </View>
+                  )}
 
                   {/* Body part tags */}
                   {musclesWorked.length > 0 && (

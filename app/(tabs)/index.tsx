@@ -473,7 +473,7 @@ export default function HomeScreen() {
                     logId: todaySession?.id ?? '',
                   },
                 })}
-                style={{ backgroundColor: focusCardColor, borderRadius: 24, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: focusCardColor }}
+                style={{ backgroundColor: focusCardColor, borderRadius: 24, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: focusCardColor, marginBottom: 12 }}
               >
                 <Text style={{ position: 'absolute', top: 14, right: 16, fontSize: 11, fontWeight: '700', color: '#FFFFFFAA', letterSpacing: 1 }}>VIEW</Text>
                 <Ionicons name="checkmark-circle" size={48} color="#FFFFFF" />
@@ -486,7 +486,7 @@ export default function HomeScreen() {
               </Pressable>
               <Pressable
                 onPress={() => router.push('/workout/quick')}
-                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
+                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center', marginBottom: 12 }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
                   Create Workout
@@ -495,8 +495,8 @@ export default function HomeScreen() {
             </View>
 
           ) : !todayWorkout ? (
-            <View>
-              <View style={{ backgroundColor: theme.surface, borderRadius: 24, padding: 16, marginBottom: 16, borderWidth: 1, borderColor: theme.border }}>
+            <View style={{ gap: 12 }}>
+              <View style={{ backgroundColor: theme.surface, borderRadius: 24, padding: 16, borderWidth: 1, borderColor: theme.border }}>
                 <Text allowFontScaling style={{ fontSize: 18, fontWeight: '800', color: theme.text, marginBottom: 8 }}>Rest day</Text>
                 <Text allowFontScaling style={{ fontSize: 13, color: theme.textSecondary, lineHeight: 20, marginBottom: 16 }}>{quote}</Text>
                 <View style={{ backgroundColor: theme.background, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: theme.border }}>
@@ -521,7 +521,7 @@ export default function HomeScreen() {
               )}
               <Pressable
                 onPress={() => router.push('/workout/quick')}
-                style={{ marginTop: 12, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
+                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
                   Create Workout
@@ -643,7 +643,7 @@ export default function HomeScreen() {
 
 
           {/* Today's stats + Add meal + Add cardio + Steps (four across) */}
-          <View style={{ flexDirection: 'row', gap: 8 }}>
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
             <Pressable
               onPress={() => router.push('/(tabs)/meals')}
               style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: theme.border }}

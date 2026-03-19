@@ -14,6 +14,7 @@ import * as MediaLibrary from 'expo-media-library';
 import { useSettings } from '@/lib/settings-context';
 import { LoggedExercise } from '@/lib/types';
 import { formatNumber } from '@/lib/utils';
+import { computeDensity, computeTopE1RMs, computeAvgIntensity } from '@/lib/workout-metrics';
 
 export default function ShareCardScreen() {
   const router = useRouter();
@@ -29,6 +30,10 @@ export default function ShareCardScreen() {
   const sessionVolume = exercises.reduce(
     (sum, ex) => sum + ex.sets.filter(s => s.completed && s.weight != null).reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0), 0
   );
+
+  const density = computeDensity(exercises, durationMinutes);
+  const topE1RMs = computeTopE1RMs(exercises, 1);
+  const avgIntensity = computeAvgIntensity(exercises);
 
   const handleShareSession = useCallback(async () => {
     if (!sessionCardRef.current) return;
@@ -80,6 +85,30 @@ export default function ShareCardScreen() {
               <Text style={{ fontSize: 11, color: theme.background + '60', marginTop: 4 }}>MIN</Text>
             </View>
           </View>
+
+          {/* Advanced metrics */}
+          {(density > 0 || topE1RMs.length > 0 || avgIntensity > 0) && (
+            <View style={{ flexDirection: 'row', gap: 24, marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: theme.background + '20' }}>
+              {density > 0 && (
+                <View>
+                  <Text style={{ fontSize: 18, fontWeight: '800', color: theme.background }}>{formatNumber(density)}</Text>
+                  <Text style={{ fontSize: 11, color: theme.background + '60', marginTop: 4 }}>LBS/MIN</Text>
+                </View>
+              )}
+              {avgIntensity > 0 && (
+                <View>
+                  <Text style={{ fontSize: 18, fontWeight: '800', color: theme.background }}>{avgIntensity}%</Text>
+                  <Text style={{ fontSize: 11, color: theme.background + '60', marginTop: 4 }}>INTENSITY</Text>
+                </View>
+              )}
+              {topE1RMs.length > 0 && (
+                <View style={{ flex: 1 }}>
+                  <Text style={{ fontSize: 18, fontWeight: '800', color: theme.background }}>{formatNumber(topE1RMs[0].e1rm)}</Text>
+                  <Text style={{ fontSize: 11, color: theme.background + '60', marginTop: 4 }} numberOfLines={1}>e1RM</Text>
+                </View>
+              )}
+            </View>
+          )}
         </View>
       </View>
     </SafeAreaView>
