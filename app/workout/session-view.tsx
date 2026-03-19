@@ -19,7 +19,7 @@ import { useSettings } from '@/lib/settings-context';
 import { useUserStore } from '@/lib/user-store';
 import { LoggedExercise } from '@/lib/types';
 import { SemanticColors } from '@/constants/theme';
-import { isBodyweightExercise, getInstructions } from '@/lib/exercise-data';
+import { isBodyweightExercise } from '@/lib/exercise-data';
 import { formatTime, animateLayout, formatNumber } from '@/lib/utils';
 import { isBarbell } from '@/lib/plate-calculator';
 import { PlateCalculatorSheet } from '@/components/PlateCalculatorSheet';
@@ -77,7 +77,6 @@ export default function SessionViewScreen() {
     : '';
 
   const [activeExercise, setActiveExercise] = useState<number | 'all' | null>('all');
-  const [expandedDetails, setExpandedDetails] = useState<Record<number, boolean>>({});
 
   // Editable exercises (Step 13)
   const [editableExercises, setEditableExercises] = useState<LoggedExercise[]>(exercises);
@@ -234,8 +233,6 @@ export default function SessionViewScreen() {
         {/* Exercises */}
         {editableExercises.map((logged, exIdx) => {
           const isExpanded = activeExercise === 'all' || activeExercise === exIdx;
-          const detailsOpen = expandedDetails[exIdx] ?? false;
-          const instructions = getInstructions(logged.name);
           const isBW = isBodyweightExercise(logged.name);
           const allSetsComplete = logged?.sets.every((s) => s.completed) ?? false;
           const isEditing = editingExIdx === exIdx;
@@ -244,14 +241,14 @@ export default function SessionViewScreen() {
             <View
               key={exIdx}
               style={{
-                marginBottom: 12,
-                borderRadius: 16,
+                marginBottom: 8,
+                borderRadius: 14,
                 backgroundColor: isExpanded ? theme.surface : 'transparent',
                 borderWidth: isExpanded ? 1 : 0,
                 borderColor: theme.border,
-                padding: isExpanded ? 12 : 0,
-                paddingVertical: isExpanded ? 12 : 4,
-                paddingHorizontal: isExpanded ? 12 : 4,
+                padding: isExpanded ? 10 : 0,
+                paddingVertical: isExpanded ? 10 : 4,
+                paddingHorizontal: isExpanded ? 10 : 4,
               }}
             >
               <Pressable
@@ -264,7 +261,7 @@ export default function SessionViewScreen() {
                     setActiveExercise(isExpanded ? null : exIdx);
                   }
                 }}
-                style={{ flexDirection: 'row', alignItems: 'center', marginBottom: isExpanded ? 12 : 0 }}
+                style={{ flexDirection: 'row', alignItems: 'center', marginBottom: isExpanded ? 8 : 0 }}
               >
                 {/* Exercise number indicator */}
                 <Text style={{
@@ -314,9 +311,10 @@ export default function SessionViewScreen() {
                       style={{
                         flexDirection: 'row',
                         alignItems: 'center',
-                        marginBottom: 8,
-                        padding: 12,
-                        borderRadius: 12,
+                        marginBottom: 4,
+                        paddingHorizontal: 10,
+                        paddingVertical: 6,
+                        borderRadius: 10,
                         backgroundColor: set.completed ? theme.surface : theme.background,
                         borderWidth: 1,
                         borderColor: set.completed ? '#22C55E' : theme.border,
@@ -368,10 +366,10 @@ export default function SessionViewScreen() {
                                 <View style={{
                                   backgroundColor: theme.surface,
                                   borderRadius: 8,
-                                  paddingHorizontal: 10,
-                                  paddingVertical: 8,
+                                  paddingHorizontal: 8,
+                                  paddingVertical: 4,
                                 }}>
-                                  <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text }}>
+                                  <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>
                                     {set.weight != null ? `${set.weight} ${unitLabel}` : '\u2014'}
                                   </Text>
                                 </View>
@@ -411,10 +409,10 @@ export default function SessionViewScreen() {
                             <View style={{
                               backgroundColor: theme.surface,
                               borderRadius: 8,
-                              paddingHorizontal: 10,
-                              paddingVertical: 8,
+                              paddingHorizontal: 8,
+                              paddingVertical: 4,
                             }}>
-                              <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text }}>
+                              <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>
                                 {set.reps > 0 ? `${set.reps} reps` : '\u2014'}
                               </Text>
                             </View>
@@ -422,20 +420,6 @@ export default function SessionViewScreen() {
                         </View>
                       </View>
 
-                      {/* Completion indicator */}
-                      <View style={{
-                        marginLeft: 12,
-                        width: 20,
-                        height: 20,
-                        borderRadius: 10,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor: set.completed ? '#22C55E' : 'transparent',
-                        borderWidth: set.completed ? 0 : 2,
-                        borderColor: '#EAB308',
-                      }}>
-                        {set.completed && <Text style={{ color: '#FFFFFF', fontSize: 10, fontWeight: '700' }}>{'\u2713'}</Text>}
-                      </View>
                     </View>
                   ))}
 
@@ -471,43 +455,6 @@ export default function SessionViewScreen() {
                     </View>
                   )}
 
-                  {/* Exercise instructions toggle */}
-                  <Pressable
-                    onPress={() => {
-                      animateLayout();
-                      setExpandedDetails((prev) => ({ ...prev, [exIdx]: !prev[exIdx] }));
-                    }}
-                    style={{ paddingVertical: 8 }}
-                  >
-                    <Text style={{ fontSize: 13, fontWeight: '500', color: theme.textSecondary }}>
-                      {detailsOpen ? 'Hide instructions \u2191' : 'How to perform \u2193'}
-                    </Text>
-                  </Pressable>
-
-                  {detailsOpen && (
-                    <View style={{
-                      backgroundColor: theme.background,
-                      borderRadius: 12,
-                      padding: 12,
-                      marginBottom: 4,
-                      borderWidth: 1,
-                      borderColor: theme.border,
-                    }}>
-                      <Text style={{
-                        fontSize: 11,
-                        fontWeight: '700',
-                        color: theme.chrome,
-                        marginBottom: 6,
-                        textTransform: 'uppercase',
-                        letterSpacing: 1,
-                      }}>
-                        Instructions
-                      </Text>
-                      <Text style={{ fontSize: 14, color: theme.text, lineHeight: 20 }}>
-                        {instructions}
-                      </Text>
-                    </View>
-                  )}
                 </>
               )}
             </View>

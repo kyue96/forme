@@ -72,6 +72,8 @@ export default function QuickWorkoutScreen() {
   const [workoutName, setWorkoutName] = useState(activeWorkout?.dayName ?? 'My Workout');
   const [editingName, setEditingName] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
+  const confirmAddDoneRef = useRef(false);
+  const [confirmAddDoneTick, setConfirmAddDoneTick] = useState(0);
 
   // --- Workout state ---
   const [loggedExercises, setLoggedExercises] = useState<LoggedExercise[]>(() => {
@@ -87,11 +89,12 @@ export default function QuickWorkoutScreen() {
   const [saving, setSaving] = useState(false);
   const [addExerciseOpen, setAddExerciseOpen] = useState(false);
   const [exerciseSearch, setExerciseSearch] = useState('');
-  const [workoutStarted, setWorkoutStarted] = useState(false);
+  const [workoutStarted, setWorkoutStarted] = useState(() => activeWorkout?.dayIndex === -1 && getElapsedMs() > 0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [reorderMode, setReorderMode] = useState(false);
   const [confirmRestart, setConfirmRestart] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedForSuperset, setSelectedForSuperset] = useState<number[]>([]);
   const [unlinkConfirmIdx, setUnlinkConfirmIdx] = useState<number | null>(null);
@@ -99,6 +102,7 @@ export default function QuickWorkoutScreen() {
   const [warmupCollapsed, setWarmupCollapsed] = useState(activeWorkout?.warmupDone ?? false);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const discardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { exercises: customExercises, loaded: customLoaded, load: loadCustomExercises, create: createCustomExercise } = useCustomExerciseStore();
   const [showCreateCustom, setShowCreateCustom] = useState(false);
@@ -740,6 +744,21 @@ export default function QuickWorkoutScreen() {
     setTimeout(() => pauseWorkout(), 50);
   };
 
+  const handleDiscard = () => {
+    if (!confirmDiscard) {
+      setConfirmDiscard(true);
+      if (discardTimerRef.current) clearTimeout(discardTimerRef.current);
+      discardTimerRef.current = setTimeout(() => setConfirmDiscard(false), 3000);
+      return;
+    }
+    // Second tap - discard
+    setConfirmDiscard(false);
+    if (discardTimerRef.current) clearTimeout(discardTimerRef.current);
+    skipRestTimer();
+    clearWorkout();
+    router.back();
+  };
+
   const handleExit = () => {
     skipRestTimer();
     if (phase === 'workout') {
@@ -1185,10 +1204,15 @@ export default function QuickWorkoutScreen() {
   // Phase 2: Active Workout
   const currentExIdx = loggedExercises.findIndex((ex) => ex.sets.some((s) => !s.completed));
 
-  const filteredAddExercises = EXERCISE_DATABASE.filter((e) =>
-    e.name.toLowerCase().includes(exerciseSearch.toLowerCase()) &&
-    !loggedExercises.some((le) => le.name.toLowerCase() === e.name.toLowerCase())
-  );
+  const addGroupedByCategory = EXERCISE_CATEGORIES.map((cat) => ({
+    category: cat,
+    exercises: EXERCISE_DATABASE.filter((e) =>
+      e.category === cat &&
+      e.name.toLowerCase().includes(exerciseSearch.toLowerCase()) &&
+      !loggedExercises.some((le) => le.name.toLowerCase() === e.name.toLowerCase()) &&
+      (activeFilters.size === 0 || activeFilters.has(e.category))
+    ),
+  })).filter((g) => g.exercises.length > 0);
 
   const renderRightActions = (exIdx: number) => () => (
     <View style={{ flexDirection: 'row', gap: 4, marginLeft: 8 }}>
@@ -1294,6 +1318,10 @@ export default function QuickWorkoutScreen() {
                 {/* Restart - two-tap confirm */}
                 <Pressable onPress={handleRestart} hitSlop={12} style={{ padding: 4 }}>
                   <Ionicons name="refresh-outline" size={22} color={confirmRestart ? SemanticColors.danger : theme.chrome} />
+                </Pressable>
+                {/* Discard - two-tap confirm */}
+                <Pressable onPress={handleDiscard} hitSlop={12} style={{ padding: 4 }}>
+                  <Ionicons name="trash-outline" size={20} color={confirmDiscard ? SemanticColors.danger : theme.chrome} />
                 </Pressable>
                 <Pressable onPress={handleExit} hitSlop={12} style={{ padding: 4 }}>
                   <Ionicons name="close-outline" size={26} color={theme.chrome} />
@@ -1759,30 +1787,115 @@ export default function QuickWorkoutScreen() {
         <Modal visible={addExerciseOpen} animationType="slide" presentationStyle="pageSheet">
           <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }}>
             <View style={{
-              flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-              paddingHorizontal: 20, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.border,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingHorizontal: 20,
+              paddingVertical: 10,
+              backgroundColor: theme.background,
+              borderBottomWidth: 1,
+              borderBottomColor: theme.border,
             }}>
-              <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text }}>
+              <Text style={{ fontSize: 17, fontWeight: '800', color: theme.text }}>
                 Add Exercise
               </Text>
-              <Pressable onPress={() => { setAddExerciseOpen(false); setExerciseSearch(''); }} hitSlop={12}>
-                <Ionicons name="close" size={24} color={theme.chrome} />
+              <Pressable
+                onPress={() => {
+                  if (confirmAddDoneRef.current) {
+                    confirmAddDoneRef.current = false;
+                    setAddExerciseOpen(false);
+                    setExerciseSearch('');
+                  } else {
+                    confirmAddDoneRef.current = true;
+                    setTimeout(() => { confirmAddDoneRef.current = false; setConfirmAddDoneTick((t) => t + 1); }, 3000);
+                    setConfirmAddDoneTick((t) => t + 1);
+                  }
+                }}
+                hitSlop={12}
+              >
+                <Ionicons
+                  name={confirmAddDoneRef.current ? 'checkmark-circle' : 'checkmark'}
+                  size={26}
+                  color={confirmAddDoneRef.current ? '#22C55E' : theme.chrome}
+                />
               </Pressable>
             </View>
+
             <View style={{ paddingHorizontal: 20, paddingVertical: 12 }}>
-              <TextInput
-                style={{
-                  fontSize: 16, color: theme.text, backgroundColor: theme.surface,
-                  borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12,
-                  borderWidth: 1, borderColor: theme.border,
-                }}
-                placeholder="Search exercises…"
-                placeholderTextColor={theme.textSecondary}
-                value={exerciseSearch}
-                onChangeText={setExerciseSearch}
-                autoFocus
-              />
+              <View style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                backgroundColor: theme.surface,
+                borderWidth: 1,
+                borderColor: theme.border,
+                borderRadius: 12,
+                paddingHorizontal: 12,
+              }}>
+                <Ionicons name="search-outline" size={18} color={theme.textSecondary} />
+                <TextInput
+                  style={{ flex: 1, paddingVertical: 12, paddingHorizontal: 8, fontSize: 16, color: theme.text }}
+                  placeholder="Search exercises…"
+                  placeholderTextColor={theme.textSecondary}
+                  value={exerciseSearch}
+                  onChangeText={setExerciseSearch}
+                  autoFocus
+                />
+                {exerciseSearch.length > 0 && (
+                  <Pressable onPress={() => setExerciseSearch('')} hitSlop={8}>
+                    <Ionicons name="close-circle" size={18} color={theme.textSecondary} />
+                  </Pressable>
+                )}
+                <Pressable
+                  onPress={() => { animateLayout(); setShowFilterMenu(!showFilterMenu); }}
+                  hitSlop={8}
+                  style={{ paddingLeft: 8 }}
+                >
+                  <Ionicons name="filter" size={18} color={activeFilters.size > 0 ? '#F59E0B' : theme.textSecondary} />
+                </Pressable>
+              </View>
+              {showFilterMenu && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    {EXERCISE_CATEGORIES.map((cat) => (
+                      <Pressable
+                        key={cat}
+                        onPress={() => { animateLayout(); setActiveFilters((prev) => { const next = new Set(prev); if (next.has(cat)) next.delete(cat); else next.add(cat); return next; }); }}
+                        style={{
+                          paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16,
+                          backgroundColor: activeFilters.has(cat) ? theme.text : theme.surface,
+                          borderWidth: 1, borderColor: activeFilters.has(cat) ? theme.text : theme.border,
+                        }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: activeFilters.has(cat) ? theme.background : theme.textSecondary }}>{cat}</Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                </ScrollView>
+              )}
+
+              {/* Camera + Custom buttons */}
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 12, marginBottom: 12 }}>
+                <Pressable
+                  onPress={handleCameraScan}
+                  style={{
+                    flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+                    paddingVertical: 12,
+                    borderRadius: 12, borderWidth: 1, borderColor: theme.border, borderStyle: 'dashed',
+                  }}
+                >
+                  <Ionicons name="camera-outline" size={20} color={theme.chrome} />
+                  <Text style={{ fontSize: 14, fontWeight: '600', color: theme.chrome }}>Camera</Text>
+                </Pressable>
+              </View>
+
+              {scanning && (
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginBottom: 12 }}>
+                  <ActivityIndicator size="small" color={theme.chrome} />
+                  <Text style={{ fontSize: 13, color: theme.textSecondary }}>Identifying equipment...</Text>
+                </View>
+              )}
             </View>
+
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
               {customExercises
                 .filter((ce) => ce.name.toLowerCase().includes(exerciseSearch.toLowerCase()) && !loggedExercises.some((le) => le.name.toLowerCase() === ce.name.toLowerCase()))
@@ -1799,24 +1912,74 @@ export default function QuickWorkoutScreen() {
                     <Ionicons name="add-circle-outline" size={22} color={theme.chrome} />
                   </Pressable>
                 ))}
-              {filteredAddExercises.map((exercise, i) => (
-                <Pressable
-                  key={i}
-                  onPress={() => addExerciseDuringWorkout(exercise.name)}
-                  style={{
-                    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.border,
-                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                  }}
-                >
-                  <View>
-                    <Text style={{ fontSize: 16, color: theme.text, fontWeight: '500' }}>{exercise.name}</Text>
-                    <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>{exercise.category}</Text>
+              {addGroupedByCategory.map(({ category, exercises: catExercises }) => {
+                const isSearching = exerciseSearch.trim().length > 0;
+                const isCatExpanded = isSearching || expandedCategories.has(category);
+                return (
+                  <View key={category} style={{ marginBottom: 12 }}>
+                    <Pressable
+                      onPress={() => {
+                        animateLayout();
+                        setExpandedCategories((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(category)) next.delete(category);
+                          else next.add(category);
+                          return next;
+                        });
+                      }}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        paddingVertical: 8,
+                      }}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Ionicons
+                          name={isCatExpanded ? 'chevron-down' : 'chevron-forward'}
+                          size={16}
+                          color={theme.chrome}
+                        />
+                        <Text style={{
+                          fontSize: 12,
+                          fontWeight: '700',
+                          color: theme.chrome,
+                          textTransform: 'uppercase',
+                          letterSpacing: 1.5,
+                        }}>
+                          {category}
+                        </Text>
+                      </View>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary }}>{catExercises.length}</Text>
+                    </Pressable>
+                    {isCatExpanded && catExercises.map((ex) => (
+                      <Pressable
+                        key={ex.name}
+                        onPress={() => addExerciseDuringWorkout(ex.name)}
+                        style={{
+                          paddingVertical: 12,
+                          paddingHorizontal: 12,
+                          marginBottom: 4,
+                          borderRadius: 12,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}
+                      >
+                        <View>
+                          <Text style={{ fontSize: 16, color: theme.text, fontWeight: '500' }}>{ex.name}</Text>
+                          <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>{ex.category}</Text>
+                        </View>
+                        <Ionicons name="add-circle-outline" size={22} color={theme.chrome} />
+                      </Pressable>
+                    ))}
                   </View>
-                  <Ionicons name="add-circle-outline" size={22} color={theme.chrome} />
-                </Pressable>
-              ))}
-              {filteredAddExercises.length === 0 && (
-                <Text style={{ color: theme.textSecondary, fontSize: 14, textAlign: 'center', marginTop: 40 }}>No exercises found</Text>
+                );
+              })}
+              {addGroupedByCategory.length === 0 && (
+                <Text style={{ color: theme.textSecondary, fontSize: 14, textAlign: 'center', marginTop: 40 }}>
+                  No exercises found
+                </Text>
               )}
             </ScrollView>
           </SafeAreaView>

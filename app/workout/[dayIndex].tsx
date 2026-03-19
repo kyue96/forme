@@ -87,11 +87,12 @@ export default function WorkoutScreen() {
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const confirmAddDoneRef = useRef(false);
   const [confirmAddDoneTick, setConfirmAddDoneTick] = useState(0);
-  const [workoutStarted, setWorkoutStarted] = useState(false);
+  const [workoutStarted, setWorkoutStarted] = useState(() => activeWorkout?.dayIndex === dayIdx && getElapsedMs() > 0);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [reorderMode, setReorderMode] = useState(false);
   const [confirmRestart, setConfirmRestart] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectedForSuperset, setSelectedForSuperset] = useState<number[]>([]);
   const [unlinkConfirmIdx, setUnlinkConfirmIdx] = useState<number | null>(null);
@@ -100,6 +101,7 @@ export default function WorkoutScreen() {
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const discardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { exercises: customExercises, loaded: customLoaded, load: loadCustomExercises, create: createCustomExercise } = useCustomExerciseStore();
   const [scanning, setScanning] = useState(false);
@@ -455,6 +457,21 @@ export default function WorkoutScreen() {
     storeSetWarmupDone(false);
     warmupAnim.setValue(1);
     setTimeout(() => pauseWorkout(), 50);
+  };
+
+  const handleDiscard = () => {
+    if (!confirmDiscard) {
+      setConfirmDiscard(true);
+      if (discardTimerRef.current) clearTimeout(discardTimerRef.current);
+      discardTimerRef.current = setTimeout(() => setConfirmDiscard(false), 3000);
+      return;
+    }
+    // Second tap - discard
+    setConfirmDiscard(false);
+    if (discardTimerRef.current) clearTimeout(discardTimerRef.current);
+    skipRestTimer();
+    clearWorkout();
+    router.back();
   };
 
   const handleExit = () => {
@@ -900,6 +917,10 @@ export default function WorkoutScreen() {
                 {/* Restart - two-tap confirm */}
                 <Pressable onPress={handleRestart} hitSlop={12} style={{ padding: 4 }}>
                   <Ionicons name="refresh-outline" size={22} color={confirmRestart ? SemanticColors.danger : theme.chrome} />
+                </Pressable>
+                {/* Discard - two-tap confirm */}
+                <Pressable onPress={handleDiscard} hitSlop={12} style={{ padding: 4 }}>
+                  <Ionicons name="trash-outline" size={20} color={confirmDiscard ? SemanticColors.danger : theme.chrome} />
                 </Pressable>
                 {/* Exit */}
                 <Pressable onPress={handleExit} hitSlop={12} style={{ padding: 4 }}>
