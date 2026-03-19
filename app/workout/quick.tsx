@@ -39,6 +39,7 @@ import { formatTimeMs, formatTime, animateLayout, animateLayoutSlow } from '@/li
 import { getWarmupRoutine } from '@/lib/warmup-data';
 import { getExerciseImageUrls } from '@/lib/exercise-images';
 import { Image as ExpoImage } from 'expo-image';
+import { ExerciseThumbnail } from '@/components/ExerciseThumbnail';
 import * as Notifications from 'expo-notifications';
 
 type Phase = 'pick' | 'workout';
@@ -1572,21 +1573,8 @@ export default function QuickWorkoutScreen() {
                       }}>
                         {exIdx + 1}
                       </Text>
-                      {/* Exercise thumbnail */}
-                      {(() => {
-                        const imgUrl = getExerciseImageUrls(logged.name);
-                        return (
-                          <View style={{ width: 40, height: 40, borderRadius: 10, overflow: 'hidden', marginRight: 10, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border }}>
-                            {imgUrl ? (
-                              <ExpoImage source={{ uri: imgUrl.start }} style={{ width: 40, height: 40 }} contentFit="cover" cachePolicy="disk" />
-                            ) : (
-                              <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
-                                <Ionicons name="barbell-outline" size={18} color={theme.textSecondary} />
-                              </View>
-                            )}
-                          </View>
-                        );
-                      })()}
+                      {/* Exercise thumbnail - tap to view full illustration */}
+                      <ExerciseThumbnail exerciseName={logged.name} theme={theme} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>{logged.name}</Text>
                         <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
