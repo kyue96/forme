@@ -1573,8 +1573,6 @@ export default function QuickWorkoutScreen() {
                       }}>
                         {exIdx + 1}
                       </Text>
-                      {/* Exercise thumbnail - tap to view full illustration */}
-                      <ExerciseThumbnail exerciseName={logged.name} theme={theme} />
                       <View style={{ flex: 1 }}>
                         <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>{logged.name}</Text>
                         <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
@@ -1586,6 +1584,8 @@ export default function QuickWorkoutScreen() {
                           </Text>
                         )}
                       </View>
+                      {/* Info icon - navigate to exercise detail */}
+                      <ExerciseThumbnail exerciseName={logged.name} theme={theme} />
                       {isExpanded && loggedExercises.length > 1 && (
                         <Pressable onPress={() => removeExercise(exIdx)} hitSlop={8} style={{ padding: 4, marginLeft: 8 }}>
                           <Ionicons name="trash-outline" size={16} color={SemanticColors.danger} />
@@ -1596,23 +1596,6 @@ export default function QuickWorkoutScreen() {
 
                     {isExpanded && (
                       <>
-                        {/* Exercise images - start/end positions */}
-                        {(() => {
-                          const imgs = getExerciseImageUrls(logged.name);
-                          if (!imgs) return null;
-                          return (
-                            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, alignItems: 'center', justifyContent: 'center' }}>
-                              <View style={{ flex: 1, borderRadius: 12, overflow: 'hidden', backgroundColor: theme.background, borderWidth: 1, borderColor: theme.border }}>
-                                <ExpoImage source={{ uri: imgs.start }} style={{ width: '100%', aspectRatio: 1 }} contentFit="cover" cachePolicy="disk" />
-                              </View>
-                              <Ionicons name="arrow-forward" size={14} color={theme.textSecondary} />
-                              <View style={{ flex: 1, borderRadius: 12, overflow: 'hidden', backgroundColor: theme.background, borderWidth: 1, borderColor: theme.border }}>
-                                <ExpoImage source={{ uri: imgs.end }} style={{ width: '100%', aspectRatio: 1 }} contentFit="cover" cachePolicy="disk" />
-                              </View>
-                            </View>
-                          );
-                        })()}
-
                         <Pressable
                           onPress={() => {
                             animateLayout();
