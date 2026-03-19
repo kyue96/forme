@@ -426,7 +426,7 @@ export default function HomeScreen() {
               {todaySession && (
                 <Pressable
                   onPress={() => router.push({
-                    pathname: '/workout/share-card',
+                    pathname: '/workout/card-picker',
                     params: {
                       exercises: JSON.stringify(todaySession.exercises),
                       dayName: todaySession.day_name,
@@ -506,19 +506,33 @@ export default function HomeScreen() {
                   <Text allowFontScaling style={{ fontSize: 13, color: theme.text }}>{tip}</Text>
                 </View>
               </View>
-              {nextWorkout && (
-                <View style={{ backgroundColor: theme.text, borderRadius: 16, padding: 20 }}>
-                  <Text allowFontScaling style={{ fontSize: 10, color: theme.background + '66', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
-                    Up next
-                  </Text>
-                  <Text allowFontScaling style={{ fontSize: 15, fontWeight: '800', color: theme.background }}>
-                    {nextWorkout.focus}
-                  </Text>
-                  <Text allowFontScaling style={{ fontSize: 12, color: theme.background + '80', marginTop: 4 }}>
-                    {nextWorkout.dayName} · {nextWorkout.exercises.length} exercises
-                  </Text>
-                </View>
-              )}
+              {nextWorkout && (() => {
+                const nextDayIdx = DAY_NAMES_FULL.findIndex((n) => n.toLowerCase() === nextWorkout.dayName.toLowerCase());
+                const daysUntil = nextDayIdx > todayIdx ? nextDayIdx - todayIdx : nextDayIdx + 7 - todayIdx;
+                const nextDate = new Date(now);
+                nextDate.setDate(now.getDate() + daysUntil);
+                const dateLabel = `${nextDate.getMonth() + 1}/${nextDate.getDate()}`;
+                return (
+                  <View style={{ backgroundColor: focusCardColor, borderRadius: 16, padding: 20 }}>
+                    <Text allowFontScaling style={{ fontSize: 10, color: '#FFFFFF99', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+                      Up next
+                    </Text>
+                    <Text allowFontScaling style={{ fontSize: 15, fontWeight: '800', color: '#FFFFFF' }}>
+                      {nextWorkout.focus}
+                    </Text>
+                    <Text allowFontScaling style={{ fontSize: 12, color: '#FFFFFFCC', marginTop: 4 }}>
+                      {nextWorkout.dayName} {dateLabel} · {nextWorkout.exercises.length} exercises
+                    </Text>
+                    <View style={{ marginTop: 10, gap: 3 }}>
+                      {nextWorkout.exercises.map((ex: any, i: number) => (
+                        <Text key={i} allowFontScaling style={{ fontSize: 12, color: '#FFFFFFCC' }}>
+                          {`- ${ex.name}`}
+                        </Text>
+                      ))}
+                    </View>
+                  </View>
+                );
+              })()}
               <Pressable
                 onPress={() => router.push('/workout/quick')}
                 style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
@@ -712,65 +726,35 @@ export default function HomeScreen() {
               <Text style={{ fontSize: 11, color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1.5 }}>
                 {selectedDay.date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}
               </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                {dayLog?.log && dayModalExpanded && (
-                  <Pressable
-                    onPress={() => {
-                      setSelectedDay(null);
-                      setDayModalExpanded(false);
-                      router.push(`/(tabs)/workout?logId=${dayLog.log.id}`);
-                    }}
-                    hitSlop={8}
-                    style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: theme.text }}
-                  >
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: theme.background, letterSpacing: 1 }}>DETAILS</Text>
-                  </Pressable>
-                )}
-                {dayLog?.log && (
-                  <Pressable onPress={() => { animateLayout(); setDayModalExpanded(!dayModalExpanded); }} hitSlop={12} style={{ padding: 4 }}>
-                    <Ionicons name={dayModalExpanded ? 'chevron-down' : 'chevron-up'} size={20} color={theme.chrome} />
-                  </Pressable>
-                )}
-              </View>
+              {dayLog?.log && (
+                <Pressable
+                  onPress={() => {
+                    setSelectedDay(null);
+                    setDayModalExpanded(false);
+                    router.push(`/(tabs)/workout?logId=${dayLog.log.id}`);
+                  }}
+                  hitSlop={8}
+                  style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: theme.text }}
+                >
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.background, letterSpacing: 1 }}>DETAILS</Text>
+                </Pressable>
+              )}
             </View>
             {dayLog?.log ? (() => {
               const logExercises = dayLog.log.exercises ?? [];
-              const muscleGroups = [...new Set(logExercises.map((ex: any) => {
-                const found = EXERCISE_DATABASE.find((e) => e.name.toLowerCase() === ex.name?.toLowerCase());
-                return found?.category;
-              }).filter(Boolean))] as string[];
-              const totalSets = logExercises.reduce((sum: number, ex: any) => sum + (ex.sets?.length ?? 0), 0);
-              const totalReps = logExercises.reduce((sum: number, ex: any) => sum + (ex.sets ?? []).reduce((s: number, set: any) => s + (set.reps ?? 0), 0), 0);
-              const totalVolume = logExercises.reduce((sum: number, ex: any) => sum + (ex.sets ?? []).filter((s: any) => s.completed && s.weight != null).reduce((s: number, set: any) => s + (set.weight ?? 0) * (set.reps ?? 0), 0), 0);
               return (
                 <View>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: '#22C55E' }} />
-                    <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text }}>{dayLog.log.day_name}</Text>
-                  </View>
-                  {muscleGroups.length > 0 && (
-                    <View style={{ marginBottom: 10 }}>
-                      <MuscleGroupPills categories={muscleGroups} size="small" />
-                    </View>
-                  )}
-                  <Text style={{ fontSize: 13, color: theme.textSecondary }}>
-                    {logExercises.length} exercises · {dayLog.log.duration_minutes} min
-                  </Text>
-                  <Text style={{ fontSize: 12, color: theme.chrome, marginTop: 4, marginBottom: dayModalExpanded ? 12 : 0 }}>
-                    {totalSets} sets · {totalReps} reps
-                  </Text>
-                  {dayModalExpanded && logExercises.length > 0 && (
-                    <View style={{ marginTop: 4, gap: 6 }}>
+                  <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text, marginBottom: 12 }}>{dayLog.log.day_name}</Text>
+                  {logExercises.length > 0 && (
+                    <View style={{ gap: 6 }}>
                       {logExercises.map((ex: any, i: number) => {
-                        const done = ex.sets?.filter((s: any) => s.completed).length ?? 0;
                         const total = ex.sets?.length ?? 0;
                         return (
-                          <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Ionicons name={done === total ? 'checkmark-circle' : 'ellipse-outline'} size={14} color={done === total ? '#22C55E' : theme.textSecondary} style={{ marginRight: 8 }} />
-                            <Text style={{ fontSize: 13, color: done === total ? theme.text : theme.textSecondary, fontWeight: done === total ? '600' : '400', flex: 1 }}>
-                              {ex.name}
+                          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 12 }}>
+                            <Text style={{ fontSize: 13, color: theme.text, fontWeight: '600', flex: 1 }}>
+                              {`\u2022 ${ex.name}`}
                             </Text>
-                            <Text style={{ fontSize: 11, color: theme.chrome }}>{done}/{total}</Text>
+                            <Text style={{ fontSize: 11, color: theme.chrome }}>{total} sets</Text>
                           </View>
                         );
                       })}

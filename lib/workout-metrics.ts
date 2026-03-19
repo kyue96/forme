@@ -137,6 +137,47 @@ export function computeAvgIntensity(exercises: LoggedExercise[]): number {
   return setCount > 0 ? Math.round(totalIntensity / setCount) : 0;
 }
 
+// ── Metric 6: Best Set ──
+
+export interface BestSetResult {
+  exerciseName: string;
+  weight: number;
+  reps: number;
+}
+
+/** Returns the single set with highest volume (weight × reps). */
+export function computeBestSet(exercises: LoggedExercise[]): BestSetResult | null {
+  let best: BestSetResult | null = null;
+  let bestVolume = 0;
+
+  for (const ex of exercises) {
+    for (const s of ex.sets) {
+      if (!s.completed || !s.weight || s.reps <= 0) continue;
+      const vol = s.weight * s.reps;
+      if (vol > bestVolume) {
+        bestVolume = vol;
+        best = { exerciseName: ex.name, weight: s.weight, reps: s.reps };
+      }
+    }
+  }
+
+  return best;
+}
+
+// ── Metric 7: Volume Comparison ──
+
+/** Returns a fun comparison string for the total volume lifted (in lbs). */
+export function getVolumeComparison(volumeLbs: number): string {
+  if (volumeLbs >= 100_000) return '= weight of a blue whale\u2019s heart \U0001F40B';
+  if (volumeLbs >= 50_000) return '= weight of a fighter jet \u2708\uFE0F';
+  if (volumeLbs >= 20_000) return '= weight of a school bus \U0001F68C';
+  if (volumeLbs >= 10_000) return '= weight of a baby elephant \U0001F418';
+  if (volumeLbs >= 5_000) return '= weight of a hippo\u2019s jaw \U0001F99B';
+  if (volumeLbs >= 2_000) return '= weight of a grand piano \U0001F3B9';
+  if (volumeLbs >= 500) return '= weight of a grizzly bear cub \U0001F43B';
+  return '= weight of a golden retriever \U0001F415';
+}
+
 // ── Formatting helpers ──
 
 /** "You moved 12,450 lbs of iron" */

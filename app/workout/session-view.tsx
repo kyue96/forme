@@ -79,7 +79,7 @@ export default function SessionViewScreen() {
       })
     : '';
 
-  const [activeExercise, setActiveExercise] = useState<number | 'all' | null>('all');
+  const [activeExercise, setActiveExercise] = useState<number | 'all' | null>(null);
 
   // Editable exercises (Step 13)
   const [editableExercises, setEditableExercises] = useState<LoggedExercise[]>(exercises);
@@ -183,12 +183,9 @@ export default function SessionViewScreen() {
             </Pressable>
           )}
           <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
-            {params.dayName ?? ''} {completedDate ? `· ${completedDate}` : ''}
+            {completedDate}
           </Text>
         </View>
-        <Pressable onPress={handleShareSession} hitSlop={12} style={{ padding: 4 }}>
-          <Ionicons name="share-social" size={22} color={theme.text} />
-        </Pressable>
       </View>
 
       <ScrollView
@@ -199,7 +196,7 @@ export default function SessionViewScreen() {
         {/* Shareable session card */}
         <Pressable
           onPress={() => router.push({
-            pathname: '/workout/share-card',
+            pathname: '/workout/card-picker',
             params: {
               exercises: params.exercises ?? '[]',
               dayName: params.dayName ?? '',
@@ -214,7 +211,12 @@ export default function SessionViewScreen() {
             collapsable={false}
             style={{ backgroundColor: avatarColor || theme.text, borderRadius: 16, padding: 12, marginBottom: 16 }}
           >
-            <Text style={{ fontSize: 12, fontWeight: '800', color: '#FFFFFF', letterSpacing: 2, marginBottom: 8 }}>FORME</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text style={{ fontSize: 12, fontWeight: '800', color: '#FFFFFF', letterSpacing: 2 }}>FORME</Text>
+              <View style={{ borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3 }}>
+                <Text style={{ fontSize: 9, fontWeight: '700', color: '#FFFFFF', letterSpacing: 1.5 }}>SHARE</Text>
+              </View>
+            </View>
             <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>{params.dayName ?? 'Workout'}</Text>
             <View style={{ flexDirection: 'row', gap: 16, marginTop: 10 }}>
               <View>
@@ -285,8 +287,7 @@ export default function SessionViewScreen() {
                     {logged.sets.length} sets · {logged.sets.filter(s => s.completed).length} completed
                   </Text>
                 </View>
-                {/* Info icon - navigate to exercise detail */}
-                <ExerciseThumbnail exerciseName={logged.name} theme={theme} />
+                {/* Info icon - hidden until illustrations/thumbnails are ready */}
                 {isExpanded && params.logId && !isEditing && (
                   <Pressable
                     onPress={() => {
