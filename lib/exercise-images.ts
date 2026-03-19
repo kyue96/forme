@@ -351,13 +351,39 @@ export const EXERCISE_IMAGE_MAP: Record<string, string | null> = {
 };
 
 /**
+ * Looks up the free-exercise-db folder ID for a given exercise name.
+ * Tries exact match first, then strips trailing 's', then partial match.
+ */
+function resolveImageId(name: string): string | null {
+  const lower = name.toLowerCase().trim();
+
+  // 1. Exact match
+  if (EXERCISE_IMAGE_MAP[lower] !== undefined) return EXERCISE_IMAGE_MAP[lower];
+
+  // 2. Strip trailing 's' (e.g., "Barbell Deadlifts" -> "barbell deadlift")
+  if (lower.endsWith('s') && !lower.endsWith('ss')) {
+    const singular = lower.slice(0, -1);
+    if (EXERCISE_IMAGE_MAP[singular] !== undefined) return EXERCISE_IMAGE_MAP[singular];
+  }
+
+  // 3. Partial match - find a key that is contained in the name or vice versa
+  const keys = Object.keys(EXERCISE_IMAGE_MAP);
+  for (const key of keys) {
+    if (EXERCISE_IMAGE_MAP[key] === null) continue;
+    if (lower.includes(key) || key.includes(lower)) return EXERCISE_IMAGE_MAP[key];
+  }
+
+  return null;
+}
+
+/**
  * Returns both start and end position image URLs for an exercise, or null if
  * no mapping exists.
  */
 export function getExerciseImageUrls(
   name: string,
 ): { start: string; end: string } | null {
-  const id = EXERCISE_IMAGE_MAP[name.toLowerCase()];
+  const id = resolveImageId(name);
   if (!id) return null;
   return {
     start: `${BASE_URL}/${id}/0.jpg`,
@@ -367,14 +393,14 @@ export function getExerciseImageUrls(
 
 /** Returns the start-position image URL, or null. */
 export function getExerciseStartImage(name: string): string | null {
-  const id = EXERCISE_IMAGE_MAP[name.toLowerCase()];
+  const id = resolveImageId(name);
   if (!id) return null;
   return `${BASE_URL}/${id}/0.jpg`;
 }
 
 /** Returns the end-position image URL, or null. */
 export function getExerciseEndImage(name: string): string | null {
-  const id = EXERCISE_IMAGE_MAP[name.toLowerCase()];
+  const id = resolveImageId(name);
   if (!id) return null;
   return `${BASE_URL}/${id}/1.jpg`;
 }
