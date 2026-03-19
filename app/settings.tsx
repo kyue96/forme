@@ -17,6 +17,7 @@ export default function SettingsScreen() {
   const {
     theme, themeMode, setThemeMode,
     weightUnit, setWeightUnit,
+    warmupEnabled, setWarmupEnabled,
     restTimerEnabled, setRestTimerEnabled,
     restTimerDuration, setRestTimerDuration,
   } = useSettings();
@@ -110,6 +111,22 @@ export default function SettingsScreen() {
                     style={{ paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: weightUnit === u ? theme.text : theme.chromeLight }}
                   >
                     <Text style={{ fontSize: 13, fontWeight: '600', color: weightUnit === u ? theme.background : theme.textSecondary }}>{u.toUpperCase()}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            }
+          />
+          <RowItem
+            label="Warm-up"
+            right={
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {([true, false] as const).map(v => (
+                  <Pressable
+                    key={String(v)}
+                    onPress={() => setWarmupEnabled(v)}
+                    style={{ paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: warmupEnabled === v ? theme.text : theme.chromeLight }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: warmupEnabled === v ? theme.background : theme.textSecondary }}>{v ? 'On' : 'Off'}</Text>
                   </Pressable>
                 ))}
               </View>

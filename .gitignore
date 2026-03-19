@@ -3,6 +3,9 @@
 # dependencies
 node_modules/
 
+# Processed exercise images (regenerate with scripts/process-exercise-images.js)
+assets/exercises/
+
 # Expo
 .expo/
 dist/

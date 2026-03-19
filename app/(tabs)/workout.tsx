@@ -433,7 +433,7 @@ export default function WorkoutScreen() {
                 style={{ marginBottom: 12, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  Create workout
+                  Create Workout
                 </Text>
               </Pressable>
               {plan.weeklyPlan.map((day, i) => {

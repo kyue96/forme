@@ -21,6 +21,8 @@ interface PoseMannequinProps {
   size?: number;
   color?: string;
   fillColor?: string;
+  strokeWidth?: number;
+  variant?: 'dark' | 'light';
 }
 
 const rad = (deg: number) => (deg * Math.PI) / 180;
@@ -80,10 +82,17 @@ function torsoPath(
  * Body-outline mannequin with tapered limbs and proper torso shape.
  * Minimal, clean silhouette aesthetic.
  */
-export function PoseMannequin({ pose, size = 120, color = '#888', fillColor }: PoseMannequinProps) {
-  const fill = fillColor || color;
-  const opacity = fillColor ? 1 : 0.15;
-  const sw = 1.8;
+export function PoseMannequin({ pose, size = 120, color, fillColor, strokeWidth: swProp, variant = 'dark' }: PoseMannequinProps) {
+  // Soft glow silhouette: solid fill + brighter stroke for halo effect
+  const darkFill = '#2a2a2a';
+  const darkStroke = '#555';
+  const lightFill = '#d0d0d0';
+  const lightStroke = '#aaa';
+
+  const fill = fillColor || (variant === 'dark' ? darkFill : lightFill);
+  const stroke = color || (variant === 'dark' ? darkStroke : lightStroke);
+  const opacity = 1;
+  const sw = swProp ?? 2;
 
   // Body proportions (120x120 viewbox)
   const headR = 7;
@@ -131,33 +140,33 @@ export function PoseMannequin({ pose, size = 120, color = '#888', fillColor }: P
     <Svg width={size} height={size} viewBox="0 0 120 120">
       <G>
         {/* Back leg (right) - drawn first so it's behind torso */}
-        <Path d={limbPath(hipX, hipY, rkX, rkY, thighW1, thighW2)} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
-        <Path d={limbPath(rkX, rkY, rfX, rfY, shinW1, shinW2)} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
-        <Ellipse cx={rfX} cy={rfY} rx={footRx} ry={footRy} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
+        <Path d={limbPath(hipX, hipY, rkX, rkY, thighW1, thighW2)} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
+        <Path d={limbPath(rkX, rkY, rfX, rfY, shinW1, shinW2)} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
+        <Ellipse cx={rfX} cy={rfY} rx={footRx} ry={footRy} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
 
         {/* Back arm (right) */}
-        <Path d={limbPath(shX, shY, reX, reY, upperArmW1, upperArmW2)} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
-        <Path d={limbPath(reX, reY, rhX, rhY, forearmW1, forearmW2)} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
-        <Circle cx={rhX} cy={rhY} r={handR} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
+        <Path d={limbPath(shX, shY, reX, reY, upperArmW1, upperArmW2)} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
+        <Path d={limbPath(reX, reY, rhX, rhY, forearmW1, forearmW2)} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
+        <Circle cx={rhX} cy={rhY} r={handR} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
 
         {/* Torso */}
-        <Path d={torsoPath(shX, shY, hipX, hipY, shoulderW, waistW)} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
+        <Path d={torsoPath(shX, shY, hipX, hipY, shoulderW, waistW)} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
 
         {/* Neck */}
-        <Path d={limbPath(headX, headY + headR, neckX, neckY, 2.5, 3)} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
+        <Path d={limbPath(headX, headY + headR, neckX, neckY, 2.5, 3)} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
 
         {/* Head */}
-        <Circle cx={headX} cy={headY} r={headR} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
+        <Circle cx={headX} cy={headY} r={headR} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
 
         {/* Front leg (left) */}
-        <Path d={limbPath(hipX, hipY, lkX, lkY, thighW1, thighW2)} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
-        <Path d={limbPath(lkX, lkY, lfX, lfY, shinW1, shinW2)} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
-        <Ellipse cx={lfX} cy={lfY} rx={footRx} ry={footRy} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
+        <Path d={limbPath(hipX, hipY, lkX, lkY, thighW1, thighW2)} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
+        <Path d={limbPath(lkX, lkY, lfX, lfY, shinW1, shinW2)} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
+        <Ellipse cx={lfX} cy={lfY} rx={footRx} ry={footRy} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
 
         {/* Front arm (left) */}
-        <Path d={limbPath(shX, shY, leX, leY, upperArmW1, upperArmW2)} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
-        <Path d={limbPath(leX, leY, lhX, lhY, forearmW1, forearmW2)} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
-        <Circle cx={lhX} cy={lhY} r={handR} fill={fill} fillOpacity={opacity} stroke={color} strokeWidth={sw} />
+        <Path d={limbPath(shX, shY, leX, leY, upperArmW1, upperArmW2)} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
+        <Path d={limbPath(leX, leY, lhX, lhY, forearmW1, forearmW2)} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
+        <Circle cx={lhX} cy={lhY} r={handR} fill={fill} fillOpacity={opacity} stroke={stroke} strokeWidth={sw} />
       </G>
     </Svg>
   );

@@ -12,10 +12,12 @@ const STORAGE_KEYS = {
   unit: '@forme/unit',
   restTimer: '@forme/restTimer',
   restTimerEnabled: '@forme/restTimerEnabled',
+  warmupEnabled: '@forme/warmupEnabled',
 };
 
 interface Settings {
   weightUnit: WeightUnit;
+  warmupEnabled: boolean;
   restTimerEnabled: boolean;
   restTimerDuration: RestTimerDuration;
   themeMode: ThemeMode;
@@ -24,6 +26,7 @@ interface Settings {
 
 interface SettingsContextType extends Settings {
   setWeightUnit: (unit: WeightUnit) => void;
+  setWarmupEnabled: (enabled: boolean) => void;
   setRestTimerEnabled: (enabled: boolean) => void;
   setRestTimerDuration: (secs: RestTimerDuration) => void;
   setThemeMode: (mode: ThemeMode) => void;
@@ -34,6 +37,7 @@ const SettingsContext = createContext<SettingsContextType | null>(null);
 
 export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [weightUnit, setWeightUnitState] = useState<WeightUnit>('lbs');
+  const [warmupEnabled, setWarmupEnabledState] = useState(true);
   const [restTimerEnabled, setRestTimerEnabledState] = useState(true);
   const [restTimerDuration, setRestTimerDurationState] = useState<RestTimerDuration>(60);
   const [themeMode, setThemeModeState] = useState<ThemeMode>('dark');
@@ -44,11 +48,12 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const loadSettings = async () => {
     try {
       // AsyncStorage first (fast, works offline)
-      const [storedTheme, storedUnit, storedTimer, storedTimerEnabled] = await Promise.all([
+      const [storedTheme, storedUnit, storedTimer, storedTimerEnabled, storedWarmup] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.theme),
         AsyncStorage.getItem(STORAGE_KEYS.unit),
         AsyncStorage.getItem(STORAGE_KEYS.restTimer),
         AsyncStorage.getItem(STORAGE_KEYS.restTimerEnabled),
+        AsyncStorage.getItem(STORAGE_KEYS.warmupEnabled),
       ]);
 
       if (storedTheme === 'light' || storedTheme === 'dark') setThemeModeState(storedTheme);
@@ -58,6 +63,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         if ([30, 45, 60, 90, 120].includes(d)) setRestTimerDurationState(d);
       }
       if (storedTimerEnabled !== null) setRestTimerEnabledState(storedTimerEnabled !== 'false');
+      if (storedWarmup !== null) setWarmupEnabledState(storedWarmup !== 'false');
 
       // Then sync from Supabase profile (may override)
       const { data: { user } } = await supabase.auth.getUser();
@@ -94,6 +100,11 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     saveToProfile({ weight_unit: unit });
   };
 
+  const setWarmupEnabled = (enabled: boolean) => {
+    setWarmupEnabledState(enabled);
+    AsyncStorage.setItem(STORAGE_KEYS.warmupEnabled, String(enabled));
+  };
+
   const setRestTimerEnabled = (enabled: boolean) => {
     setRestTimerEnabledState(enabled);
     AsyncStorage.setItem(STORAGE_KEYS.restTimerEnabled, String(enabled));
@@ -116,8 +127,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   return (
     <SettingsContext.Provider
       value={{
-        weightUnit, restTimerEnabled, restTimerDuration, themeMode, theme, loading,
-        setWeightUnit, setRestTimerEnabled, setRestTimerDuration, setThemeMode,
+        weightUnit, warmupEnabled, restTimerEnabled, restTimerDuration, themeMode, theme, loading,
+        setWeightUnit, setWarmupEnabled, setRestTimerEnabled, setRestTimerDuration, setThemeMode,
       }}
     >
       {children}

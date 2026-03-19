@@ -47,12 +47,6 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
           const isPast = date < now && !isToday;
 
           const circleSize = isToday ? 40 : 36;
-          let circleBg = theme.surface;
-          let borderStyle: object = { borderWidth: 1, borderColor: theme.border };
-          if (isToday) { circleBg = theme.text; borderStyle = {}; }
-          else if (isSelected) { circleBg = theme.surface; borderStyle = { borderWidth: 2, borderColor: theme.text }; }
-          else if (!isWorkDay) { circleBg = theme.surface; borderStyle = {}; }
-          else if (isPast) { circleBg = theme.surface; }
 
           return (
             <Pressable key={i} style={{ alignItems: 'center' }} onPress={() => onDayPress(date, i)}>
@@ -70,13 +64,14 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
                 borderRadius: circleSize / 2,
                 alignItems: 'center',
                 justifyContent: 'center',
-                backgroundColor: circleBg,
-                ...borderStyle,
+                backgroundColor: isSelected ? theme.surface : theme.surface,
+                borderWidth: isToday ? 1.5 : isSelected ? 1.5 : 1,
+                borderColor: isToday ? theme.text : isSelected ? theme.text : theme.border,
               }}>
                 <Text allowFontScaling style={{
-                  fontSize: isToday ? 14 : 13,
+                  fontSize: 13,
                   fontWeight: isToday ? '800' : '600',
-                  color: done ? '#22C55E' : isToday ? theme.background : !isWorkDay ? theme.border : theme.textSecondary,
+                  color: done ? '#22C55E' : theme.textSecondary,
                 }}>
                   {date.getDate()}
                 </Text>
