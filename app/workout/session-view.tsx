@@ -21,6 +21,8 @@ import { LoggedExercise } from '@/lib/types';
 import { SemanticColors } from '@/constants/theme';
 import { isBodyweightExercise } from '@/lib/exercise-data';
 import { formatTime, animateLayout, formatNumber } from '@/lib/utils';
+import { getExerciseImageUrls } from '@/lib/exercise-images';
+import { Image as ExpoImage } from 'expo-image';
 import { isBarbell } from '@/lib/plate-calculator';
 import { PlateCalculatorSheet } from '@/components/PlateCalculatorSheet';
 
@@ -304,6 +306,22 @@ export default function SessionViewScreen() {
 
               {isExpanded && (
                 <>
+                  {/* Exercise images - start/end positions */}
+                  {(() => {
+                    const imgs = getExerciseImageUrls(logged.name);
+                    if (!imgs) return null;
+                    return (
+                      <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, alignItems: 'center', justifyContent: 'center' }}>
+                        <View style={{ flex: 1, borderRadius: 12, overflow: 'hidden', backgroundColor: theme.background, borderWidth: 1, borderColor: theme.border }}>
+                          <ExpoImage source={{ uri: imgs.start }} style={{ width: '100%', aspectRatio: 1 }} contentFit="cover" cachePolicy="disk" />
+                        </View>
+                        <Ionicons name="arrow-forward" size={14} color={theme.textSecondary} />
+                        <View style={{ flex: 1, borderRadius: 12, overflow: 'hidden', backgroundColor: theme.background, borderWidth: 1, borderColor: theme.border }}>
+                          <ExpoImage source={{ uri: imgs.end }} style={{ width: '100%', aspectRatio: 1 }} contentFit="cover" cachePolicy="disk" />
+                        </View>
+                      </View>
+                    );
+                  })()}
                   {/* Set rows */}
                   {logged?.sets.map((set, setIdx) => (
                     <View
@@ -317,7 +335,7 @@ export default function SessionViewScreen() {
                         borderRadius: 10,
                         backgroundColor: set.completed ? theme.surface : theme.background,
                         borderWidth: 1,
-                        borderColor: set.completed ? '#22C55E' : theme.border,
+                        borderColor: theme.border,
                       }}
                     >
                       {/* Set number */}

@@ -4,11 +4,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import Svg, { Line, Circle, Rect, Text as SvgText } from 'react-native-svg';
 
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { LoggedExercise, LoggedSet } from '@/lib/types';
+import { getExerciseImageUrls } from '@/lib/exercise-images';
 
 interface DataPoint {
   date: string;
@@ -187,6 +189,25 @@ export default function ExerciseDetailScreen() {
         </View>
       ) : (
         <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 24, paddingBottom: 40 }}>
+          {/* Exercise images - start and end position */}
+          {(() => {
+            const imgs = getExerciseImageUrls(exerciseName ?? '');
+            if (!imgs) return null;
+            return (
+              <View style={{ flexDirection: 'row', gap: 12, marginBottom: 20, alignItems: 'center', justifyContent: 'center' }}>
+                <View style={{ flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border }}>
+                  <Image source={{ uri: imgs.start }} style={{ width: '100%', aspectRatio: 0.85 }} contentFit="cover" cachePolicy="disk" />
+                  <Text style={{ fontSize: 10, fontWeight: '600', color: theme.textSecondary, textAlign: 'center', paddingVertical: 6 }}>START</Text>
+                </View>
+                <Ionicons name="arrow-forward" size={18} color={theme.textSecondary} />
+                <View style={{ flex: 1, borderRadius: 16, overflow: 'hidden', backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border }}>
+                  <Image source={{ uri: imgs.end }} style={{ width: '100%', aspectRatio: 0.85 }} contentFit="cover" cachePolicy="disk" />
+                  <Text style={{ fontSize: 10, fontWeight: '600', color: theme.textSecondary, textAlign: 'center', paddingVertical: 6 }}>END</Text>
+                </View>
+              </View>
+            );
+          })()}
+
           {/* Personal records */}
           <View style={{ flexDirection: 'row', gap: 12, marginBottom: 24 }}>
             {heaviestSet && (

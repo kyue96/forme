@@ -37,6 +37,8 @@ import {
 } from '@/lib/exercise-data';
 import { formatTimeMs, formatTime, animateLayout, animateLayoutSlow } from '@/lib/utils';
 import { getWarmupRoutine } from '@/lib/warmup-data';
+import { getExerciseImageUrls } from '@/lib/exercise-images';
+import { Image as ExpoImage } from 'expo-image';
 import * as Notifications from 'expo-notifications';
 
 type Phase = 'pick' | 'workout';
@@ -44,7 +46,7 @@ type Phase = 'pick' | 'workout';
 
 export default function QuickWorkoutScreen() {
   const router = useRouter();
-  const { weightUnit, restTimerEnabled, restTimerDuration, theme } = useSettings();
+  const { weightUnit, warmupEnabled, restTimerEnabled, restTimerDuration, theme } = useSettings();
 
   const {
     activeWorkout,
@@ -67,10 +69,9 @@ export default function QuickWorkoutScreen() {
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
-  const confirmStartRef = useRef(false);
-  const [confirmStartTick, setConfirmStartTick] = useState(0);
   const [workoutName, setWorkoutName] = useState(activeWorkout?.dayName ?? 'My Workout');
   const [editingName, setEditingName] = useState(false);
+  const [showNamePrompt, setShowNamePrompt] = useState(false);
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const confirmAddDoneRef = useRef(false);
   const [confirmAddDoneTick, setConfirmAddDoneTick] = useState(0);
@@ -804,67 +805,17 @@ export default function QuickWorkoutScreen() {
           <Text style={{ fontSize: 17, fontWeight: '800', color: theme.text }}>Choose Exercises</Text>
           <Pressable
             onPress={() => {
-              if (confirmStartRef.current) {
-                startQuickWorkout();
-              } else {
-                if (selectedNames.length === 0) return;
-                confirmStartRef.current = true;
-                setTimeout(() => { confirmStartRef.current = false; setConfirmStartTick((t) => t + 1); }, 3000);
-                setConfirmStartTick((t) => t + 1);
-              }
+              if (selectedNames.length === 0) return;
+              setWorkoutName('My Workout');
+              setShowNamePrompt(true);
             }}
             hitSlop={12}
             style={{ padding: 4 }}
           >
-            <Ionicons
-              name={confirmStartRef.current ? 'checkmark-circle' : 'checkmark'}
-              size={26}
-              color={confirmStartRef.current ? '#22C55E' : (selectedNames.length > 0 ? theme.text : theme.textSecondary)}
-            />
+            <Text style={{ fontSize: 15, fontWeight: '700', color: selectedNames.length > 0 ? theme.text : theme.textSecondary }}>
+              NEXT
+            </Text>
           </Pressable>
-        </View>
-
-        {/* Workout name */}
-        <View style={{ paddingHorizontal: 20, paddingTop: 12, paddingBottom: 4 }}>
-          {editingName ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <TextInput
-                style={{
-                  flex: 1,
-                  fontSize: 18,
-                  fontWeight: '700',
-                  color: theme.text,
-                  backgroundColor: theme.surface,
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                  borderRadius: 12,
-                  paddingHorizontal: 16,
-                  paddingVertical: 12,
-                }}
-                placeholder="Workout name"
-                placeholderTextColor={theme.textSecondary}
-                value={workoutName}
-                onChangeText={setWorkoutName}
-                maxLength={40}
-                autoFocus
-                returnKeyType="done"
-                onSubmitEditing={() => setEditingName(false)}
-              />
-              <Pressable onPress={() => setEditingName(false)} hitSlop={8}>
-                <Ionicons name="checkmark-circle" size={24} color={theme.text} />
-              </Pressable>
-            </View>
-          ) : (
-            <Pressable
-              onPress={() => setEditingName(true)}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
-            >
-              <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text }}>
-                {workoutName.trim() || 'My Workout'}
-              </Text>
-              <Ionicons name="pencil-outline" size={16} color={theme.chrome} />
-            </Pressable>
-          )}
         </View>
 
         <View style={{ paddingHorizontal: 20, paddingVertical: 12 }}>
@@ -1099,47 +1050,110 @@ export default function QuickWorkoutScreen() {
           })}
         </ScrollView>
 
-        <View style={{
-          paddingHorizontal: 20, paddingBottom: 32, paddingTop: 12,
-          backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border,
-        }}>
-          {selectedNames.length > 0 && (
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
-              {selectedNames.map((name) => (
+        {selectedNames.length > 0 && (
+          <View style={{
+            paddingHorizontal: 20, paddingBottom: 32, paddingTop: 12,
+            backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border,
+          }}>
+            {EXERCISE_CATEGORIES.map((cat) => {
+              const catNames = selectedNames.filter((n) => {
+                const found = EXERCISE_DATABASE.find((e) => e.name === n);
+                const custom = customExercises.find((ce) => ce.name === n);
+                if (custom) return custom.muscleGroup === cat;
+                return found?.category === cat;
+              });
+              if (catNames.length === 0) return null;
+              return (
+                <View key={cat} style={{ marginBottom: 10 }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: theme.chrome, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 6 }}>{cat}</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {catNames.map((name) => (
+                      <Pressable
+                        key={name}
+                        onPress={() => toggleExercise(name)}
+                        style={{
+                          flexDirection: 'row', alignItems: 'center',
+                          backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border,
+                          borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6,
+                        }}
+                      >
+                        <Text style={{ fontSize: 13, color: theme.text, marginRight: 4 }}>{name}</Text>
+                        <Ionicons name="close" size={12} color={theme.textSecondary} />
+                      </Pressable>
+                    ))}
+                  </View>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Name prompt modal */}
+        <Modal visible={showNamePrompt} transparent animationType="fade">
+          <Pressable
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center' }}
+            onPress={() => setShowNamePrompt(false)}
+          >
+            <Pressable
+              onPress={() => {}}
+              style={{
+                backgroundColor: theme.surface,
+                borderRadius: 20,
+                padding: 24,
+                width: '85%',
+                maxWidth: 360,
+              }}
+            >
+              <TextInput
+                style={{
+                  fontSize: 16,
+                  color: theme.text,
+                  backgroundColor: theme.background,
+                  borderRadius: 12,
+                  paddingHorizontal: 16,
+                  paddingVertical: 12,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  marginBottom: 20,
+                }}
+                placeholder="My Workout"
+                placeholderTextColor={theme.textSecondary}
+                value={workoutName}
+                onChangeText={setWorkoutName}
+                maxLength={40}
+                autoFocus
+                returnKeyType="done"
+                onSubmitEditing={() => {
+                  setShowNamePrompt(false);
+                  startQuickWorkout();
+                }}
+              />
+              <View style={{ flexDirection: 'row', gap: 12 }}>
                 <Pressable
-                  key={name}
-                  onPress={() => toggleExercise(name)}
+                  onPress={() => setShowNamePrompt(false)}
                   style={{
-                    flexDirection: 'row', alignItems: 'center',
-                    backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border,
-                    borderRadius: 20, paddingHorizontal: 10, paddingVertical: 6,
+                    flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center',
+                    borderWidth: 1, borderColor: theme.border,
                   }}
                 >
-                  <Text style={{ fontSize: 13, color: theme.text, marginRight: 4 }}>{name}</Text>
-                  <Ionicons name="close" size={12} color={theme.textSecondary} />
+                  <Text style={{ fontSize: 16, fontWeight: '600', color: theme.text }}>Cancel</Text>
                 </Pressable>
-              ))}
-            </View>
-          )}
-          <Pressable
-            onPress={startQuickWorkout}
-            disabled={selectedNames.length === 0}
-            style={{
-              backgroundColor: selectedNames.length > 0 ? theme.text : theme.surface,
-              paddingVertical: 16, borderRadius: 16, alignItems: 'center',
-              opacity: selectedNames.length === 0 ? 0.5 : 1,
-            }}
-          >
-            <Text style={{
-              color: selectedNames.length > 0 ? theme.background : theme.textSecondary,
-              fontWeight: '600', fontSize: 16,
-            }}>
-              {selectedNames.length === 0
-                ? 'Select exercises to start'
-                : `Start workout · ${selectedNames.length} exercise${selectedNames.length > 1 ? 's' : ''}`}
-            </Text>
+                <Pressable
+                  onPress={() => {
+                    setShowNamePrompt(false);
+                    startQuickWorkout();
+                  }}
+                  style={{
+                    flex: 1, paddingVertical: 14, borderRadius: 12, alignItems: 'center',
+                    backgroundColor: theme.text,
+                  }}
+                >
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: theme.background }}>Start</Text>
+                </Pressable>
+              </View>
+            </Pressable>
           </Pressable>
-        </View>
+        </Modal>
 
         <BottomSheet visible={showCreateCustom} onClose={() => { setShowCreateCustom(false); setCustomName(''); setCustomEquipment(''); }}>
           <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text, marginBottom: 16 }}>Custom Exercise</Text>
@@ -1342,6 +1356,7 @@ export default function QuickWorkoutScreen() {
           keyboardShouldPersistTaps="handled"
           onScrollBeginDrag={() => { if (unlinkConfirmIdx !== null) setUnlinkConfirmIdx(null); }}
           ListHeaderComponent={(() => {
+            if (!warmupEnabled) return null;
             const warmup = getWarmupRoutine('full');
             const totalItems = warmup.cardio.length + warmup.mobility.length;
             const checkedCount = Object.values(warmupChecked).filter(Boolean).length;
@@ -1578,6 +1593,23 @@ export default function QuickWorkoutScreen() {
 
                     {isExpanded && (
                       <>
+                        {/* Exercise images - start/end positions */}
+                        {(() => {
+                          const imgs = getExerciseImageUrls(logged.name);
+                          if (!imgs) return null;
+                          return (
+                            <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, alignItems: 'center', justifyContent: 'center' }}>
+                              <View style={{ flex: 1, borderRadius: 12, overflow: 'hidden', backgroundColor: theme.background, borderWidth: 1, borderColor: theme.border }}>
+                                <ExpoImage source={{ uri: imgs.start }} style={{ width: '100%', aspectRatio: 1 }} contentFit="cover" cachePolicy="disk" />
+                              </View>
+                              <Ionicons name="arrow-forward" size={14} color={theme.textSecondary} />
+                              <View style={{ flex: 1, borderRadius: 12, overflow: 'hidden', backgroundColor: theme.background, borderWidth: 1, borderColor: theme.border }}>
+                                <ExpoImage source={{ uri: imgs.end }} style={{ width: '100%', aspectRatio: 1 }} contentFit="cover" cachePolicy="disk" />
+                              </View>
+                            </View>
+                          );
+                        })()}
+
                         <Pressable
                           onPress={() => {
                             animateLayout();
