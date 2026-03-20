@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSettings } from '@/lib/settings-context';
 import { LoggedExercise } from '@/lib/types';
-import { formatNumber } from '@/lib/utils';
+import { formatNumber, stripParens } from '@/lib/utils';
 import {
   computeTopE1RMs,
   computeVolumeByMuscle,
@@ -21,6 +21,8 @@ import { MuscleGroupPills } from '@/components/MuscleGroupPills';
 import { getExerciseCategories } from '@/lib/exercise-utils';
 import { supabase } from '@/lib/supabase';
 import { useUserStore } from '@/lib/user-store';
+import { StreakRing } from '@/components/StreakRing';
+import { dateKey } from '@/components/WeeklyCalendar';
 
 interface VolumeChartProps {
   data: Array<{ volume: number; date: string; label: string }>;
@@ -201,10 +203,13 @@ export default function PostWorkoutScreen() {
     dayName: string;
     focus: string;
     durationMinutes: string;
+    startedAt: string;
   }>();
 
   const [historicalVolumes, setHistoricalVolumes] = useState<Array<{ volume: number; date: string; label: string }>>([]);
   const [scrollEnabled, setScrollEnabled] = useState(true);
+  const [streak, setStreak] = useState(0);
+  const [maxStreak, setMaxStreak] = useState(0);
 
   const exercises: LoggedExercise[] = params.exercises ? JSON.parse(params.exercises) : [];
   const durationMinutes = parseInt(params.durationMinutes ?? '0', 10);
@@ -230,7 +235,40 @@ export default function PostWorkoutScreen() {
 
   useEffect(() => {
     fetchHistoricalVolumes();
+    fetchStreak();
   }, []);
+
+  const fetchStreak = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const start = new Date();
+      start.setDate(start.getDate() - 60);
+      const { data: logs } = await supabase
+        .from('workout_logs')
+        .select('completed_at')
+        .eq('user_id', user.id)
+        .gte('completed_at', dateKey(start))
+        .order('completed_at', { ascending: false });
+
+      const dates = new Set((logs ?? []).map((l: any) => l.completed_at?.split('T')[0]).filter(Boolean));
+      // Current streak
+      let s = 0;
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      if (!dates.has(dateKey(d))) d.setDate(d.getDate() - 1);
+      while (dates.has(dateKey(d))) { s++; d.setDate(d.getDate() - 1); }
+      setStreak(s);
+      // Max streak
+      const sorted = Array.from(dates).sort();
+      let best = 0, run = 1;
+      for (let i = 1; i < sorted.length; i++) {
+        const diff = Math.round((new Date(sorted[i] + 'T12:00:00').getTime() - new Date(sorted[i - 1] + 'T12:00:00').getTime()) / 86400000);
+        if (diff === 1) run++; else { best = Math.max(best, run); run = 1; }
+      }
+      setMaxStreak(Math.max(best, run));
+    } catch {}
+  };
 
   const fetchHistoricalVolumes = async () => {
     try {
@@ -286,28 +324,20 @@ export default function PostWorkoutScreen() {
           <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 4, marginRight: 8 }}>
             <Ionicons name="chevron-back" size={24} color={theme.text} />
           </Pressable>
-          <View style={{ flex: 1, marginRight: 8 }}>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>Workout Summary</Text>
-            <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>{params.dayName || params.focus}</Text>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text, flex: 1 }} numberOfLines={1}>
+                {stripParens(params.focus || params.dayName || '')}
+              </Text>
+              <MuscleGroupPills categories={exerciseCategories} size="small" />
+            </View>
+            <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
+              {params.startedAt
+                ? new Date(params.startedAt).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+                : new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+              }
+            </Text>
           </View>
-          <Pressable
-            onPress={() => router.push({
-              pathname: '/workout/card-picker',
-              params: {
-                exercises: params.exercises ?? '[]',
-                dayName: params.dayName ?? '',
-                focus: params.focus ?? '',
-                durationMinutes: params.durationMinutes ?? '0',
-              },
-            })}
-            hitSlop={12}
-            style={{ padding: 4 }}
-          >
-            <Ionicons name="share-outline" size={22} color={theme.text} />
-          </Pressable>
-        </View>
-        <View style={{ flexDirection: 'row', marginTop: 8, marginLeft: 36 }}>
-          <MuscleGroupPills categories={exerciseCategories} size="small" />
         </View>
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false} scrollEnabled={scrollEnabled}>
@@ -337,6 +367,17 @@ export default function PostWorkoutScreen() {
               <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>time</Text>
             </View>
           </View>
+
+          {/* Streak Ring */}
+          {streak > 0 && (
+            <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <StreakRing streak={streak} maxStreak={maxStreak} size="mini" color={avatarColor || '#F59E0B'} />
+              <View>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>{streak}-day streak</Text>
+                <Text style={{ fontSize: 11, color: theme.textSecondary }}>Keep it going!</Text>
+              </View>
+            </View>
+          )}
 
           {/* Volume Trend Chart */}
           {historicalVolumes.length > 1 && (
@@ -378,37 +419,64 @@ export default function PostWorkoutScreen() {
           )}
         </View>
 
-        {/* Post button */}
-        <View style={{ paddingHorizontal: 24, marginBottom: 24, gap: 10 }}>
-          <Pressable
-            onPress={() => {
-              const cardDataJson = JSON.stringify({
-                focus: params.focus ?? '',
-                dayName: params.dayName ?? '',
-                sets: totalSets,
-                reps: totalReps,
-                volume: displayVolume,
-                unitLabel,
-                durationMinutes,
-                muscles: exerciseCategories,
-              });
-              router.push({ pathname: '/create-post', params: { cardData: cardDataJson } });
-            }}
-            style={{
-              backgroundColor: theme.text,
-              borderRadius: 16,
-              paddingVertical: 16,
-              alignItems: 'center',
-              flexDirection: 'row',
-              justifyContent: 'center',
-              gap: 8,
-            }}
-          >
-            <Ionicons name="people" size={18} color={theme.background} />
-            <Text style={{ fontSize: 15, fontWeight: '600', color: theme.background }}>Post to Forme</Text>
-          </Pressable>
-        </View>
       </ScrollView>
+      {/* Sticky footer buttons */}
+      <View style={{
+        paddingHorizontal: 24,
+        paddingVertical: 12,
+        backgroundColor: theme.background,
+        borderTopWidth: 1,
+        borderTopColor: theme.border,
+        flexDirection: 'row',
+        gap: 10,
+      }}>
+        <Pressable
+          onPress={() => router.push({
+            pathname: '/workout/card-picker',
+            params: {
+              exercises: params.exercises ?? '[]',
+              dayName: params.dayName ?? '',
+              focus: params.focus ?? '',
+              durationMinutes: params.durationMinutes ?? '0',
+            },
+          })}
+          style={{
+            flex: 1,
+            borderRadius: 14,
+            paddingVertical: 14,
+            alignItems: 'center',
+            backgroundColor: theme.surface,
+            borderWidth: 1,
+            borderColor: theme.border,
+          }}
+        >
+          <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text, letterSpacing: 1 }}>SHARE</Text>
+        </Pressable>
+        <Pressable
+          onPress={() => {
+            const cardDataJson = JSON.stringify({
+              focus: params.focus ?? '',
+              dayName: params.dayName ?? '',
+              sets: totalSets,
+              reps: totalReps,
+              volume: displayVolume,
+              unitLabel,
+              durationMinutes,
+              muscles: exerciseCategories,
+            });
+            router.push({ pathname: '/create-post', params: { cardData: cardDataJson } });
+          }}
+          style={{
+            flex: 1,
+            borderRadius: 14,
+            paddingVertical: 14,
+            alignItems: 'center',
+            backgroundColor: theme.text,
+          }}
+        >
+          <Text style={{ fontSize: 13, fontWeight: '700', color: theme.background, letterSpacing: 1 }}>POST TO FEED</Text>
+        </Pressable>
+      </View>
     </SafeAreaView>
   );
 }

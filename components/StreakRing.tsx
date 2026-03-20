@@ -1,0 +1,146 @@
+import React from 'react';
+import { View, Text } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
+import { useSettings } from '@/lib/settings-context';
+
+const MILESTONES = [7, 14, 21, 30, 45, 60, 90, 120, 180, 365];
+
+function getNextMilestone(streak: number): number {
+  return MILESTONES.find((m) => m > streak) ?? streak + 30;
+}
+
+interface StreakRingProps {
+  streak: number;
+  maxStreak?: number;
+  size?: 'large' | 'mini';
+  color?: string;
+}
+
+export function StreakRing({ streak, maxStreak = 0, size = 'large', color }: StreakRingProps) {
+  const { theme } = useSettings();
+  const accentColor = color || '#F59E0B';
+
+  const goal = getNextMilestone(streak);
+  const progress = Math.min(streak / goal, 1);
+  const isNearBest = maxStreak > 0 && streak >= maxStreak - 3 && streak <= maxStreak;
+  const isNewBest = streak > maxStreak && maxStreak > 0;
+  const remaining = goal - streak;
+
+  if (size === 'mini') {
+    const ringSize = 48;
+    const strokeWidth = 4;
+    const radius = (ringSize - strokeWidth) / 2;
+    const circumference = 2 * Math.PI * radius;
+    const strokeDashoffset = circumference * (1 - progress);
+
+    return (
+      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={ringSize} height={ringSize}>
+          <Circle
+            cx={ringSize / 2}
+            cy={ringSize / 2}
+            r={radius}
+            stroke={theme.border}
+            strokeWidth={strokeWidth}
+            fill="none"
+            rotation={-90}
+            origin={`${ringSize / 2}, ${ringSize / 2}`}
+          />
+          <Circle
+            cx={ringSize / 2}
+            cy={ringSize / 2}
+            r={radius}
+            stroke={accentColor}
+            strokeWidth={strokeWidth}
+            fill="none"
+            strokeDasharray={`${circumference}`}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            rotation={-90}
+            origin={`${ringSize / 2}, ${ringSize / 2}`}
+          />
+        </Svg>
+        <View style={{ position: 'absolute', alignItems: 'center' }}>
+          <Text style={{ fontSize: 14, fontWeight: '800', color: theme.text }}>{streak}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  // Large variant
+  const ringSize = 80;
+  const strokeWidth = 6;
+  const radius = (ringSize - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference * (1 - progress);
+
+  return (
+    <View style={{
+      backgroundColor: theme.surface,
+      borderRadius: 16,
+      padding: 16,
+      borderWidth: 1,
+      borderColor: theme.border,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 16,
+    }}>
+      {/* Ring */}
+      <View style={{ alignItems: 'center', justifyContent: 'center' }}>
+        <Svg width={ringSize} height={ringSize}>
+          <Circle
+            cx={ringSize / 2}
+            cy={ringSize / 2}
+            r={radius}
+            stroke={theme.border}
+            strokeWidth={strokeWidth}
+            fill="none"
+            rotation={-90}
+            origin={`${ringSize / 2}, ${ringSize / 2}`}
+          />
+          <Circle
+            cx={ringSize / 2}
+            cy={ringSize / 2}
+            r={radius}
+            stroke={accentColor}
+            strokeWidth={strokeWidth}
+            fill="none"
+            strokeDasharray={`${circumference}`}
+            strokeDashoffset={strokeDashoffset}
+            strokeLinecap="round"
+            rotation={-90}
+            origin={`${ringSize / 2}, ${ringSize / 2}`}
+          />
+        </Svg>
+        <View style={{ position: 'absolute', alignItems: 'center' }}>
+          <Text style={{ fontSize: 22, fontWeight: '800', color: theme.text }}>{streak}</Text>
+          <Text style={{ fontSize: 9, fontWeight: '500', color: theme.text, opacity: 0.5, marginTop: -2 }}>streak</Text>
+        </View>
+      </View>
+
+      {/* Text content */}
+      <View style={{ flex: 1 }}>
+        <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>
+          {streak}-day streak
+        </Text>
+        <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
+          {remaining > 0 ? `${remaining} more day${remaining === 1 ? '' : 's'} to hit ${goal}` : `${goal}-day goal reached!`}
+        </Text>
+        {(isNearBest || isNewBest) && (
+          <View style={{
+            marginTop: 8,
+            backgroundColor: accentColor + '20',
+            paddingHorizontal: 10,
+            paddingVertical: 4,
+            borderRadius: 8,
+            alignSelf: 'flex-start',
+          }}>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: accentColor }}>
+              {isNewBest ? 'New personal best!' : 'Personal best incoming'}
+            </Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}

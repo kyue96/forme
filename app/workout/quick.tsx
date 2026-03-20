@@ -12,6 +12,7 @@ import {
   Text,
   TextInput,
   View,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -35,8 +36,11 @@ import {
   isBodyweightExercise,
   getInstructions,
 } from '@/lib/exercise-data';
-import { formatTimeMs, formatTime, animateLayout, animateLayoutSlow } from '@/lib/utils';
+import { formatTimeMs, formatTime, animateLayout, animateLayoutSlow, stripParens } from '@/lib/utils';
+import { MuscleGroupPills } from '@/components/MuscleGroupPills';
+import { getExerciseCategories } from '@/lib/exercise-utils';
 import { getWarmupRoutine } from '@/lib/warmup-data';
+import { useUserStore } from '@/lib/user-store';
 import { getExerciseImageUrls } from '@/lib/exercise-images';
 import { Image as ExpoImage } from 'expo-image';
 import { ExerciseThumbnail } from '@/components/ExerciseThumbnail';
@@ -59,6 +63,15 @@ export default function QuickWorkoutScreen() {
     getElapsedMs,
     setWarmupDone: storeSetWarmupDone,
   } = useWorkoutStore();
+
+  const avatarColor = useUserStore((s) => s.avatarColor) ?? '#F59E0B';
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+
+  useEffect(() => {
+    const showSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow', () => setKeyboardVisible(true));
+    const hideSub = Keyboard.addListener(Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide', () => setKeyboardVisible(false));
+    return () => { showSub.remove(); hideSub.remove(); };
+  }, []);
 
   const [phase, setPhase] = useState<Phase>(() => {
     if (activeWorkout?.dayIndex === -1) return 'workout';
@@ -103,8 +116,8 @@ export default function QuickWorkoutScreen() {
   const [warmupChecked, setWarmupChecked] = useState<Record<string, boolean>>({});
   const [warmupCollapsed, setWarmupCollapsed] = useState(() => {
     if (activeWorkout?.warmupDone) return true;
-    // Auto-collapse warmup if resuming with at least 1 completed set
-    if (activeWorkout?.dayIndex === -1 && getElapsedMs() > 0 && activeWorkout?.loggedExercises?.some(ex => ex.sets.some(s => s.completed))) return true;
+    // Auto-collapse if resuming an active workout (timer was running)
+    if (activeWorkout?.dayIndex === -1 && getElapsedMs() > 0) return true;
     return false;
   });
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -691,6 +704,7 @@ export default function QuickWorkoutScreen() {
   const saveAndNavigate = async () => {
     setSaving(true);
     const durationMinutes = Math.round(getElapsedMs() / 60000);
+    const workoutStartedAt = activeWorkout?.createdAt ? new Date(activeWorkout.createdAt).toISOString() : new Date().toISOString();
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
@@ -713,6 +727,7 @@ export default function QuickWorkoutScreen() {
           dayName: workoutName.trim() || 'My Workout',
           focus: 'Custom',
           durationMinutes: String(durationMinutes),
+          startedAt: workoutStartedAt,
         },
       });
     }
@@ -1266,6 +1281,14 @@ export default function QuickWorkoutScreen() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SetRowKeyboardAccessory />
       <SafeAreaView edges={['top']} style={{ flex: 1, backgroundColor: theme.background }}>
+        {/* Floating timer pill when keyboard is open */}
+        {keyboardVisible && workoutStarted && (
+          <View style={{ position: 'absolute', top: 8, right: 16, zIndex: 100, backgroundColor: avatarColor, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, elevation: 8 }}>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', fontVariant: ['tabular-nums'] }}>
+              {formatTimeMs(displayMs)}
+            </Text>
+          </View>
+        )}
         {/* Header */}
         <View style={{
           flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
@@ -1291,14 +1314,14 @@ export default function QuickWorkoutScreen() {
             ) : (
               <Pressable onPress={() => setEditingName(true)} style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }} numberOfLines={1}>
-                  {workoutName.trim() || 'My Workout'}
+                  {stripParens(workoutName.trim() || 'My Workout')}
                 </Text>
                 <Ionicons name="pencil-outline" size={14} color={theme.chrome} />
               </Pressable>
             )}
-            <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
-              Exercise {currentExIdx >= 0 ? currentExIdx + 1 : loggedExercises.length} of {loggedExercises.length}
-            </Text>
+            <View style={{ marginTop: 4 }}>
+              <MuscleGroupPills categories={getExerciseCategories(loggedExercises)} size="small" />
+            </View>
           </View>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
             {reorderMode ? (
@@ -1362,7 +1385,7 @@ export default function QuickWorkoutScreen() {
           keyboardShouldPersistTaps="handled"
           onScrollBeginDrag={() => { if (unlinkConfirmIdx !== null) setUnlinkConfirmIdx(null); }}
           ListHeaderComponent={(() => {
-            if (!warmupEnabled) return null;
+            if (!warmupEnabled || workoutStarted) return null;
             const warmup = getWarmupRoutine('full');
             const totalItems = warmup.cardio.length + warmup.mobility.length;
             const checkedCount = Object.values(warmupChecked).filter(Boolean).length;
@@ -1417,10 +1440,10 @@ export default function QuickWorkoutScreen() {
                   </Text>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                     <Pressable onPress={startFromWarmup} disabled={workoutStarted} hitSlop={8} style={{ backgroundColor: workoutStarted ? theme.chrome : theme.text, paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 }}>
-                      <Text style={{ color: theme.background, fontWeight: '600', fontSize: 13 }}>{workoutStarted ? 'In progress' : 'Start'}</Text>
+                      <Text style={{ color: theme.background, fontWeight: '600', fontSize: 13 }}>{workoutStarted ? 'IN PROGRESS' : 'START'}</Text>
                     </Pressable>
-                    <Pressable onPress={() => { dismissWarmup(); }} hitSlop={8}>
-                      <Ionicons name="chevron-up" size={20} color={theme.textSecondary} />
+                    <Pressable onPress={() => { dismissWarmup(); }} hitSlop={8} style={{ paddingHorizontal: 14, paddingVertical: 6, borderRadius: 8 }}>
+                      <Text style={{ color: '#EF4444', fontWeight: '600', fontSize: 13 }}>DISMISS</Text>
                     </Pressable>
                   </View>
                 </View>
@@ -1669,7 +1692,6 @@ export default function QuickWorkoutScreen() {
           }}
         />
         </KeyboardAvoidingView>
-
 
         {/* Bottom bar: Play | Timer (abs center) | Rest + Finish */}
         <View style={{ backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border, paddingHorizontal: 24, paddingTop: 10, paddingBottom: 28 }}>

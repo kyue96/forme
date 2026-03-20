@@ -13,6 +13,8 @@ import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 import { BadgesTab } from '@/components/BadgesTab';
+import { StreakRing } from '@/components/StreakRing';
+import { WeeklyVolumeCard } from '@/components/WeeklyVolumeCard';
 
 import { usePlan } from '@/lib/plan-context';
 import { supabase } from '@/lib/supabase';
@@ -69,7 +71,7 @@ export default function WorkoutScreen() {
   const focusCardColor = avatarColor || '#F59E0B';
   const { logId } = useLocalSearchParams<{ logId?: string }>();
 
-  const [activeTab, setActiveTab] = useState<'plan' | 'history' | 'badges'>('plan');
+  const [activeTab, setActiveTab] = useState<'plan' | 'history' | 'badges' | 'stats'>('plan');
   const [showPastDays, setShowPastDays] = useState(false);
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -77,6 +79,13 @@ export default function WorkoutScreen() {
   const [expandedDay, setExpandedDay] = useState<number | null>(null);
   const [todayLoggedDays, setTodayLoggedDays] = useState<Set<string>>(new Set());
   const [completedDays, setCompletedDays] = useState<Set<string>>(new Set());
+
+  // Stats tab data
+  const [streak, setStreak] = useState(0);
+  const [maxStreak, setMaxStreak] = useState(0);
+  const [weekVolume, setWeekVolume] = useState(0);
+  const [weeklyVolData, setWeeklyVolData] = useState<[any[], any[], any[]]>([[], [], []]);
+  const [volDelta, setVolDelta] = useState<number | null>(null);
 
   // Open a specific log when navigated from the home screen calendar.
   const consumedLogId = useRef<string | null>(null);
@@ -134,7 +143,101 @@ export default function WorkoutScreen() {
     }
   }, []);
 
-  useFocusEffect(useCallback(() => { loadHistory(); }, [loadHistory]));
+  const loadStats = useCallback(async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      // Streak
+      const streakStart = new Date();
+      streakStart.setDate(streakStart.getDate() - 60);
+      const { data: streakLogs } = await supabase
+        .from('workout_logs')
+        .select('completed_at')
+        .eq('user_id', user.id)
+        .gte('completed_at', dateKey(streakStart))
+        .order('completed_at', { ascending: false });
+
+      const streakDatesList = (streakLogs ?? []).map((l: any) => l.completed_at?.split('T')[0]).filter(Boolean);
+      const streakDatesSet = new Set(streakDatesList);
+
+      let s = 0;
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      if (!streakDatesSet.has(dateKey(d))) d.setDate(d.getDate() - 1);
+      while (streakDatesSet.has(dateKey(d))) { s++; d.setDate(d.getDate() - 1); }
+      setStreak(s);
+
+      const sorted = Array.from(streakDatesSet).sort();
+      let best = 0, run = 1;
+      for (let i = 1; i < sorted.length; i++) {
+        const prev = new Date(sorted[i - 1] + 'T12:00:00');
+        const curr = new Date(sorted[i] + 'T12:00:00');
+        if (Math.round((curr.getTime() - prev.getTime()) / 86400000) === 1) { run++; } else { best = Math.max(best, run); run = 1; }
+      }
+      setMaxStreak(Math.max(best, run));
+
+      // Weekly volume (3 weeks)
+      const weekDates = getWeekDates();
+      const weekStart = dateKey(weekDates[0]);
+      const weekEnd = dateKey(weekDates[6]);
+      const lastWeekMon = new Date(weekDates[0]); lastWeekMon.setDate(lastWeekMon.getDate() - 7);
+      const lastWeekSun = new Date(weekDates[0]); lastWeekSun.setDate(lastWeekSun.getDate() - 1);
+      const w1Mon = new Date(weekDates[0]); w1Mon.setDate(w1Mon.getDate() - 14);
+      const w1Sun = new Date(weekDates[0]); w1Sun.setDate(w1Sun.getDate() - 8);
+
+      const { data: thisWeekLogs } = await supabase
+        .from('workout_logs').select('exercises, completed_at').eq('user_id', user.id)
+        .gte('completed_at', weekStart).lte('completed_at', weekEnd + 'T23:59:59');
+      const { data: lastWeekLogs } = await supabase
+        .from('workout_logs').select('exercises, completed_at').eq('user_id', user.id)
+        .gte('completed_at', dateKey(lastWeekMon)).lte('completed_at', dateKey(lastWeekSun) + 'T23:59:59');
+      const { data: w1Logs } = await supabase
+        .from('workout_logs').select('exercises, completed_at').eq('user_id', user.id)
+        .gte('completed_at', dateKey(w1Mon)).lte('completed_at', dateKey(w1Sun) + 'T23:59:59');
+
+      const calcVolume = (logsList: any[]) =>
+        (logsList ?? []).reduce((total, log) => {
+          const exs = log.exercises as LoggedExercise[];
+          return total + exs.reduce((s2, ex) =>
+            s2 + ex.sets.filter(se => se.completed && se.weight != null).reduce((v, se) => v + (se.weight ?? 0) * se.reps, 0), 0);
+        }, 0);
+
+      const calcLogVolume = (log: any) => {
+        const exs = log.exercises as LoggedExercise[];
+        return exs.reduce((s2, ex) =>
+          s2 + ex.sets.filter(se => se.completed && se.weight != null).reduce((v, se) => v + (se.weight ?? 0) * se.reps, 0), 0);
+      };
+
+      const thisVol = calcVolume(thisWeekLogs ?? []);
+      const lastVol = calcVolume(lastWeekLogs ?? []);
+      const conv = weightUnit === 'lbs' ? 2.205 : 1;
+      setWeekVolume(Math.round(thisVol * conv));
+      setVolDelta(lastVol > 0 ? ((thisVol - lastVol) / lastVol) * 100 : null);
+
+      const buildDailyVol = (logsList: any[], mondayDate: Date) => {
+        const days = Array.from({ length: 7 }, (_, i) => {
+          const dd = new Date(mondayDate);
+          dd.setDate(dd.getDate() + i);
+          return { day: dateKey(dd), volume: 0 };
+        });
+        (logsList ?? []).forEach((log: any) => {
+          const logDate = log.completed_at?.split('T')[0];
+          const entry = days.find((dd) => dd.day === logDate);
+          if (entry) entry.volume += Math.round(calcLogVolume(log) * conv);
+        });
+        return days;
+      };
+
+      setWeeklyVolData([
+        buildDailyVol(w1Logs ?? [], w1Mon),
+        buildDailyVol(lastWeekLogs ?? [], lastWeekMon),
+        buildDailyVol(thisWeekLogs ?? [], weekDates[0]),
+      ]);
+    } catch {}
+  }, [weightUnit]);
+
+  useFocusEffect(useCallback(() => { loadHistory(); loadStats(); }, [loadHistory, loadStats]));
 
   const removeLog = (logId: string) => {
     Alert.alert('Remove workout', 'Delete this workout log?', [
@@ -359,7 +462,7 @@ export default function WorkoutScreen() {
         {/* Header */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
           <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>
-            {activeTab === 'plan' ? 'Plan' : activeTab === 'history' ? 'History' : 'Achievements'}
+            {activeTab === 'plan' ? 'Plan' : activeTab === 'history' ? 'History' : activeTab === 'stats' ? 'Stats' : 'Achievements'}
           </Text>
           <View style={{ flexDirection: 'row', gap: 16 }}>
             <Pressable
@@ -379,6 +482,15 @@ export default function WorkoutScreen() {
               hitSlop={8}
             >
               <Ionicons name="calendar-outline" size={22} color={activeTab === 'history' ? focusCardColor : theme.chrome} />
+            </Pressable>
+            <Pressable
+              onPress={() => {
+                animateLayout();
+                setActiveTab('stats');
+              }}
+              hitSlop={8}
+            >
+              <Ionicons name="analytics-outline" size={22} color={activeTab === 'stats' ? focusCardColor : theme.chrome} />
             </Pressable>
             <Pressable
               onPress={() => {
@@ -493,6 +605,21 @@ export default function WorkoutScreen() {
                 });
               })()
             )}
+          </View>
+        ) : activeTab === 'stats' ? (
+          <View style={{ gap: 12 }}>
+            <StreakRing streak={streak} maxStreak={maxStreak} size="large" color={focusCardColor} />
+            {weeklyVolData[2].length > 0 && (
+              <WeeklyVolumeCard
+                weeks={weeklyVolData}
+                totalVolume={weekVolume}
+                deltaPercent={volDelta}
+                accentColor={focusCardColor}
+              />
+            )}
+            <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+              <Text style={{ fontSize: 13, color: theme.textSecondary }}>More insights coming soon</Text>
+            </View>
           </View>
         ) : activeTab === 'badges' ? (
           <BadgesTab />

@@ -16,7 +16,7 @@ SplashScreen.preventAutoHideAsync();
 function RootLayoutNav({ session }: { session: Session | null }) {
   const router = useRouter();
   const segments = useSegments();
-  const { theme } = useSettings();
+  const { theme, themeMode } = useSettings();
 
   useEffect(() => {
     const inAuthGroup = segments[0] === '(auth)';
@@ -28,17 +28,29 @@ function RootLayoutNav({ session }: { session: Session | null }) {
     }
   }, [session, segments]);
 
+  // Detect dark theme by checking if background color is dark
+  const isDark = (() => {
+    const hex = theme.background.replace('#', '');
+    const r = parseInt(hex.substring(0, 2), 16);
+    const g = parseInt(hex.substring(2, 4), 16);
+    const b = parseInt(hex.substring(4, 6), 16);
+    return (r * 299 + g * 587 + b * 114) / 1000 < 128;
+  })();
+
   return (
-    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
-      <Stack.Screen name="(auth)" />
-      <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="quiz" />
-      <Stack.Screen name="plan-result" />
-      <Stack.Screen name="workout/[dayIndex]" />
-      <Stack.Screen name="create-post" options={{ presentation: 'modal' }} />
-      <Stack.Screen name="user/[userId]" />
-      <Stack.Screen name="discover" />
-    </Stack>
+    <>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
+        <Stack.Screen name="(auth)" />
+        <Stack.Screen name="(tabs)" />
+        <Stack.Screen name="quiz" />
+        <Stack.Screen name="plan-result" />
+        <Stack.Screen name="workout/[dayIndex]" />
+        <Stack.Screen name="create-post" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="user/[userId]" />
+        <Stack.Screen name="discover" />
+      </Stack>
+    </>
   );
 }
 
@@ -70,7 +82,6 @@ export default function RootLayout() {
       <QuizProvider>
         <PlanProvider>
           <RootLayoutNav session={session} />
-          <StatusBar style="dark" />
         </PlanProvider>
       </QuizProvider>
     </SettingsProvider>

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import { Animated, PanResponder, Pressable, Text, View } from 'react-native';
 import { useSettings } from '@/lib/settings-context';
 import { useUserStore } from '@/lib/user-store';
@@ -41,9 +41,11 @@ interface WeeklyCalendarProps {
   onDayPress: (date: Date, dayIndex: number) => void;
   planDayNames?: Set<string>;
   selectedDay?: string;
+  onInteractionStart?: () => void;
+  onInteractionEnd?: () => void;
 }
 
-export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, selectedDay }: WeeklyCalendarProps) {
+export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, selectedDay, onInteractionStart, onInteractionEnd }: WeeklyCalendarProps) {
   const { theme } = useSettings();
   const avatarColor = useUserStore((s) => s.avatarColor);
   const dotColor = avatarColor || '#F59E0B';
@@ -56,6 +58,9 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
   const now = new Date();
   now.setHours(0, 0, 0, 0);
   const todayStr = dateKey(now);
+
+  // Track whether TODAY pill should show: different week OR different day selected
+  const showTodayPill = weekOffset !== 0 || (selectedDay != null && selectedDay !== todayStr);
 
   const changeWeek = useCallback((direction: 1 | -1) => {
     if (swiping.current) return;
@@ -76,26 +81,89 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
   }, [fadeAnim, slideAnim]);
 
   const goToToday = useCallback(() => {
-    Animated.timing(fadeAnim, { toValue: 0, duration: 100, useNativeDriver: true }).start(() => {
-      setWeekOffset(0);
-      slideAnim.setValue(0);
-      Animated.timing(fadeAnim, { toValue: 1, duration: 150, useNativeDriver: true }).start();
-    });
-  }, [fadeAnim, slideAnim]);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    // If on a different week, animate back
+    if (weekOffset !== 0) {
+      Animated.timing(fadeAnim, { toValue: 0, duration: 100, useNativeDriver: true }).start(() => {
+        setWeekOffset(0);
+        slideAnim.setValue(0);
+        Animated.timing(fadeAnim, { toValue: 1, duration: 150, useNativeDriver: true }).start();
+      });
+    }
+    // Always re-select today
+    onDayPress(today, today.getDay());
+  }, [fadeAnim, slideAnim, weekOffset, onDayPress]);
 
-  const panResponder = useRef(
+  // Refs for drag-to-select
+  const containerRef = useRef<View>(null);
+  const containerX = useRef(0);
+  const containerWidth = useRef(0);
+  const dragging = useRef(false);
+  const lastDragIdx = useRef(-1);
+  const weekDatesRef = useRef(weekDates);
+  weekDatesRef.current = weekDates;
+  const onDayPressRef = useRef(onDayPress);
+  onDayPressRef.current = onDayPress;
+  const onInteractionStartRef = useRef(onInteractionStart);
+  onInteractionStartRef.current = onInteractionStart;
+  const onInteractionEndRef = useRef(onInteractionEnd);
+  onInteractionEndRef.current = onInteractionEnd;
+
+  const getDayIndexFromX = useCallback((pageX: number) => {
+    const relX = pageX - containerX.current;
+    const dayWidth = containerWidth.current / 7;
+    const idx = Math.floor(relX / dayWidth);
+    return Math.max(0, Math.min(6, idx));
+  }, []);
+
+  const panResponder = useMemo(() =>
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gs) =>
-        Math.abs(gs.dx) > 20 && Math.abs(gs.dx) > Math.abs(gs.dy) * 2,
+      onStartShouldSetPanResponder: () => false,
+      onMoveShouldSetPanResponder: (_, gs) => {
+        const isHorizontal = Math.abs(gs.dx) > 15 && Math.abs(gs.dx) > Math.abs(gs.dy) * 1.5;
+        return isHorizontal;
+      },
+      onPanResponderGrant: (evt) => {
+        dragging.current = true;
+        lastDragIdx.current = -1;
+        onInteractionStartRef.current?.();
+        // Select the initial day
+        const idx = getDayIndexFromX(evt.nativeEvent.pageX);
+        lastDragIdx.current = idx;
+        const dates = weekDatesRef.current;
+        onDayPressRef.current(dates[idx], idx);
+      },
+      onPanResponderMove: (evt) => {
+        if (!dragging.current) return;
+        const idx = getDayIndexFromX(evt.nativeEvent.pageX);
+        if (idx !== lastDragIdx.current) {
+          lastDragIdx.current = idx;
+          const dates = weekDatesRef.current;
+          onDayPressRef.current(dates[idx], idx);
+        }
+      },
       onPanResponderRelease: (_, gs) => {
+        if (dragging.current) {
+          dragging.current = false;
+          onInteractionEndRef.current?.();
+          return;
+        }
+        // Fallback: week swipe
         if (gs.dx < -40 || (gs.vx < -0.3 && gs.dx < -10)) {
           changeWeek(1);
         } else if (gs.dx > 40 || (gs.vx > 0.3 && gs.dx > 10)) {
           changeWeek(-1);
         }
       },
-    })
-  ).current;
+      onPanResponderTerminate: () => {
+        if (dragging.current) {
+          dragging.current = false;
+          onInteractionEndRef.current?.();
+        }
+      },
+    }),
+  [changeWeek, getDayIndexFromX]);
 
   return (
     <View style={{ paddingHorizontal: 24, paddingTop: 16, marginBottom: 16 }}>
@@ -108,7 +176,7 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
           {getMonthLabel(weekDates)}
         </Text>
         <Pressable
-          onPress={weekOffset !== 0 ? goToToday : undefined}
+          onPress={showTodayPill ? goToToday : undefined}
           hitSlop={8}
           style={{
             paddingHorizontal: 8,
@@ -117,13 +185,23 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
             backgroundColor: theme.surface,
             borderWidth: 1,
             borderColor: theme.border,
-            opacity: weekOffset !== 0 ? 1 : 0,
+            opacity: showTodayPill ? 1 : 0,
           }}
         >
-          <Text allowFontScaling style={{ fontSize: 10, fontWeight: '600', color: theme.text }}>Today</Text>
+          <Text allowFontScaling style={{ fontSize: 10, fontWeight: '600', color: theme.text }}>TODAY</Text>
         </Pressable>
       </View>
-      <View {...panResponder.panHandlers} style={{ height: 66 }}>
+      <View
+        ref={containerRef}
+        onLayout={() => {
+          containerRef.current?.measureInWindow((x, _y, w) => {
+            containerX.current = x;
+            containerWidth.current = w;
+          });
+        }}
+        {...panResponder.panHandlers}
+        style={{ height: 66 }}
+      >
         <Animated.View style={{
           flexDirection: 'row',
           justifyContent: 'space-between',

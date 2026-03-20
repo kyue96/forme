@@ -100,9 +100,6 @@ export default function HomeScreen() {
 
 
   // Quick stats
-  const [weekSessions, setWeekSessions] = useState(0);
-  const [weekVolume, setWeekVolume] = useState(0);
-  const [streak, setStreak] = useState(0);
 
   // Selected day on calendar (null = today)
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -115,6 +112,7 @@ export default function HomeScreen() {
 
   // FAB state
   const [fabOpen, setFabOpen] = useState(false);
+  const [scrollEnabled, setScrollEnabled] = useState(true);
   const fabAnim = useRef(new Animated.Value(0)).current;
 
   // Theme switcher removed - use Settings screen instead
@@ -207,84 +205,6 @@ export default function HomeScreen() {
       // Nudges: check inactivity
       checkAndScheduleNudges(user.id);
 
-      // Volume insight: compare this week vs last week
-      try {
-        const lastWeekMon = new Date(weekDates[0]);
-        lastWeekMon.setDate(lastWeekMon.getDate() - 7);
-        const lastWeekSun = new Date(weekDates[0]);
-        lastWeekSun.setDate(lastWeekSun.getDate() - 1);
-
-        // Check if user has at least 2 full weeks of workout history
-        const twoWeeksAgo = new Date(weekDates[0]);
-        twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14);
-        const { data: earliestLog } = await supabase
-          .from('workout_logs')
-          .select('completed_at')
-          .eq('user_id', user.id)
-          .order('completed_at', { ascending: true })
-          .limit(1)
-          .single();
-
-        const hasEnoughHistory = earliestLog
-          ? new Date(earliestLog.completed_at) <= twoWeeksAgo
-          : false;
-
-        const { data: thisWeekLogs } = await supabase
-          .from('workout_logs')
-          .select('exercises')
-          .eq('user_id', user.id)
-          .gte('completed_at', weekStart)
-          .lte('completed_at', weekEnd + 'T23:59:59');
-
-        const { data: lastWeekLogs } = await supabase
-          .from('workout_logs')
-          .select('exercises')
-          .eq('user_id', user.id)
-          .gte('completed_at', dateKey(lastWeekMon))
-          .lte('completed_at', dateKey(lastWeekSun) + 'T23:59:59');
-
-        const calcVolume = (logsList: any[]) =>
-          (logsList ?? []).reduce((total, log) => {
-            const exs = log.exercises as LoggedExercise[];
-            return total + exs.reduce((s, ex) =>
-              s + ex.sets.filter(se => se.completed && se.weight != null).reduce((v, se) => v + (se.weight ?? 0) * se.reps, 0), 0);
-          }, 0);
-
-        const thisVol = calcVolume(thisWeekLogs ?? []);
-        const lastVol = calcVolume(lastWeekLogs ?? []);
-        const thisWeekSessions = (thisWeekLogs ?? []).length;
-        setWeekSessions(thisWeekSessions);
-        const displayVol = weightUnit === 'lbs' ? Math.round(thisVol * 2.205) : Math.round(thisVol);
-        setWeekVolume(displayVol);
-      } catch {}
-
-      // Streak: fetch recent logs (up to 60 days back) and count consecutive days
-      try {
-        const streakStart = new Date();
-        streakStart.setDate(streakStart.getDate() - 60);
-        const { data: streakLogs } = await supabase
-          .from('workout_logs')
-          .select('completed_at')
-          .eq('user_id', user.id)
-          .gte('completed_at', dateKey(streakStart))
-          .order('completed_at', { ascending: false });
-
-        const streakDates = new Set(
-          (streakLogs ?? []).map((l: any) => l.completed_at?.split('T')[0]).filter(Boolean)
-        );
-        let s = 0;
-        const d = new Date();
-        d.setHours(0, 0, 0, 0);
-        // If no workout today, start counting from yesterday
-        if (!streakDates.has(dateKey(d))) {
-          d.setDate(d.getDate() - 1);
-        }
-        while (streakDates.has(dateKey(d))) {
-          s++;
-          d.setDate(d.getDate() - 1);
-        }
-        setStreak(s);
-      } catch {}
     } catch {}
   }, [activeDate]);
 
@@ -442,6 +362,7 @@ export default function HomeScreen() {
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingBottom: 24 }}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={scrollEnabled}
       >
         {/* Calendar strip */}
         {plan && (
@@ -450,10 +371,12 @@ export default function HomeScreen() {
             onDayPress={handleDayPress}
             planDayNames={planDayNames}
             selectedDay={selectedDate}
+            onInteractionStart={() => setScrollEnabled(false)}
+            onInteractionEnd={() => setScrollEnabled(true)}
           />
         )}
 
-        <View style={{ paddingHorizontal: 24 }}>
+        <View style={{ paddingHorizontal: 24, gap: 12 }}>
           {!plan ? (
             <View style={{ marginTop: 40, alignItems: 'center' }}>
               <Text allowFontScaling style={{ color: theme.textSecondary, fontSize: 15, textAlign: 'center', marginBottom: 32, lineHeight: 22 }}>
@@ -468,7 +391,7 @@ export default function HomeScreen() {
             </View>
 
           ) : (todayCompleted || todaySession) ? (
-            <View style={{ gap: 12, minHeight: 350 }}>
+            <View style={{ gap: 12 }}>
               {/* Workout complete card */}
               <Pressable
                 onPress={() => router.push({
@@ -482,7 +405,7 @@ export default function HomeScreen() {
                     logId: todaySession?.id ?? '',
                   },
                 })}
-                style={{ backgroundColor: focusCardColor, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: focusCardColor, marginBottom: 0 }}
+                style={{ backgroundColor: focusCardColor, borderRadius: 16, paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: focusCardColor }}
               >
                 <Ionicons name="checkmark-circle" size={28} color="#FFFFFF" />
                 <Text allowFontScaling style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', marginLeft: 12, flex: 1 }}>
@@ -566,12 +489,11 @@ export default function HomeScreen() {
             </View>
 
           ) : !activeWorkoutDay ? (
-            <View style={{ gap: 12, minHeight: 350 }}>
-              {/* Rest Day card — same size/position as Workout Complete card */}
-              <View style={{ backgroundColor: theme.surface, borderRadius: 24, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: theme.border, flex: 1, justifyContent: 'center' }}>
-                <Ionicons name="moon-outline" size={40} color={theme.chrome} />
-                <Text allowFontScaling style={{ fontSize: 20, fontWeight: '800', color: theme.text, marginTop: 12 }}>Rest Day</Text>
-                <Text allowFontScaling style={{ fontSize: 13, color: theme.textSecondary, textAlign: 'center', marginTop: 4 }}>{tip}</Text>
+            <View style={{ gap: 12 }}>
+              {/* Rest Day card — compact, matches Workout Complete */}
+              <View style={{ backgroundColor: theme.surface, borderRadius: 16, paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: theme.border }}>
+                <Ionicons name="moon" size={28} color={theme.chrome} />
+                <Text allowFontScaling style={{ fontSize: 16, fontWeight: '800', color: theme.text, marginLeft: 12 }}>Rest Day</Text>
               </View>
               {todaySession && (
                 <Pressable
@@ -674,9 +596,9 @@ export default function HomeScreen() {
             </View>
 
           ) : (
-            <View style={{ minHeight: 350 }}>
+            <View style={{ gap: 12 }}>
               {/* Focus card - shows resume state when workout is active */}
-              {activeWorkout && !todayCompleted ? (() => {
+              {activeWorkout && !todayCompleted && !selectedDate ? (() => {
                 const completedSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.filter((s) => s.completed).length, 0);
                 const totalSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.length, 0);
                 return (
@@ -688,12 +610,15 @@ export default function HomeScreen() {
                         router.push(`/workout/${activeWorkout.dayIndex}`);
                       }
                     }}
-                    style={{ borderRadius: 24, marginBottom: 12, flex: 1, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
+                    style={{ borderRadius: 24, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
                   >
                     <View style={{ paddingHorizontal: 20, paddingVertical: 24, flex: 1, backgroundColor: focusCardColor, borderRadius: 24 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                         <View style={{ flex: 1 }}>
-                          <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+                          <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5 }}>
+                            Today's Workout
+                          </Text>
+                          <Text allowFontScaling style={{ fontSize: 11, fontWeight: '600', color: '#FFFFFF99', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
                             In Progress
                           </Text>
                           <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: '#FFFFFF', lineHeight: 34 }}>
@@ -703,8 +628,11 @@ export default function HomeScreen() {
                             {completedSets}/{totalSets} sets
                           </Text>
                         </View>
-                        <View style={{ width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: '#FFFFFF99', alignItems: 'center', justifyContent: 'center' }}>
-                          <Ionicons name="arrow-forward" size={22} color="#FFFFFF" />
+                        <View style={{ alignItems: 'flex-end', gap: 8 }}>
+                          <MuscleGroupPills categories={getExerciseCategories(activeWorkout.loggedExercises)} size="small" />
+                          <View style={{ width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: '#FFFFFF99', alignItems: 'center', justifyContent: 'center' }}>
+                            <Ionicons name="arrow-forward" size={22} color="#FFFFFF" />
+                          </View>
                         </View>
                       </View>
                       {/* Exercise progress */}
@@ -731,7 +659,7 @@ export default function HomeScreen() {
                     const idx = plan.weeklyPlan.indexOf(activeWorkoutDay);
                     router.push(`/workout/${idx}`);
                   }}
-                  style={{ borderRadius: 24, marginBottom: 12, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
+                  style={{ borderRadius: 24, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
                 >
                   <View style={{ paddingHorizontal: 20, paddingVertical: 24, backgroundColor: focusCardColor, borderRadius: 24 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
@@ -771,7 +699,7 @@ export default function HomeScreen() {
 
           {/* Today's activities */}
           {todayActivities.length > 0 && (
-            <View style={{ marginTop: 10 }}>
+            <View>
               {todayActivities.map((act) => (
                 <View key={act.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 4 }}>
                   <Ionicons name="checkmark-circle" size={16} color="#22C55E" />
@@ -784,26 +712,8 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {/* Quick stats row */}
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 16 }}>
-            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center' }}>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: theme.text }}>
-                {streak}
-              </Text>
-              <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5, marginTop: 2 }}>streak</Text>
-            </View>
-            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center' }}>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: theme.text }}>{weekSessions}</Text>
-              <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5, marginTop: 2 }}>this week</Text>
-            </View>
-            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center' }}>
-              <Text style={{ fontSize: 20, fontWeight: '800', color: theme.text }}>{weekVolume > 0 ? formatNumber(weekVolume) : '-'}</Text>
-              <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5, marginTop: 2 }}>{weightUnit === 'lbs' ? 'lbs' : 'kg'} this week</Text>
-            </View>
-          </View>
-
-          {/* Total Cal + Steps */}
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 16 }}>
+          {/* Total Cal + Steps — per selected date */}
+          <View style={{ flexDirection: 'row', gap: 8 }}>
             <Pressable
               onPress={() => router.push('/(tabs)/meals')}
               style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border }}
