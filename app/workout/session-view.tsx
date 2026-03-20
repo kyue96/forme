@@ -26,6 +26,8 @@ import { Image as ExpoImage } from 'expo-image';
 import { ExerciseThumbnail } from '@/components/ExerciseThumbnail';
 import { isBarbell } from '@/lib/plate-calculator';
 import { PlateCalculatorSheet } from '@/components/PlateCalculatorSheet';
+import { MuscleGroupPills } from '@/components/MuscleGroupPills';
+import { getExerciseCategories } from '@/lib/exercise-utils';
 
 export default function SessionViewScreen() {
   const router = useRouter();
@@ -50,6 +52,9 @@ export default function SessionViewScreen() {
   const sessionTotalSets = exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).length, 0);
   const sessionVolume = exercises.reduce(
     (sum, ex) => sum + ex.sets.filter(s => s.completed && s.weight != null).reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0), 0
+  );
+  const sessionTotalReps = exercises.reduce(
+    (sum, ex) => sum + ex.sets.filter(s => s.completed).reduce((r, set) => r + set.reps, 0), 0
   );
 
   const handleShareSession = useCallback(async () => {
@@ -134,9 +139,9 @@ export default function SessionViewScreen() {
       <View style={{
         flexDirection: 'row',
         alignItems: 'center',
-        paddingHorizontal: 16,
-        paddingVertical: 12,
-        backgroundColor: theme.surface,
+        paddingHorizontal: 20,
+        paddingVertical: 10,
+        backgroundColor: theme.background,
         borderBottomWidth: 1,
         borderBottomColor: theme.border,
       }}>
@@ -208,27 +213,33 @@ export default function SessionViewScreen() {
           <View
             ref={sessionCardRef}
             collapsable={false}
-            style={{ backgroundColor: avatarColor || theme.text, borderRadius: 16, padding: 12, marginBottom: 16 }}
+            style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border, marginBottom: 16 }}
           >
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-              <Text style={{ fontSize: 12, fontWeight: '800', color: '#FFFFFF', letterSpacing: 2 }}>FORME</Text>
-              <View style={{ borderWidth: 1, borderColor: 'rgba(255,255,255,0.5)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 3 }}>
-                <Text style={{ fontSize: 9, fontWeight: '700', color: '#FFFFFF', letterSpacing: 1.5 }}>SHARE</Text>
-              </View>
+            {/* Header row: workout name + muscle tags */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{params.focus ?? params.dayName ?? 'Workout'}</Text>
+              <MuscleGroupPills categories={getExerciseCategories(exercises)} size="small" />
             </View>
-            <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>{params.dayName ?? 'Workout'}</Text>
-            <View style={{ flexDirection: 'row', gap: 16, marginTop: 10 }}>
-              <View>
-                <Text style={{ fontSize: 18, fontWeight: '800', color: '#FFFFFF' }}>{sessionTotalSets}</Text>
-                <Text style={{ fontSize: 9, color: '#FFFFFF60' }}>SETS</Text>
+            {/* Hero volume */}
+            <View style={{ alignItems: 'center', marginBottom: 12 }}>
+              <Text style={{ fontSize: 32, fontWeight: '800', color: theme.text, lineHeight: 36 }}>
+                {sessionVolume > 0 ? formatNumber(Math.round(sessionVolume)) : '\u2014'}
+              </Text>
+              <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>pounds moved</Text>
+            </View>
+            {/* Stats row */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 10 }}>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{sessionTotalSets}</Text>
+                <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>sets</Text>
               </View>
-              <View>
-                <Text style={{ fontSize: 18, fontWeight: '800', color: '#FFFFFF' }}>{sessionVolume > 0 ? formatNumber(Math.round(sessionVolume)) : '\u2014'}</Text>
-                <Text style={{ fontSize: 9, color: '#FFFFFF60' }}>VOLUME</Text>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{sessionTotalReps}</Text>
+                <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>reps</Text>
               </View>
-              <View>
-                <Text style={{ fontSize: 18, fontWeight: '800', color: '#FFFFFF' }}>{durationMinutes}</Text>
-                <Text style={{ fontSize: 9, color: '#FFFFFF60' }}>MIN</Text>
+              <View style={{ alignItems: 'center' }}>
+                <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{durationMinutes}m</Text>
+                <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>time</Text>
               </View>
             </View>
           </View>

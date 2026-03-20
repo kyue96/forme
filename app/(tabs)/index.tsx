@@ -3,7 +3,6 @@ import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
-  PanResponder,
   Pressable,
   ScrollView,
   Share,
@@ -68,7 +67,7 @@ interface TodaySession {
 export default function HomeScreen() {
   const router = useRouter();
   const { plan, loading } = usePlan();
-  const { theme } = useSettings();
+  const { theme, weightUnit } = useSettings();
   const { steps } = useHealthKit();
 
   const [completedDays, setCompletedDays] = useState<Set<string>>(new Set());
@@ -76,10 +75,6 @@ export default function HomeScreen() {
   const [todayCalories, setTodayCalories] = useState<number | null>(null);
   const [todayMeals, setTodayMeals] = useState<any[]>([]);
 
-  const [selectedDay, setSelectedDay] = useState<{ date: Date; dayIdx: number } | null>(null);
-  const [dayLog, setDayLog] = useState<any>(null);
-  const [dayLogLoading, setDayLogLoading] = useState(false);
-  const [dayModalExpanded, setDayModalExpanded] = useState(false);
 
   // Activity logging
   const [showActivitySheet, setShowActivitySheet] = useState(false);
@@ -92,24 +87,6 @@ export default function HomeScreen() {
   // Today's session
   const [todaySession, setTodaySession] = useState<TodaySession | null>(null);
   const sessionCardRef = useRef<View>(null);
-
-  // Day modal swipe navigation
-  const dayModalPan = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gs) =>
-        Math.abs(gs.dx) > 25 && Math.abs(gs.dx) > Math.abs(gs.dy) * 2,
-      onPanResponderRelease: (_, gs) => {
-        if (gs.dx < -50 || (gs.vx < -0.3 && gs.dx < -20)) {
-          // Swipe left → next day
-          dayModalSwipe.current?.('next');
-        } else if (gs.dx > 50 || (gs.vx > 0.3 && gs.dx > 20)) {
-          // Swipe right → prev day
-          dayModalSwipe.current?.('prev');
-        }
-      },
-    })
-  ).current;
-  const dayModalSwipe = useRef<((dir: 'prev' | 'next') => void) | null>(null);
 
   // Meal logging sheet
   const [showMealSheet, setShowMealSheet] = useState(false);
@@ -131,7 +108,9 @@ export default function HomeScreen() {
 
   const weekDates = getWeekDates();
   const now = new Date();
-  const todayStr = dateKey(now);
+  const todayMidnight = new Date(now);
+  todayMidnight.setHours(0, 0, 0, 0);
+  const todayStr = dateKey(todayMidnight);
 
   const jsDayName = now.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
   const todayWorkout = plan?.weeklyPlan.find((d) => d.dayName.toLowerCase() === jsDayName);
@@ -296,37 +275,13 @@ export default function HomeScreen() {
     }
   }, [activeWorkout]);
 
-  // Keep swipe callback in sync with selectedDay
-  useEffect(() => {
-    dayModalSwipe.current = selectedDay ? (dir: 'prev' | 'next') => {
-      const newDate = new Date(selectedDay.date);
-      newDate.setDate(newDate.getDate() + (dir === 'next' ? 1 : -1));
-      handleDayPress(newDate, newDate.getDay());
-    } : null;
-  }, [selectedDay]);
 
-  const handleDayPress = async (date: Date, i: number) => {
-    setSelectedDay({ date, dayIdx: i });
-    setDayLog(null);
-    setDayModalExpanded(false);
-    const dk = dateKey(date);
-    const dayName = DAY_NAMES_FULL[i];
-    const plannedDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === dayName.toLowerCase());
-    setDayLogLoading(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      const { data: logs } = await supabase
-        .from('workout_logs')
-        .select('id, day_name, exercises, duration_minutes, completed_at')
-        .eq('user_id', user.id)
-        .gte('completed_at', dk + 'T00:00:00')
-        .lte('completed_at', dk + 'T23:59:59')
-        .limit(1);
-      setDayLog({ log: logs?.[0] ?? null, planned: plannedDay });
-    } catch {} finally {
-      setDayLogLoading(false);
-    }
+
+  const handleDayPress = (date: Date, i: number) => {
+    router.push({
+      pathname: '/workout/day-view',
+      params: { dateStr: dateKey(date), dayName: DAY_NAMES_FULL[i] },
+    });
   };
 
   const saveActivity = async () => {
@@ -405,9 +360,10 @@ export default function HomeScreen() {
 
   // Today's session stats
   const sessionTotalSets = todaySession?.exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).length, 0) ?? 0;
-  const sessionVolume = todaySession?.exercises.reduce(
+  const sessionVolumeRaw = todaySession?.exercises.reduce(
     (sum, ex) => sum + ex.sets.filter(s => s.completed && s.weight != null).reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0), 0
   ) ?? 0;
+  const sessionVolume = Math.round(sessionVolumeRaw);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
@@ -444,64 +400,13 @@ export default function HomeScreen() {
                 style={{ marginTop: 16, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  Create Workout
+                  + Create Workout
                 </Text>
               </Pressable>
             </View>
 
-          ) : todayCompleted ? (
+          ) : (todayCompleted || todaySession) ? (
             <View style={{ gap: 12 }}>
-              {/* Shareable session card */}
-              {todaySession && (
-                <Pressable
-                  onPress={() => router.push({
-                    pathname: '/workout/card-picker',
-                    params: {
-                      exercises: JSON.stringify(todaySession.exercises),
-                      dayName: todaySession.day_name,
-                      focus: todayWorkout?.focus ?? todaySession.day_name,
-                      durationMinutes: String(todaySession.duration_minutes ?? 0),
-                      logId: todaySession.id,
-                    },
-                  })}
-                >
-                  <View
-                    ref={sessionCardRef}
-                    collapsable={false}
-                    style={{ backgroundColor: theme.text, borderRadius: 16, padding: 16 }}
-                  >
-                    {/* Header row: FORME + workout name */}
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                      <Text style={{ fontSize: 10, fontWeight: '800', color: theme.background + '50', letterSpacing: 2 }}>FORME</Text>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.background }}>{todayWorkout?.focus ?? todaySession.day_name}</Text>
-                    </View>
-                    {/* Hero volume */}
-                    <View style={{ alignItems: 'center', marginBottom: 12 }}>
-                      <Text style={{ fontSize: 32, fontWeight: '800', color: theme.background, lineHeight: 36 }}>
-                        {sessionVolume > 0 ? formatNumber(Math.round(sessionVolume)) : '\u2014'}
-                      </Text>
-                      <Text style={{ fontSize: 11, color: theme.background + '70', marginTop: 2 }}>pounds moved</Text>
-                    </View>
-                    {/* Stats row */}
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: theme.background + '15', paddingTop: 10 }}>
-                      <View style={{ alignItems: 'center' }}>
-                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.background }}>{sessionTotalSets}</Text>
-                        <Text style={{ fontSize: 9, color: theme.background + '50' }}>sets</Text>
-                      </View>
-                      <View style={{ alignItems: 'center' }}>
-                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.background }}>
-                          {todaySession.exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).reduce((r, set) => r + set.reps, 0), 0)}
-                        </Text>
-                        <Text style={{ fontSize: 9, color: theme.background + '50' }}>reps</Text>
-                      </View>
-                      <View style={{ alignItems: 'center' }}>
-                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.background }}>{todaySession.duration_minutes}m</Text>
-                        <Text style={{ fontSize: 9, color: theme.background + '50' }}>time</Text>
-                      </View>
-                    </View>
-                  </View>
-                </Pressable>
-              )}
               {/* Workout complete card */}
               <Pressable
                 onPress={() => router.push({
@@ -515,17 +420,15 @@ export default function HomeScreen() {
                     logId: todaySession?.id ?? '',
                   },
                 })}
-                style={{ backgroundColor: focusCardColor, borderRadius: 24, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: focusCardColor, marginBottom: 12 }}
+                style={{ backgroundColor: focusCardColor, borderRadius: 24, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: focusCardColor, marginBottom: 0 }}
               >
                 <Text style={{ position: 'absolute', top: 14, right: 16, fontSize: 11, fontWeight: '700', color: '#FFFFFFAA', letterSpacing: 1 }}>VIEW</Text>
                 <Ionicons name="checkmark-circle" size={48} color="#FFFFFF" />
-                <Text allowFontScaling style={{ fontSize: 20, fontWeight: '800', color: '#FFFFFF', marginTop: 12, marginBottom: 4 }}>
-                  Workout complete
-                </Text>
-                <Text allowFontScaling style={{ fontSize: 13, color: '#FFFFFFAA', textAlign: 'center' }}>
-                  Great work today. Recovery starts now.
+                <Text allowFontScaling style={{ fontSize: 20, fontWeight: '800', color: '#FFFFFF', marginTop: 12 }}>
+                  Workout Complete
                 </Text>
               </Pressable>
+              {/* Shareable session card */}
               {todaySession && (
                 <Pressable
                   onPress={() => router.push({
@@ -537,10 +440,42 @@ export default function HomeScreen() {
                       durationMinutes: String(todaySession.duration_minutes ?? 0),
                     },
                   })}
-                  style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8, marginBottom: 12 }}
                 >
-                  <Ionicons name="analytics-outline" size={18} color={theme.text} />
-                  <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>Workout Summary</Text>
+                  <View
+                    ref={sessionCardRef}
+                    collapsable={false}
+                    style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border }}
+                  >
+                    {/* Header row: workout name + muscle tags */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{todayWorkout?.focus ?? todaySession.day_name}</Text>
+                      <MuscleGroupPills categories={getExerciseCategories(todaySession.exercises)} size="small" />
+                    </View>
+                    {/* Hero volume */}
+                    <View style={{ alignItems: 'center', marginBottom: 12 }}>
+                      <Text style={{ fontSize: 32, fontWeight: '800', color: theme.text, lineHeight: 36 }}>
+                        {sessionVolume > 0 ? formatNumber(Math.round(sessionVolume)) : '\u2014'}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>pounds moved</Text>
+                    </View>
+                    {/* Stats row */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 10 }}>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{sessionTotalSets}</Text>
+                        <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>sets</Text>
+                      </View>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>
+                          {todaySession.exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).reduce((r, set) => r + set.reps, 0), 0)}
+                        </Text>
+                        <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>reps</Text>
+                      </View>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{todaySession.duration_minutes}m</Text>
+                        <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>time</Text>
+                      </View>
+                    </View>
+                  </View>
                 </Pressable>
               )}
               <Pressable
@@ -548,7 +483,7 @@ export default function HomeScreen() {
                 style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  Create Workout
+                  + Create Workout
                 </Text>
               </Pressable>
             </View>
@@ -559,6 +494,51 @@ export default function HomeScreen() {
                 <Text allowFontScaling style={{ fontSize: 18, fontWeight: '800', color: theme.text, marginBottom: 6 }}>Rest day</Text>
                 <Text allowFontScaling style={{ fontSize: 13, color: theme.text, lineHeight: 20 }}>{tip}</Text>
               </View>
+              {todaySession && (
+                <Pressable
+                  onPress={() => router.push({
+                    pathname: '/workout/post-workout',
+                    params: {
+                      exercises: JSON.stringify(todaySession.exercises),
+                      dayName: todaySession.day_name,
+                      focus: todaySession.day_name,
+                      durationMinutes: String(todaySession.duration_minutes ?? 0),
+                    },
+                  })}
+                >
+                  <View
+                    collapsable={false}
+                    style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border }}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{todaySession.day_name}</Text>
+                      <MuscleGroupPills categories={getExerciseCategories(todaySession.exercises)} size="small" />
+                    </View>
+                    <View style={{ alignItems: 'center', marginBottom: 12 }}>
+                      <Text style={{ fontSize: 32, fontWeight: '800', color: theme.text, lineHeight: 36 }}>
+                        {sessionVolume > 0 ? formatNumber(Math.round(sessionVolume)) : '\u2014'}
+                      </Text>
+                      <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>pounds moved</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 10 }}>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{sessionTotalSets}</Text>
+                        <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>sets</Text>
+                      </View>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>
+                          {todaySession.exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).reduce((r, set) => r + set.reps, 0), 0)}
+                        </Text>
+                        <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>reps</Text>
+                      </View>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{todaySession.duration_minutes}m</Text>
+                        <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>time</Text>
+                      </View>
+                    </View>
+                  </View>
+                </Pressable>
+              )}
               {nextWorkout && (() => {
                 const nextDayIdx = DAY_NAMES_FULL.findIndex((n) => n.toLowerCase() === nextWorkout.dayName.toLowerCase());
                 const daysUntil = nextDayIdx > todayIdx ? nextDayIdx - todayIdx : nextDayIdx + 7 - todayIdx;
@@ -594,7 +574,7 @@ export default function HomeScreen() {
                 style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  Create Workout
+                  + Create Workout
                 </Text>
               </Pressable>
             </View>
@@ -705,7 +685,7 @@ export default function HomeScreen() {
                 style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center', marginBottom: 12 }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  Create Workout
+                  + Create Workout
                 </Text>
               </Pressable>
             </View>
@@ -771,100 +751,6 @@ export default function HomeScreen() {
           )}
         </View>
       </ScrollView>
-
-      {/* Day detail modal */}
-      <BottomSheet visible={!!selectedDay} onClose={() => { setSelectedDay(null); setDayModalExpanded(false); }} hideHandle>
-        <View style={{ minHeight: 280 }}>
-        {dayLogLoading ? (
-          <ActivityIndicator color={theme.chrome} style={{ marginTop: 40 }} />
-        ) : selectedDay && (
-          <View {...dayModalPan.panHandlers}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-              <Pressable
-                onPress={() => {
-                  const prevDate = new Date(selectedDay.date);
-                  prevDate.setDate(prevDate.getDate() - 1);
-                  handleDayPress(prevDate, prevDate.getDay());
-                }}
-                hitSlop={12}
-                style={{ padding: 4 }}
-              >
-                <Ionicons name="chevron-back" size={20} color={theme.chrome} />
-              </Pressable>
-              <Text style={{ fontSize: 11, color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1.5 }}>
-                {selectedDay.date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-              </Text>
-              <Pressable
-                onPress={() => {
-                  const nextDate = new Date(selectedDay.date);
-                  nextDate.setDate(nextDate.getDate() + 1);
-                  handleDayPress(nextDate, nextDate.getDay());
-                }}
-                hitSlop={12}
-                style={{ padding: 4 }}
-              >
-                <Ionicons name="chevron-forward" size={20} color={theme.chrome} />
-              </Pressable>
-            </View>
-            {dayLog?.log && (
-              <Pressable
-                onPress={() => {
-                  setSelectedDay(null);
-                  setDayModalExpanded(false);
-                  router.push(`/(tabs)/workout?logId=${dayLog.log.id}`);
-                }}
-                hitSlop={8}
-                style={{ paddingHorizontal: 10, paddingVertical: 4, borderRadius: 8, backgroundColor: theme.text, alignSelf: 'flex-end', marginBottom: 4 }}
-              >
-                <Text style={{ fontSize: 11, fontWeight: '700', color: theme.background, letterSpacing: 1 }}>DETAILS</Text>
-              </Pressable>
-            )}
-            {dayLog?.log ? (() => {
-              const logExercises = dayLog.log.exercises ?? [];
-              return (
-                <View>
-                  <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text, marginBottom: 12 }}>{dayLog.log.day_name}</Text>
-                  {logExercises.length > 0 && (
-                    <View style={{ gap: 6 }}>
-                      {logExercises.map((ex: any, i: number) => {
-                        const total = ex.sets?.length ?? 0;
-                        return (
-                          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', paddingLeft: 12 }}>
-                            <Text style={{ fontSize: 13, color: theme.text, fontWeight: '600', flex: 1 }}>
-                              {`\u2022 ${ex.name}`}
-                            </Text>
-                            <Text style={{ fontSize: 11, color: theme.chrome }}>{total} sets</Text>
-                          </View>
-                        );
-                      })}
-                    </View>
-                  )}
-                </View>
-              );
-            })() : dayLog?.planned ? (
-              <View>
-                <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text, marginBottom: 4 }}>{dayLog.planned.focus}</Text>
-                <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>{dayLog.planned.exercises.length} exercises planned</Text>
-                {dateKey(selectedDay.date) === todayStr && (
-                  <Pressable
-                    onPress={() => {
-                      setSelectedDay(null);
-                      const idx = plan?.weeklyPlan.indexOf(dayLog.planned);
-                      if (idx != null && idx >= 0) router.push(`/workout/${idx}`);
-                    }}
-                    style={{ backgroundColor: theme.text, paddingVertical: 14, borderRadius: 14, alignItems: 'center', marginTop: 8 }}
-                  >
-                    <Text style={{ color: theme.background, fontWeight: '700' }}>Start workout →</Text>
-                  </Pressable>
-                )}
-              </View>
-            ) : (
-              <Text style={{ color: theme.textSecondary, marginTop: 8 }}>No workout logged or planned for this day.</Text>
-            )}
-          </View>
-        )}
-        </View>
-      </BottomSheet>
 
       {/* Activity logging bottom sheet */}
       <BottomSheet visible={showActivitySheet} onClose={() => setShowActivitySheet(false)}>

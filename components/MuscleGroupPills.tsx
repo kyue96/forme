@@ -47,6 +47,7 @@ export function MuscleGroupPills({ categories, size = 'normal' }: MuscleGroupPil
                 fontSize: isSmall ? 9 : 11,
                 fontWeight: '600',
                 color: '#FFFFFF',
+                textTransform: 'uppercase',
               }}
             >
               {cat}

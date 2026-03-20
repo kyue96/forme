@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
+  PanResponder,
   Pressable,
   ScrollView,
   Text,
@@ -8,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSettings } from '@/lib/settings-context';
 import { LoggedExercise } from '@/lib/types';
 import { formatNumber } from '@/lib/utils';
@@ -25,14 +27,17 @@ interface VolumeChartProps {
   theme: any;
   avatarColor: string | null;
   currentIndex: number;
+  onInteractionStart?: () => void;
+  onInteractionEnd?: () => void;
 }
 
-function VolumeChart({ data, theme, avatarColor, currentIndex }: VolumeChartProps) {
+function VolumeChart({ data, theme, avatarColor, currentIndex, onInteractionStart, onInteractionEnd }: VolumeChartProps) {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const highlightColor = avatarColor || '#F59E0B';
   const chartHeight = 160;
   const barMinHeight = 4;
-  const yAxisWidth = 40;
+  const yAxisWidth = 52;
+  const chartLayoutRef = useRef({ x: 0, width: 0 });
 
   // Y-axis: scale in increments of 5,000, max 100,000
   const rawMax = Math.max(...data.map(d => d.volume), 1);
@@ -42,6 +47,34 @@ function VolumeChart({ data, theme, avatarColor, currentIndex }: VolumeChartProp
   for (let i = 0; i <= tickCount; i++) {
     ticks.push(Math.round((scaleMax / tickCount) * (tickCount - i)));
   }
+
+  const getIndexFromX = (pageX: number) => {
+    const { x, width } = chartLayoutRef.current;
+    if (width === 0) return null;
+    const relX = pageX - x;
+    const idx = Math.floor((relX / width) * data.length);
+    return Math.max(0, Math.min(data.length - 1, idx));
+  };
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponderCapture: () => true,
+      onPanResponderTerminationRequest: () => false,
+      onPanResponderGrant: (e) => {
+        onInteractionStart?.();
+        const idx = getIndexFromX(e.nativeEvent.pageX);
+        if (idx !== null) setSelectedIdx(prev => prev === idx ? null : idx);
+      },
+      onPanResponderMove: (e) => {
+        const idx = getIndexFromX(e.nativeEvent.pageX);
+        if (idx !== null) setSelectedIdx(idx);
+      },
+      onPanResponderRelease: () => { onInteractionEnd?.(); },
+      onPanResponderTerminate: () => { onInteractionEnd?.(); },
+    })
+  ).current;
 
   // Which bar to show label for
   const activeIdx = selectedIdx ?? currentIndex;
@@ -57,34 +90,44 @@ function VolumeChart({ data, theme, avatarColor, currentIndex }: VolumeChartProp
 
       <View style={{ flexDirection: 'row' }}>
         {/* Y-axis */}
-        <View style={{ width: yAxisWidth, height: chartHeight, justifyContent: 'space-between', paddingRight: 6 }}>
+        <View style={{ width: yAxisWidth, height: chartHeight, justifyContent: 'space-between' }}>
           {ticks.map((tick, i) => (
-            <Text key={i} style={{ fontSize: 9, color: theme.textSecondary, textAlign: 'right' }}>
-              {tick >= 1000 ? `${Math.round(tick / 1000)}k` : tick}
+            <Text key={i} style={{ fontSize: 9, color: theme.textSecondary, textAlign: 'left' }}>
+              {formatNumber(tick)}
             </Text>
           ))}
         </View>
 
-        {/* Chart area */}
-        <View style={{ flex: 1, height: chartHeight, position: 'relative' }}>
-          {/* Grid lines */}
-          {ticks.map((_, i) => (
-            <View
-              key={`grid-${i}`}
-              style={{
-                position: 'absolute',
-                top: (chartHeight / (ticks.length - 1)) * i,
-                left: 0,
-                right: 0,
-                height: 1,
-                backgroundColor: theme.border,
-                opacity: 0.4,
-              }}
-            />
-          ))}
+        {/* Chart area with drag-to-scrub */}
+        <View
+          style={{ flex: 1, height: chartHeight, position: 'relative' }}
+          onLayout={(e) => {
+            e.target.measureInWindow((x, _y, width) => {
+              chartLayoutRef.current = { x, width };
+            });
+          }}
+          {...panResponder.panHandlers}
+        >
+          {/* Grid lines (behind bars) */}
+          <View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, zIndex: 0 }}>
+            {ticks.map((_, i) => (
+              <View
+                key={`grid-${i}`}
+                style={{
+                  position: 'absolute',
+                  top: (chartHeight / (ticks.length - 1)) * i,
+                  left: 0,
+                  right: 0,
+                  height: 1,
+                  backgroundColor: theme.border,
+                  opacity: 0.3,
+                }}
+              />
+            ))}
+          </View>
 
-          {/* Bars */}
-          <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: chartHeight, gap: 4, paddingHorizontal: 2 }}>
+          {/* Bars (in front of grid) */}
+          <View style={{ flexDirection: 'row', alignItems: 'flex-end', height: chartHeight, gap: 4, paddingHorizontal: 2, zIndex: 1 }}>
             {data.map((item, idx) => {
               const isCurrent = idx === currentIndex;
               const isSelected = idx === selectedIdx;
@@ -92,26 +135,35 @@ function VolumeChart({ data, theme, avatarColor, currentIndex }: VolumeChartProp
               const barHeight = Math.max(heightPercent * (chartHeight / 100), barMinHeight);
               const isActive = isCurrent || isSelected;
 
+              const gradientColors = isCurrent
+                ? [highlightColor, highlightColor + '80'] as const
+                : isSelected
+                  ? [theme.text, theme.text + '80'] as const
+                  : [theme.chrome + '50', theme.chrome + '20'] as const;
+
               return (
-                <Pressable
+                <View
                   key={idx}
-                  onPress={() => setSelectedIdx(selectedIdx === idx ? null : idx)}
                   style={{ flex: 1, alignItems: 'center', justifyContent: 'flex-end', height: chartHeight }}
                 >
-                  <View style={{
-                    width: '80%',
-                    height: barHeight,
-                    backgroundColor: isCurrent ? highlightColor : (isSelected ? theme.text : theme.chrome + '30'),
-                    borderRadius: 4,
-                    ...(isActive && {
-                      shadowColor: isCurrent ? highlightColor : theme.text,
-                      shadowOffset: { width: 0, height: 2 },
-                      shadowOpacity: 0.3,
-                      shadowRadius: 4,
-                      elevation: 3,
-                    }),
-                  }} />
-                </Pressable>
+                  <LinearGradient
+                    colors={gradientColors}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 0, y: 1 }}
+                    style={{
+                      width: '80%',
+                      height: barHeight,
+                      borderRadius: 6,
+                      ...(isActive && {
+                        shadowColor: isCurrent ? highlightColor : theme.text,
+                        shadowOffset: { width: 0, height: 3 },
+                        shadowOpacity: 0.35,
+                        shadowRadius: 6,
+                        elevation: 4,
+                      }),
+                    }}
+                  />
+                </View>
               );
             })}
           </View>
@@ -152,6 +204,7 @@ export default function PostWorkoutScreen() {
   }>();
 
   const [historicalVolumes, setHistoricalVolumes] = useState<Array<{ volume: number; date: string; label: string }>>([]);
+  const [scrollEnabled, setScrollEnabled] = useState(true);
 
   const exercises: LoggedExercise[] = params.exercises ? JSON.parse(params.exercises) : [];
   const durationMinutes = parseInt(params.durationMinutes ?? '0', 10);
@@ -167,7 +220,7 @@ export default function PostWorkoutScreen() {
         .reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0),
     0
   );
-  const displayVolume = weightUnit === 'lbs' ? Math.round(totalVolume * 2.205) : totalVolume;
+  const displayVolume = Math.round(totalVolume);
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
   const exerciseCategories = getExerciseCategories(exercises);
 
@@ -200,7 +253,7 @@ export default function PostWorkoutScreen() {
                 .reduce((s: number, set: any) => s + (set.weight ?? 0) * set.reps, 0),
             0
           );
-          const convertedVolume = weightUnit === 'lbs' ? Math.round(logVolume * 2.205) : logVolume;
+          const convertedVolume = Math.round(logVolume);
           const date = new Date(log.completed_at);
           const label = `${date.getMonth() + 1}/${date.getDate()}`;
           return { volume: convertedVolume, date: log.completed_at, label };
@@ -238,11 +291,11 @@ export default function PostWorkoutScreen() {
           FORME
         </Text>
       </View>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false} scrollEnabled={scrollEnabled}>
         {/* Header */}
         <View style={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: 24 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>Workout Summary</Text>
+            <Text style={{ fontSize: 22, fontWeight: '800', color: theme.text }}>Workout Summary</Text>
             <Pressable
               onPress={() => router.push({
                 pathname: '/workout/card-picker',
@@ -258,9 +311,9 @@ export default function PostWorkoutScreen() {
               <Ionicons name="share-outline" size={22} color={theme.chrome} />
             </Pressable>
           </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-            <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text }}>{params.dayName || params.focus}</Text>
-            <MuscleGroupPills categories={exerciseCategories} size="normal" />
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
+            <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>{params.dayName || params.focus}</Text>
+            <MuscleGroupPills categories={exerciseCategories} size="small" />
           </View>
         </View>
 
@@ -294,7 +347,7 @@ export default function PostWorkoutScreen() {
           {historicalVolumes.length > 1 && (
             <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginTop: 12 }}>
               <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>Volume Trend</Text>
-              <VolumeChart data={historicalVolumes} theme={theme} avatarColor={avatarColor} currentIndex={historicalVolumes.length - 1} />
+              <VolumeChart data={historicalVolumes} theme={theme} avatarColor={avatarColor} currentIndex={historicalVolumes.length - 1} onInteractionStart={() => setScrollEnabled(false)} onInteractionEnd={() => setScrollEnabled(true)} />
             </View>
           )}
 
@@ -361,16 +414,6 @@ export default function PostWorkoutScreen() {
           </Pressable>
         </View>
       </ScrollView>
-
-      {/* Done button */}
-      <View style={{ paddingHorizontal: 24, paddingBottom: 32, paddingTop: 12, backgroundColor: theme.background }}>
-        <Pressable
-          onPress={() => router.replace('/(tabs)')}
-          style={{ backgroundColor: theme.text, paddingVertical: 16, borderRadius: 16, alignItems: 'center' }}
-        >
-          <Text style={{ color: theme.background, fontWeight: '600', fontSize: 16 }}>Done</Text>
-        </Pressable>
-      </View>
     </SafeAreaView>
   );
 }

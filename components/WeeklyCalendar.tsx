@@ -159,7 +159,7 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
                   <Text allowFontScaling style={{
                     fontSize: 13,
                     fontWeight: isToday ? '800' : '600',
-                    color: isToday ? dotColor : (done ? '#22C55E' : theme.textSecondary),
+                    color: done ? '#22C55E' : (isToday ? dotColor : theme.textSecondary),
                   }}>
                     {date.getDate()}
                   </Text>

@@ -83,18 +83,16 @@ export default function CardPickerScreen() {
         .reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0),
     0
   );
-  const displayVolume = weightUnit === 'lbs' ? Math.round(totalVolumeRaw * 2.205) : Math.round(totalVolumeRaw);
+  const displayVolume = Math.round(totalVolumeRaw);
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
 
   const density = computeDensity(exercises, durationMinutes);
-  const displayDensity = weightUnit === 'lbs' ? Math.round(density * 2.205) : density;
+  const displayDensity = Math.round(density);
   const avgIntensity = computeAvgIntensity(exercises);
   const topE1RMs = computeTopE1RMs(exercises, 1);
   const bestSet = computeBestSet(exercises);
-  const displayBestSet = bestSet && weightUnit === 'lbs'
-    ? { ...bestSet, weight: Math.round(bestSet.weight * 2.205) }
-    : bestSet;
-  const volumeLbs = weightUnit === 'lbs' ? displayVolume : Math.round(totalVolumeRaw * 2.205);
+  const displayBestSet = bestSet;
+  const volumeLbs = weightUnit === 'lbs' ? displayVolume : Math.round(totalVolumeRaw * 2.205); // convert kg to lbs for comparison strings only
   const volumeComparison = getVolumeComparison(volumeLbs);
 
   const cardData: ShareCardData = {
@@ -152,7 +150,7 @@ export default function CardPickerScreen() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#0A0A0A' }}>
       {/* Header — close button only */}
-      <View style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
+      <View style={{ paddingHorizontal: 20, paddingVertical: 10 }}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
           <Ionicons name="close" size={28} color="#FFFFFF" />
         </Pressable>
@@ -196,17 +194,19 @@ export default function CardPickerScreen() {
         <Pressable
           onPress={handleShare}
           style={{
-            backgroundColor: '#FFFFFF',
+            backgroundColor: '#1A1A1A',
             borderRadius: 14,
             paddingVertical: 16,
             alignItems: 'center',
             flexDirection: 'row',
             justifyContent: 'center',
             gap: 8,
+            borderWidth: 1,
+            borderColor: '#2A2A2A',
           }}
         >
-          <Ionicons name="share-outline" size={20} color="#000000" />
-          <Text style={{ fontSize: 15, fontWeight: '700', color: '#000000' }}>Save & Share</Text>
+          <Ionicons name="share-outline" size={20} color="#FFFFFF" />
+          <Text style={{ fontSize: 15, fontWeight: '700', color: '#FFFFFF' }}>Save & Share</Text>
         </Pressable>
       </View>
     </SafeAreaView>
