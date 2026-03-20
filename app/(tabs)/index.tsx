@@ -363,7 +363,7 @@ export default function HomeScreen() {
   const sessionVolumeRaw = todaySession?.exercises.reduce(
     (sum, ex) => sum + ex.sets.filter(s => s.completed && s.weight != null).reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0), 0
   ) ?? 0;
-  const sessionVolume = Math.round(sessionVolumeRaw);
+  const sessionVolume = weightUnit === 'lbs' ? Math.round(sessionVolumeRaw * 2.205) : Math.round(sessionVolumeRaw);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
@@ -454,9 +454,9 @@ export default function HomeScreen() {
                     {/* Hero volume */}
                     <View style={{ alignItems: 'center', marginBottom: 12 }}>
                       <Text style={{ fontSize: 32, fontWeight: '800', color: theme.text, lineHeight: 36 }}>
-                        {sessionVolume > 0 ? formatNumber(Math.round(sessionVolume)) : '\u2014'}
+                        {sessionVolume > 0 ? formatNumber(sessionVolume) : '\u2014'}
                       </Text>
-                      <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>pounds moved</Text>
+                      <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>{weightUnit === 'lbs' ? 'pounds' : 'kg'} moved</Text>
                     </View>
                     {/* Stats row */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 10 }}>
@@ -516,9 +516,9 @@ export default function HomeScreen() {
                     </View>
                     <View style={{ alignItems: 'center', marginBottom: 12 }}>
                       <Text style={{ fontSize: 32, fontWeight: '800', color: theme.text, lineHeight: 36 }}>
-                        {sessionVolume > 0 ? formatNumber(Math.round(sessionVolume)) : '\u2014'}
+                        {sessionVolume > 0 ? formatNumber(sessionVolume) : '\u2014'}
                       </Text>
-                      <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>pounds moved</Text>
+                      <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>{weightUnit === 'lbs' ? 'pounds' : 'kg'} moved</Text>
                     </View>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 10 }}>
                       <View style={{ alignItems: 'center' }}>

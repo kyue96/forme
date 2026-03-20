@@ -50,9 +50,10 @@ export default function SessionViewScreen() {
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
 
   const sessionTotalSets = exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).length, 0);
-  const sessionVolume = exercises.reduce(
+  const sessionVolumeRaw = exercises.reduce(
     (sum, ex) => sum + ex.sets.filter(s => s.completed && s.weight != null).reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0), 0
   );
+  const sessionVolume = weightUnit === 'lbs' ? Math.round(sessionVolumeRaw * 2.205) : Math.round(sessionVolumeRaw);
   const sessionTotalReps = exercises.reduce(
     (sum, ex) => sum + ex.sets.filter(s => s.completed).reduce((r, set) => r + set.reps, 0), 0
   );
@@ -225,7 +226,7 @@ export default function SessionViewScreen() {
               <Text style={{ fontSize: 32, fontWeight: '800', color: theme.text, lineHeight: 36 }}>
                 {sessionVolume > 0 ? formatNumber(Math.round(sessionVolume)) : '\u2014'}
               </Text>
-              <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>pounds moved</Text>
+              <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>{weightUnit === 'lbs' ? 'pounds' : 'kg'} moved</Text>
             </View>
             {/* Stats row */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 10 }}>
