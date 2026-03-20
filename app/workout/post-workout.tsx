@@ -274,48 +274,43 @@ export default function PostWorkoutScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
-      {/* Header with back button */}
+      {/* Sticky header */}
       <View style={{
-        flexDirection: 'row',
-        alignItems: 'center',
         paddingHorizontal: 20,
         paddingVertical: 10,
         backgroundColor: theme.background,
         borderBottomWidth: 1,
         borderBottomColor: theme.border,
       }}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 4, marginRight: 12 }}>
-          <Ionicons name="chevron-back" size={24} color={theme.text} />
-        </Pressable>
-        <Text style={{ fontSize: 17, fontWeight: '800', letterSpacing: 3, color: theme.text, textTransform: 'uppercase' }}>
-          FORME
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 4, marginRight: 8 }}>
+            <Ionicons name="chevron-back" size={24} color={theme.text} />
+          </Pressable>
+          <View style={{ flex: 1, marginRight: 8 }}>
+            <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>Workout Summary</Text>
+            <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>{params.dayName || params.focus}</Text>
+          </View>
+          <Pressable
+            onPress={() => router.push({
+              pathname: '/workout/card-picker',
+              params: {
+                exercises: params.exercises ?? '[]',
+                dayName: params.dayName ?? '',
+                focus: params.focus ?? '',
+                durationMinutes: params.durationMinutes ?? '0',
+              },
+            })}
+            hitSlop={12}
+            style={{ padding: 4 }}
+          >
+            <Ionicons name="share-outline" size={22} color={theme.text} />
+          </Pressable>
+        </View>
+        <View style={{ flexDirection: 'row', marginTop: 8, marginLeft: 36 }}>
+          <MuscleGroupPills categories={exerciseCategories} size="small" />
+        </View>
       </View>
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false} scrollEnabled={scrollEnabled}>
-        {/* Header */}
-        <View style={{ paddingHorizontal: 24, paddingTop: 24, paddingBottom: 24 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text style={{ fontSize: 22, fontWeight: '800', color: theme.text }}>Workout Summary</Text>
-            <Pressable
-              onPress={() => router.push({
-                pathname: '/workout/card-picker',
-                params: {
-                  exercises: params.exercises ?? '[]',
-                  dayName: params.dayName ?? '',
-                  focus: params.focus ?? '',
-                  durationMinutes: params.durationMinutes ?? '0',
-                },
-              })}
-              hitSlop={12}
-            >
-              <Ionicons name="share-outline" size={22} color={theme.chrome} />
-            </Pressable>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 }}>
-            <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>{params.dayName || params.focus}</Text>
-            <MuscleGroupPills categories={exerciseCategories} size="small" />
-          </View>
-        </View>
 
         {/* Summary metrics */}
         <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>

@@ -31,9 +31,11 @@ export default function TabsLayout() {
   return (
     <View style={{ flex: 1 }}>
       <Tabs
+        sceneContainerStyle={{ backgroundColor: theme.background }}
         screenOptions={{
           headerShown: false,
           tabBarShowLabel: false,
+          sceneStyle: { backgroundColor: theme.background },
           tabBarStyle: {
             height: 60,
             paddingTop: 0,

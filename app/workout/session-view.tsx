@@ -2,6 +2,7 @@ import { useState, useRef, useCallback } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   Alert,
+  Animated,
   Pressable,
   ScrollView,
   Share,
@@ -20,7 +21,7 @@ import { useUserStore } from '@/lib/user-store';
 import { LoggedExercise } from '@/lib/types';
 import { SemanticColors } from '@/constants/theme';
 import { isBodyweightExercise } from '@/lib/exercise-data';
-import { formatTime, animateLayout, formatNumber } from '@/lib/utils';
+import { formatTime, animateLayout, formatNumber, stripParens } from '@/lib/utils';
 import { getExerciseImageUrls } from '@/lib/exercise-images';
 import { Image as ExpoImage } from 'expo-image';
 import { ExerciseThumbnail } from '@/components/ExerciseThumbnail';
@@ -85,18 +86,37 @@ export default function SessionViewScreen() {
       })
     : '';
 
-  const [activeExercise, setActiveExercise] = useState<number | 'all' | null>(null);
+  const [activeExercise, setActiveExercise] = useState<number | 'all' | null>(0);
 
   // Editable exercises (Step 13)
   const [editableExercises, setEditableExercises] = useState<LoggedExercise[]>(exercises);
   const [editingExIdx, setEditingExIdx] = useState<number | null>(null);
 
   // Editable workout name (Step 14)
-  const [workoutName, setWorkoutName] = useState(params.focus ?? params.dayName ?? 'Workout');
+  const [workoutName, setWorkoutName] = useState(stripParens(params.focus ?? params.dayName ?? 'Workout'));
   const [editingName, setEditingName] = useState(false);
 
   // Plate calculator
   const [plateCalcTarget, setPlateCalcTarget] = useState<{ exIdx: number; setIdx: number } | null>(null);
+
+  // Edit buttons slide animation
+  const editButtonsAnim = useRef(new Animated.Value(0)).current;
+  const [visibleEditIdx, setVisibleEditIdx] = useState<number | null>(null);
+
+  const startEditing = (exIdx: number) => {
+    setEditingExIdx(exIdx);
+    setVisibleEditIdx(exIdx);
+    editButtonsAnim.setValue(0);
+    Animated.timing(editButtonsAnim, { toValue: 1, duration: 250, useNativeDriver: false }).start();
+  };
+
+  const dismissEditButtons = (callback?: () => void) => {
+    Animated.timing(editButtonsAnim, { toValue: 0, duration: 200, useNativeDriver: false }).start(() => {
+      setEditingExIdx(null);
+      setVisibleEditIdx(null);
+      callback?.();
+    });
+  };
 
   const saveExerciseEdits = async (exIdx: number) => {
     if (!params.logId) return;
@@ -106,21 +126,20 @@ export default function SessionViewScreen() {
         .update({ exercises: editableExercises })
         .eq('id', params.logId);
     } catch {}
-    animateLayout();
-    setEditingExIdx(null);
+    dismissEditButtons();
   };
 
   const cancelExerciseEdits = () => {
-    // Revert the edited exercise back to original
-    if (editingExIdx != null) {
-      setEditableExercises((prev) => {
-        const copy = [...prev];
-        copy[editingExIdx] = exercises[editingExIdx];
-        return copy;
-      });
-    }
-    animateLayout();
-    setEditingExIdx(null);
+    const idx = editingExIdx;
+    dismissEditButtons(() => {
+      if (idx != null) {
+        setEditableExercises((prev) => {
+          const copy = [...prev];
+          copy[idx] = exercises[idx];
+          return copy;
+        });
+      }
+    });
   };
 
   const saveWorkoutName = async () => {
@@ -136,61 +155,65 @@ export default function SessionViewScreen() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
-      {/* Header */}
+      {/* Header — fixed at top */}
       <View style={{
-        flexDirection: 'row',
-        alignItems: 'center',
         paddingHorizontal: 20,
         paddingVertical: 10,
         backgroundColor: theme.background,
         borderBottomWidth: 1,
         borderBottomColor: theme.border,
       }}>
-        <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 4, marginRight: 8 }}>
-          <Ionicons name="chevron-back" size={24} color={theme.text} />
-        </Pressable>
-        <View style={{ flex: 1, marginRight: 8 }}>
-          {editingName ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <TextInput
-                style={{
-                  flex: 1,
-                  fontSize: 16,
-                  fontWeight: '700',
-                  color: theme.text,
-                  backgroundColor: theme.background,
-                  borderWidth: 1,
-                  borderColor: theme.border,
-                  borderRadius: 8,
-                  paddingHorizontal: 8,
-                  paddingVertical: 4,
-                }}
-                value={workoutName}
-                onChangeText={setWorkoutName}
-                autoFocus
-                returnKeyType="done"
-                onSubmitEditing={saveWorkoutName}
-              />
-              <Pressable onPress={saveWorkoutName} hitSlop={8}>
-                <Ionicons name="checkmark-circle" size={24} color={SemanticColors.success} />
-              </Pressable>
-            </View>
-          ) : (
-            <Pressable
-              onPress={() => params.logId ? setEditingName(true) : undefined}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
-            >
-              <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }} numberOfLines={1}>
-                {workoutName}
-              </Text>
-              {params.logId && (
-                <Ionicons name="pencil" size={14} color={theme.chrome} />
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          <Pressable onPress={() => router.back()} hitSlop={12} style={{ padding: 4, marginRight: 8 }}>
+            <Ionicons name="chevron-back" size={24} color={theme.text} />
+          </Pressable>
+          <View style={{ flex: 1 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+              {editingName ? (
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, height: 24 }}>
+                  <TextInput
+                    style={{
+                      flex: 1,
+                      fontSize: 16,
+                      fontWeight: '700',
+                      color: theme.text,
+                      backgroundColor: theme.background,
+                      borderWidth: 1,
+                      borderColor: theme.border,
+                      borderRadius: 8,
+                      paddingHorizontal: 8,
+                      paddingVertical: 0,
+                      height: 24,
+                    }}
+                    value={workoutName}
+                    onChangeText={setWorkoutName}
+                    autoFocus
+                    returnKeyType="done"
+                    onSubmitEditing={saveWorkoutName}
+                  />
+                  <Pressable onPress={saveWorkoutName} hitSlop={8}>
+                    <Ionicons name="checkmark-circle" size={24} color={SemanticColors.success} />
+                  </Pressable>
+                </View>
+              ) : (
+                <Pressable
+                  onPress={() => params.logId ? setEditingName(true) : undefined}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}
+                >
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }} numberOfLines={1}>
+                    {workoutName}
+                  </Text>
+                  {params.logId && (
+                    <Ionicons name="pencil" size={14} color={theme.chrome} />
+                  )}
+                </Pressable>
               )}
-            </Pressable>
-          )}
-          <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
-            {completedDate}
-          </Text>
+              <MuscleGroupPills categories={getExerciseCategories(exercises)} size="small" />
+            </View>
+            <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
+              {completedDate}
+            </Text>
+          </View>
         </View>
       </View>
 
@@ -199,53 +222,6 @@ export default function SessionViewScreen() {
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Shareable session card — tap to view workout summary */}
-        <Pressable
-          onPress={() => router.push({
-            pathname: '/workout/post-workout',
-            params: {
-              exercises: params.exercises ?? '[]',
-              dayName: params.dayName ?? '',
-              focus: params.focus ?? params.dayName ?? '',
-              durationMinutes: params.durationMinutes ?? '0',
-            },
-          })}
-        >
-          <View
-            ref={sessionCardRef}
-            collapsable={false}
-            style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border, marginBottom: 16 }}
-          >
-            {/* Header row: workout name + muscle tags */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{params.focus ?? params.dayName ?? 'Workout'}</Text>
-              <MuscleGroupPills categories={getExerciseCategories(exercises)} size="small" />
-            </View>
-            {/* Hero volume */}
-            <View style={{ alignItems: 'center', marginBottom: 12 }}>
-              <Text style={{ fontSize: 32, fontWeight: '800', color: theme.text, lineHeight: 36 }}>
-                {sessionVolume > 0 ? formatNumber(Math.round(sessionVolume)) : '\u2014'}
-              </Text>
-              <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>{weightUnit === 'lbs' ? 'pounds' : 'kg'} moved</Text>
-            </View>
-            {/* Stats row */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 10 }}>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{sessionTotalSets}</Text>
-                <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>sets</Text>
-              </View>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{sessionTotalReps}</Text>
-                <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>reps</Text>
-              </View>
-              <View style={{ alignItems: 'center' }}>
-                <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{durationMinutes}m</Text>
-                <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>time</Text>
-              </View>
-            </View>
-          </View>
-        </Pressable>
-
         {/* Exercises */}
         {editableExercises.map((logged, exIdx) => {
           const isExpanded = activeExercise === 'all' || activeExercise === exIdx;
@@ -317,7 +293,7 @@ export default function SessionViewScreen() {
                         alignItems: 'center',
                         marginBottom: 4,
                         paddingHorizontal: 10,
-                        paddingVertical: 6,
+                        height: 44,
                         borderRadius: 10,
                         backgroundColor: set.completed ? theme.surface : theme.background,
                         borderWidth: 1,
@@ -368,10 +344,12 @@ export default function SessionViewScreen() {
                                 </View>
                               ) : (
                                 <Pressable
-                                  onPress={() => params.logId ? setEditingExIdx(exIdx) : undefined}
+                                  onPress={() => params.logId ? startEditing(exIdx) : undefined}
                                   style={{
                                     backgroundColor: theme.surface,
                                     borderRadius: 8,
+                                    borderWidth: 1,
+                                    borderColor: 'transparent',
                                     paddingHorizontal: 8,
                                     paddingVertical: 4,
                                   }}
@@ -414,10 +392,12 @@ export default function SessionViewScreen() {
                             />
                           ) : (
                             <Pressable
-                              onPress={() => params.logId ? setEditingExIdx(exIdx) : undefined}
+                              onPress={() => params.logId ? startEditing(exIdx) : undefined}
                               style={{
                                 backgroundColor: theme.surface,
                                 borderRadius: 8,
+                                borderWidth: 1,
+                                borderColor: 'transparent',
                                 paddingHorizontal: 8,
                                 paddingVertical: 4,
                               }}
@@ -433,9 +413,16 @@ export default function SessionViewScreen() {
                     </View>
                   ))}
 
-                  {/* Save / Cancel buttons for edit mode */}
-                  {isEditing && (
-                    <View style={{ flexDirection: 'row', gap: 12, marginBottom: 8 }}>
+                  {/* Save / Cancel buttons for edit mode — slide down/up */}
+                  {visibleEditIdx === exIdx && (
+                    <Animated.View style={{
+                      flexDirection: 'row',
+                      gap: 12,
+                      marginBottom: 8,
+                      opacity: editButtonsAnim,
+                      maxHeight: editButtonsAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 50] }),
+                      overflow: 'hidden',
+                    }}>
                       <Pressable
                         onPress={cancelExerciseEdits}
                         style={{
@@ -462,7 +449,7 @@ export default function SessionViewScreen() {
                       >
                         <Text style={{ fontSize: 13, fontWeight: '600', color: '#FFFFFF' }}>Save</Text>
                       </Pressable>
-                    </View>
+                    </Animated.View>
                   )}
 
                 </>

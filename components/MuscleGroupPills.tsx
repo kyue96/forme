@@ -7,6 +7,7 @@ const CATEGORY_COLORS: Record<string, string> = {
   Chest:      '#EF4444',
   Back:       '#3B82F6',
   Shoulders:  '#F59E0B',
+  Traps:      '#14B8A6',
   Biceps:     '#8B5CF6',
   Triceps:    '#A855F7',
   Legs:       '#22C55E',

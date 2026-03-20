@@ -9,13 +9,14 @@ import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { QuizProvider } from '@/lib/quiz-store';
 import { PlanProvider } from '@/lib/plan-context';
-import { SettingsProvider } from '@/lib/settings-context';
+import { SettingsProvider, useSettings } from '@/lib/settings-context';
 
 SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav({ session }: { session: Session | null }) {
   const router = useRouter();
   const segments = useSegments();
+  const { theme } = useSettings();
 
   useEffect(() => {
     const inAuthGroup = segments[0] === '(auth)';
@@ -28,7 +29,7 @@ function RootLayoutNav({ session }: { session: Session | null }) {
   }, [session, segments]);
 
   return (
-    <Stack screenOptions={{ headerShown: false }}>
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: theme.background } }}>
       <Stack.Screen name="(auth)" />
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="quiz" />

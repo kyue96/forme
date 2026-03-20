@@ -299,7 +299,7 @@ export interface ExerciseEntry {
   category: string;
 }
 
-export const EXERCISE_CATEGORIES = ['Chest', 'Back', 'Shoulders', 'Biceps', 'Triceps', 'Legs', 'Core', 'Cardio', 'Bands', 'Full Body'] as const;
+export const EXERCISE_CATEGORIES = ['Chest', 'Back', 'Shoulders', 'Traps', 'Biceps', 'Triceps', 'Legs', 'Core', 'Cardio', 'Bands', 'Full Body'] as const;
 
 export const EXERCISE_DATABASE: ExerciseEntry[] = [
   // === CHEST (19) ===
@@ -356,16 +356,16 @@ export const EXERCISE_DATABASE: ExerciseEntry[] = [
   { name: 'Cable Lateral Raise', category: 'Shoulders' },
   { name: 'Dumbbell Front Raise', category: 'Shoulders' },
   { name: 'Cable Front Raise', category: 'Shoulders' },
-  { name: 'Face Pull', category: 'Shoulders' },
+  { name: 'Face Pull', category: 'Traps' },
   { name: 'Dumbbell Rear Delt Fly', category: 'Shoulders' },
   { name: 'Arnold Press', category: 'Shoulders' },
   { name: 'Machine Shoulder Press', category: 'Shoulders' },
-  { name: 'Barbell Upright Row', category: 'Shoulders' },
-  { name: 'Dumbbell Upright Row', category: 'Shoulders' },
+  { name: 'Barbell Upright Row', category: 'Traps' },
+  { name: 'Dumbbell Upright Row', category: 'Traps' },
   { name: 'Reverse Pec Deck', category: 'Shoulders' },
   { name: 'Landmine Press', category: 'Shoulders' },
-  { name: 'Dumbbell Shrug', category: 'Shoulders' },
-  { name: 'Barbell Shrug', category: 'Shoulders' },
+  { name: 'Dumbbell Shrug', category: 'Traps' },
+  { name: 'Barbell Shrug', category: 'Traps' },
   { name: 'Behind the Neck Press', category: 'Shoulders' },
   { name: 'Cable Rear Delt Fly', category: 'Shoulders' },
   { name: 'Plate Front Raise', category: 'Shoulders' },

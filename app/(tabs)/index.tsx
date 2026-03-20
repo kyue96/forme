@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
+  Animated,
   Pressable,
   ScrollView,
   Share,
@@ -25,12 +26,13 @@ import { AppHeader } from '@/components/AppHeader';
 import { BottomSheet } from '@/components/BottomSheet';
 import { WeeklyCalendar, getWeekDates, dateKey, DAY_NAMES_FULL } from '@/components/WeeklyCalendar';
 import { LoggedExercise } from '@/lib/types';
-import { formatNumber, animateLayout } from '@/lib/utils';
+import { formatNumber, animateLayout, stripParens } from '@/lib/utils';
 import { checkAndScheduleNudges } from '@/lib/nudge-service';
 import { useHealthKit } from '@/hooks/useHealthKit';
 import { EXERCISE_DATABASE } from '@/lib/exercise-data';
 import { MuscleGroupPills } from '@/components/MuscleGroupPills';
 import { getExerciseCategories } from '@/lib/exercise-utils';
+import { computeVolumeByMuscle } from '@/lib/workout-metrics';
 
 const MOTIVATIONAL = [
   'Your muscles grow during rest, not during the workout.',
@@ -97,6 +99,11 @@ export default function HomeScreen() {
   const [savingMeal, setSavingMeal] = useState(false);
 
 
+  // Quick stats
+  const [weekSessions, setWeekSessions] = useState(0);
+  const [weekVolume, setWeekVolume] = useState(0);
+  const [streak, setStreak] = useState(0);
+
   // Selected day on calendar (null = today)
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
 
@@ -105,6 +112,10 @@ export default function HomeScreen() {
   const clearWorkout = useWorkoutStore((s) => s.clearWorkout);
   const avatarColor = useUserStore((s) => s.avatarColor);
   const focusCardColor = avatarColor || '#F59E0B';
+
+  // FAB state
+  const [fabOpen, setFabOpen] = useState(false);
+  const fabAnim = useRef(new Animated.Value(0)).current;
 
   // Theme switcher removed - use Settings screen instead
 
@@ -242,7 +253,37 @@ export default function HomeScreen() {
         const thisVol = calcVolume(thisWeekLogs ?? []);
         const lastVol = calcVolume(lastWeekLogs ?? []);
         const thisWeekSessions = (thisWeekLogs ?? []).length;
-        // Volume insight removed per user request
+        setWeekSessions(thisWeekSessions);
+        const displayVol = weightUnit === 'lbs' ? Math.round(thisVol * 2.205) : Math.round(thisVol);
+        setWeekVolume(displayVol);
+      } catch {}
+
+      // Streak: fetch recent logs (up to 60 days back) and count consecutive days
+      try {
+        const streakStart = new Date();
+        streakStart.setDate(streakStart.getDate() - 60);
+        const { data: streakLogs } = await supabase
+          .from('workout_logs')
+          .select('completed_at')
+          .eq('user_id', user.id)
+          .gte('completed_at', dateKey(streakStart))
+          .order('completed_at', { ascending: false });
+
+        const streakDates = new Set(
+          (streakLogs ?? []).map((l: any) => l.completed_at?.split('T')[0]).filter(Boolean)
+        );
+        let s = 0;
+        const d = new Date();
+        d.setHours(0, 0, 0, 0);
+        // If no workout today, start counting from yesterday
+        if (!streakDates.has(dateKey(d))) {
+          d.setDate(d.getDate() - 1);
+        }
+        while (streakDates.has(dateKey(d))) {
+          s++;
+          d.setDate(d.getDate() - 1);
+        }
+        setStreak(s);
       } catch {}
     } catch {}
   }, [activeDate]);
@@ -284,6 +325,12 @@ export default function HomeScreen() {
   }, [activeWorkout]);
 
 
+
+  const toggleFab = () => {
+    const toValue = fabOpen ? 0 : 1;
+    setFabOpen(!fabOpen);
+    Animated.spring(fabAnim, { toValue, useNativeDriver: true, speed: 14, bounciness: 4 }).start();
+  };
 
   const handleDayPress = (date: Date, _i: number) => {
     const key = dateKey(date);
@@ -385,7 +432,7 @@ export default function HomeScreen() {
   const sessionVolumeRaw = todaySession?.exercises.reduce(
     (sum, ex) => sum + ex.sets.filter(s => s.completed && s.weight != null).reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0), 0
   ) ?? 0;
-  const sessionVolume = Math.round(sessionVolumeRaw);
+  const sessionVolume = weightUnit === 'lbs' ? Math.round(sessionVolumeRaw * 2.205) : Math.round(sessionVolumeRaw);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
@@ -418,14 +465,6 @@ export default function HomeScreen() {
               >
                 <Text allowFontScaling style={{ color: theme.background, fontWeight: '700', fontSize: 15 }}>Build my plan</Text>
               </Pressable>
-              <Pressable
-                onPress={() => router.push('/workout/quick')}
-                style={{ marginTop: 16, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
-              >
-                <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  + Create Workout
-                </Text>
-              </Pressable>
             </View>
 
           ) : (todayCompleted || todaySession) ? (
@@ -443,13 +482,13 @@ export default function HomeScreen() {
                     logId: todaySession?.id ?? '',
                   },
                 })}
-                style={{ backgroundColor: focusCardColor, borderRadius: 24, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: focusCardColor, marginBottom: 0 }}
+                style={{ backgroundColor: focusCardColor, borderRadius: 16, paddingHorizontal: 16, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: focusCardColor, marginBottom: 0 }}
               >
-                <Text style={{ position: 'absolute', top: 14, right: 16, fontSize: 11, fontWeight: '700', color: '#FFFFFFAA', letterSpacing: 1 }}>VIEW</Text>
-                <Ionicons name="checkmark-circle" size={48} color="#FFFFFF" />
-                <Text allowFontScaling style={{ fontSize: 20, fontWeight: '800', color: '#FFFFFF', marginTop: 12 }}>
+                <Ionicons name="checkmark-circle" size={28} color="#FFFFFF" />
+                <Text allowFontScaling style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', marginLeft: 12, flex: 1 }}>
                   Workout Complete
                 </Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFFAA', letterSpacing: 1 }}>DETAILS</Text>
               </Pressable>
               {/* Shareable session card */}
               {todaySession && (
@@ -471,7 +510,7 @@ export default function HomeScreen() {
                   >
                     {/* Header row: workout name + muscle tags */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{activeWorkoutDay?.focus ?? todaySession.day_name}</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{stripParens(activeWorkoutDay?.focus ?? todaySession.day_name)}</Text>
                       <MuscleGroupPills categories={getExerciseCategories(todaySession.exercises)} size="small" />
                     </View>
                     {/* Hero volume */}
@@ -498,17 +537,32 @@ export default function HomeScreen() {
                         <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>time</Text>
                       </View>
                     </View>
+                    {/* Muscle volume breakdown */}
+                    {(() => {
+                      const muscleVol = computeVolumeByMuscle(todaySession.exercises);
+                      if (muscleVol.length === 0) return null;
+                      return (
+                        <View style={{ marginTop: 12, gap: 8 }}>
+                          {muscleVol.map((item) => {
+                            const displayVol = weightUnit === 'lbs' ? Math.round(item.volume * 2.205) : item.volume;
+                            return (
+                              <View key={item.muscle} style={{ gap: 4 }}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <Text style={{ fontSize: 11, fontWeight: '600', color: theme.text }}>{item.muscle}</Text>
+                                  <Text style={{ fontSize: 11, color: theme.textSecondary }}>{formatNumber(displayVol)} {weightUnit === 'lbs' ? 'lbs' : 'kg'} ({item.percentage}%)</Text>
+                                </View>
+                                <View style={{ height: 6, backgroundColor: theme.border, borderRadius: 3, overflow: 'hidden' }}>
+                                  <View style={{ height: 6, backgroundColor: focusCardColor, borderRadius: 3, width: `${item.percentage}%` }} />
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      );
+                    })()}
                   </View>
                 </Pressable>
               )}
-              <Pressable
-                onPress={() => router.push('/workout/quick')}
-                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
-              >
-                <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  + Create Workout
-                </Text>
-              </Pressable>
             </View>
 
           ) : !activeWorkoutDay ? (
@@ -536,7 +590,7 @@ export default function HomeScreen() {
                     style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border }}
                   >
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{todaySession.day_name}</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{stripParens(todaySession.day_name)}</Text>
                       <MuscleGroupPills categories={getExerciseCategories(todaySession.exercises)} size="small" />
                     </View>
                     <View style={{ alignItems: 'center', marginBottom: 12 }}>
@@ -561,6 +615,29 @@ export default function HomeScreen() {
                         <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>time</Text>
                       </View>
                     </View>
+                    {/* Muscle volume breakdown */}
+                    {(() => {
+                      const muscleVol = computeVolumeByMuscle(todaySession.exercises);
+                      if (muscleVol.length === 0) return null;
+                      return (
+                        <View style={{ marginTop: 12, gap: 8 }}>
+                          {muscleVol.map((item) => {
+                            const displayVol = weightUnit === 'lbs' ? Math.round(item.volume * 2.205) : item.volume;
+                            return (
+                              <View key={item.muscle} style={{ gap: 4 }}>
+                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <Text style={{ fontSize: 11, fontWeight: '600', color: theme.text }}>{item.muscle}</Text>
+                                  <Text style={{ fontSize: 11, color: theme.textSecondary }}>{formatNumber(displayVol)} {weightUnit === 'lbs' ? 'lbs' : 'kg'} ({item.percentage}%)</Text>
+                                </View>
+                                <View style={{ height: 6, backgroundColor: theme.border, borderRadius: 3, overflow: 'hidden' }}>
+                                  <View style={{ height: 6, backgroundColor: focusCardColor, borderRadius: 3, width: `${item.percentage}%` }} />
+                                </View>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      );
+                    })()}
                   </View>
                 </Pressable>
               )}
@@ -594,14 +671,6 @@ export default function HomeScreen() {
                   </View>
                 );
               })()}
-              <Pressable
-                onPress={() => router.push('/workout/quick')}
-                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
-              >
-                <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  + Create Workout
-                </Text>
-              </Pressable>
             </View>
 
           ) : (
@@ -628,7 +697,7 @@ export default function HomeScreen() {
                             In Progress
                           </Text>
                           <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: '#FFFFFF', lineHeight: 34 }}>
-                            {activeWorkout.dayName}
+                            {stripParens(activeWorkout.dayName)}
                           </Text>
                           <Text allowFontScaling style={{ fontSize: 15, color: '#FFFFFFDD', marginTop: 6 }}>
                             {completedSets}/{totalSets} sets
@@ -667,11 +736,13 @@ export default function HomeScreen() {
                   <View style={{ paddingHorizontal: 20, paddingVertical: 24, backgroundColor: focusCardColor, borderRadius: 24 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                       <View style={{ flex: 1 }}>
-                        <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
-                          {selectedDate ? activeDayName.charAt(0).toUpperCase() + activeDayName.slice(1) + "'s Workout" : "Today's Workout"}
-                        </Text>
+                        {!selectedDate && (
+                          <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+                            Today's Workout
+                          </Text>
+                        )}
                         <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: '#FFFFFF', lineHeight: 34 }}>
-                          {activeWorkoutDay.focus.includes('(') ? activeWorkoutDay.focus.split('(')[0].trim() : activeWorkoutDay.focus}
+                          {stripParens(activeWorkoutDay.focus)}
                         </Text>
                         <Text allowFontScaling style={{ fontSize: 15, color: '#FFFFFFDD', marginTop: 6 }}>
                           {activeWorkoutDay.exercises.length} exercises
@@ -695,52 +766,8 @@ export default function HomeScreen() {
                   </View>
                 </Pressable>
               )}
-              <Pressable
-                onPress={() => router.push('/workout/quick')}
-                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
-              >
-                <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  + Create Workout
-                </Text>
-              </Pressable>
             </View>
           )}
-
-          {/* Today's stats + Add meal + Add cardio + Steps (four across) */}
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-            <Pressable
-              onPress={() => router.push('/(tabs)/meals')}
-              style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: theme.border }}
-            >
-              <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text, marginBottom: 4 }}>Total Cal</Text>
-              <Text allowFontScaling numberOfLines={1} adjustsFontSizeToFit style={{ fontSize: 20, fontWeight: '800', color: theme.text }}>
-                {todayCalories != null ? `${todayCalories}` : '-'}
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setShowMealSheet(true)}
-              style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center', justifyContent: 'center', gap: 6 }}
-            >
-              <Ionicons name="restaurant-outline" size={22} color={theme.chrome} />
-              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Add Meal</Text>
-            </Pressable>
-            <Pressable
-              onPress={() => setShowActivitySheet(true)}
-              style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center', justifyContent: 'center', gap: 6 }}
-            >
-              <Ionicons name="walk-outline" size={22} color={theme.chrome} />
-              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Add Cardio</Text>
-            </Pressable>
-            <View
-              style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: theme.border }}
-            >
-              <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text, marginBottom: 4 }}>Steps</Text>
-              <Text allowFontScaling style={{ fontSize: 24, fontWeight: '800', color: theme.text }}>
-                {steps != null ? formatNumber(steps) : '-'}
-              </Text>
-            </View>
-          </View>
-
 
           {/* Today's activities */}
           {todayActivities.length > 0 && (
@@ -756,8 +783,101 @@ export default function HomeScreen() {
               ))}
             </View>
           )}
+
+          {/* Quick stats row */}
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 16 }}>
+            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center' }}>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: theme.text }}>
+                {streak}
+              </Text>
+              <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5, marginTop: 2 }}>streak</Text>
+            </View>
+            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center' }}>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: theme.text }}>{weekSessions}</Text>
+              <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5, marginTop: 2 }}>this week</Text>
+            </View>
+            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border, alignItems: 'center' }}>
+              <Text style={{ fontSize: 20, fontWeight: '800', color: theme.text }}>{weekVolume > 0 ? formatNumber(weekVolume) : '-'}</Text>
+              <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5, marginTop: 2 }}>{weightUnit === 'lbs' ? 'lbs' : 'kg'} this week</Text>
+            </View>
+          </View>
+
+          {/* Total Cal + Steps */}
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 16 }}>
+            <Pressable
+              onPress={() => router.push('/(tabs)/meals')}
+              style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border }}
+            >
+              <Text allowFontScaling style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary, marginBottom: 2 }}>Total Cal</Text>
+              <Text allowFontScaling numberOfLines={1} adjustsFontSizeToFit style={{ fontSize: 18, fontWeight: '800', color: theme.text }}>
+                {todayCalories != null ? `${todayCalories}` : '-'}
+              </Text>
+            </Pressable>
+            <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border }}>
+              <Text allowFontScaling style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary, marginBottom: 2 }}>Steps</Text>
+              <Text allowFontScaling numberOfLines={1} adjustsFontSizeToFit style={{ fontSize: 18, fontWeight: '800', color: theme.text }}>
+                {steps != null ? formatNumber(steps) : '-'}
+              </Text>
+            </View>
+          </View>
+
+          {/* Bottom spacer for FAB */}
+          <View style={{ height: 80 }} />
         </View>
       </ScrollView>
+
+      {/* FAB backdrop */}
+      {fabOpen && (
+        <Pressable
+          onPress={toggleFab}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 10 }}
+        />
+      )}
+
+      {/* FAB menu items — positioned above FAB */}
+      <View pointerEvents={fabOpen ? 'auto' : 'none'} style={{ position: 'absolute', bottom: 80, right: 20, alignItems: 'flex-end', zIndex: 12, gap: 12 }}>
+        {[
+          { label: 'Add Workout', onPress: () => { toggleFab(); router.push('/workout/quick'); } },
+          { label: 'Add Meal', onPress: () => { toggleFab(); setShowMealSheet(true); } },
+          { label: 'Add Activity', onPress: () => { toggleFab(); setShowActivitySheet(true); } },
+        ].map((item, i) => (
+          <Animated.View
+            key={item.label}
+            style={{
+              opacity: fabAnim,
+              transform: [{
+                translateY: fabAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [20 + i * 10, 0],
+                }),
+              }],
+            }}
+          >
+            <Pressable
+              onPress={item.onPress}
+              style={{ backgroundColor: theme.surface, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, borderWidth: 1.5, borderColor: theme.chrome + '60' }}
+            >
+              <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>{item.label}</Text>
+            </Pressable>
+          </Animated.View>
+        ))}
+      </View>
+
+      {/* FAB button */}
+      <Pressable
+        onPress={toggleFab}
+        style={{
+          position: 'absolute', bottom: 20, right: 20, zIndex: 11,
+          width: 56, height: 56, borderRadius: 28,
+          backgroundColor: focusCardColor,
+          alignItems: 'center', justifyContent: 'center',
+          shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.35, shadowRadius: 8, elevation: 6,
+        }}
+      >
+        <Animated.View style={{ transform: [{ rotate: fabAnim.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '45deg'] }) }] }}>
+          <Ionicons name="add" size={28} color="#FFFFFF" />
+        </Animated.View>
+      </Pressable>
 
       {/* Activity logging bottom sheet */}
       <BottomSheet visible={showActivitySheet} onClose={() => setShowActivitySheet(false)}>

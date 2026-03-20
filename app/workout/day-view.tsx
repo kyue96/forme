@@ -14,7 +14,7 @@ import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { usePlan } from '@/lib/plan-context';
 import { LoggedExercise } from '@/lib/types';
-import { formatNumber } from '@/lib/utils';
+import { formatNumber, stripParens } from '@/lib/utils';
 import { MuscleGroupPills } from '@/components/MuscleGroupPills';
 import { getExerciseCategories } from '@/lib/exercise-utils';
 import { dateKey } from '@/components/WeeklyCalendar';
@@ -151,7 +151,7 @@ export default function DayViewScreen() {
             >
               <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border, marginBottom: 16 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{log.day_name ?? 'Workout'}</Text>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{stripParens(log.day_name ?? 'Workout')}</Text>
                   <MuscleGroupPills categories={getExerciseCategories(exercises)} size="small" />
                 </View>
                 <View style={{ alignItems: 'center', marginBottom: 12 }}>

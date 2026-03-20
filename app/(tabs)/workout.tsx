@@ -70,6 +70,7 @@ export default function WorkoutScreen() {
   const { logId } = useLocalSearchParams<{ logId?: string }>();
 
   const [activeTab, setActiveTab] = useState<'plan' | 'history' | 'badges'>('plan');
+  const [showPastDays, setShowPastDays] = useState(false);
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   // selectedLog state removed - now navigates to session-view
@@ -217,6 +218,124 @@ export default function WorkoutScreen() {
       <Ionicons name="trash-outline" size={20} color="#fff" />
     </Pressable>
   );
+
+  const renderPlanCard = (day: typeof plan.weeklyPlan[0], i: number, dayLogged: boolean, isNext: boolean, isMissed: boolean) => {
+    const isOpen = expandedDay === i;
+    return (
+      <View
+        key={i}
+        style={{
+          marginBottom: 10,
+          borderRadius: 16,
+          backgroundColor: isNext ? focusCardColor : theme.surface,
+          borderWidth: dayLogged ? 1 : 0,
+          borderColor: dayLogged ? '#22C55E' : 'transparent',
+          overflow: 'hidden',
+          opacity: 1,
+        }}
+      >
+        <Pressable
+          onPress={() => {
+            animateLayout();
+            setExpandedDay(isOpen ? null : i);
+          }}
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingHorizontal: 16,
+            paddingVertical: 14,
+          }}
+        >
+          <View style={{ flex: 1 }}>
+            <Text allowFontScaling style={{ fontSize: 11, color: isNext ? '#FFFFFF99' : theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
+              {formatDayDate(day.dayName)}
+            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: isNext ? '#FFFFFF' : theme.text }}>
+                {day.focus}
+              </Text>
+              {!isNext && <MuscleGroupPills categories={getExerciseCategories(day.exercises)} size="normal" />}
+            </View>
+            <Text allowFontScaling style={{ fontSize: 12, color: isNext ? '#FFFFFFCC' : theme.textSecondary, marginTop: 2 }}>
+              {day.exercises.length} exercises
+            </Text>
+          </View>
+          <Ionicons
+            name={isOpen ? 'chevron-up' : 'chevron-down'}
+            size={18}
+            color={isNext ? '#FFFFFFCC' : theme.chrome}
+          />
+        </Pressable>
+
+        {isOpen && (
+          <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+            <View style={{ height: 1, backgroundColor: theme.border, marginBottom: 12 }} />
+            {day.exercises.map((ex, j) => (
+              <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 }}>
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.chrome, marginTop: 6, marginRight: 10 }} />
+                <View style={{ flex: 1 }}>
+                  <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>
+                    {ex.name}
+                  </Text>
+                  <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 1 }}>
+                    {ex.sets} sets · {ex.reps} reps
+                  </Text>
+                </View>
+              </View>
+            ))}
+
+            {dayLogged ? (
+              <View style={{ marginTop: 8, backgroundColor: theme.background, paddingVertical: 12, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#22C55E' }}>
+                <Text allowFontScaling style={{ color: '#22C55E', fontWeight: '700', fontSize: 13 }}>
+                  Workout logged
+                </Text>
+              </View>
+            ) : isMissed ? (
+              <Pressable
+                onPress={() => {
+                  Alert.alert(
+                    'Missed workout',
+                    `This workout was scheduled for ${day.dayName}. Start it anyway?`,
+                    [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Start anyway', onPress: () => router.push(`/workout/${i}`) },
+                    ],
+                  );
+                }}
+                style={{
+                  marginTop: 8,
+                  backgroundColor: theme.textSecondary,
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  alignItems: 'center',
+                }}
+              >
+                <Text allowFontScaling style={{ color: theme.background, fontWeight: '700', fontSize: 13 }}>
+                  Start late
+                </Text>
+              </Pressable>
+            ) : (
+              <Pressable
+                onPress={() => router.push(`/workout/${i}`)}
+                style={{
+                  marginTop: 8,
+                  backgroundColor: theme.text,
+                  paddingVertical: 12,
+                  borderRadius: 12,
+                  alignItems: 'center',
+                }}
+              >
+                <Text allowFontScaling style={{ color: theme.background, fontWeight: '700', fontSize: 13 }}>
+                  Start workout
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+      </View>
+    );
+  };
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -402,102 +521,53 @@ export default function WorkoutScreen() {
                   Create Workout
                 </Text>
               </Pressable>
-              {plan.weeklyPlan.map((day, i) => {
-                const isOpen = expandedDay === i;
-                const dayLogged = todayLoggedDays.has(day.dayName.toLowerCase());
-                const isNext = i === nextPlanIdx && !dayLogged;
+              {(() => {
+                // Split plan into past and upcoming
+                const pastDays: { day: typeof plan.weeklyPlan[0]; i: number }[] = [];
+                const upcomingDays: { day: typeof plan.weeklyPlan[0]; i: number }[] = [];
+                plan.weeklyPlan.forEach((day, i) => {
+                  const dIdx = DAY_NAMES_FULL.findIndex(d => d.toLowerCase() === day.dayName.toLowerCase());
+                  const logged = todayLoggedDays.has(day.dayName.toLowerCase());
+                  if (dIdx >= 0 && dIdx < jsDow && !logged) {
+                    pastDays.push({ day, i });
+                  } else {
+                    upcomingDays.push({ day, i });
+                  }
+                });
+
                 return (
-                  <View
-                    key={i}
-                    style={{
-                      marginBottom: 10,
-                      borderRadius: 16,
-                      backgroundColor: i === nextPlanIdx && !dayLogged ? focusCardColor : theme.surface,
-                      borderWidth: dayLogged ? 1 : 0,
-                      borderColor: dayLogged ? '#22C55E' : 'transparent',
-                      overflow: 'hidden',
-                    }}
-                  >
-                    {/* Collapsed header */}
-                    <Pressable
-                      onPress={() => {
-                        animateLayout();
-                        setExpandedDay(isOpen ? null : i);
-                      }}
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                        paddingHorizontal: 16,
-                        paddingVertical: 14,
-                      }}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <Text allowFontScaling style={{ fontSize: 11, color: isNext ? '#FFFFFF99' : theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
-                          {formatDayDate(day.dayName)}
+                  <>
+                    {/* Past days toggle */}
+                    {pastDays.length > 0 && (
+                      <Pressable
+                        onPress={() => { animateLayout(); setShowPastDays(!showPastDays); }}
+                        style={{
+                          flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+                          paddingVertical: 10, marginBottom: 8, borderRadius: 12,
+                          backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border,
+                        }}
+                      >
+                        <Ionicons name={showPastDays ? 'chevron-up' : 'chevron-down'} size={14} color={theme.textSecondary} />
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: theme.textSecondary }}>
+                          {showPastDays ? 'Hide' : 'Show'} previous days ({pastDays.length})
                         </Text>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                          <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: isNext ? '#FFFFFF' : theme.text }}>
-                            {day.focus}
-                          </Text>
-                          {!isNext && <MuscleGroupPills categories={getExerciseCategories(day.exercises)} size="normal" />}
-                        </View>
-                        <Text allowFontScaling style={{ fontSize: 12, color: isNext ? '#FFFFFFCC' : theme.textSecondary, marginTop: 2 }}>
-                          {day.exercises.length} exercises
-                        </Text>
-                      </View>
-                      <Ionicons
-                        name={isOpen ? 'chevron-up' : 'chevron-down'}
-                        size={18}
-                        color={isNext ? '#FFFFFFCC' : theme.chrome}
-                      />
-                    </Pressable>
-
-                    {/* Expanded exercises */}
-                    {isOpen && (
-                      <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
-                        <View style={{ height: 1, backgroundColor: theme.border, marginBottom: 12 }} />
-                        {day.exercises.map((ex, j) => (
-                          <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 }}>
-                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.chrome, marginTop: 6, marginRight: 10 }} />
-                            <View style={{ flex: 1 }}>
-                              <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>
-                                {ex.name}
-                              </Text>
-                              <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 1 }}>
-                                {ex.sets} sets · {ex.reps} reps
-                              </Text>
-                            </View>
-                          </View>
-                        ))}
-
-                        {dayLogged ? (
-                          <View style={{ marginTop: 8, backgroundColor: theme.background, paddingVertical: 12, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#22C55E' }}>
-                            <Text allowFontScaling style={{ color: '#22C55E', fontWeight: '700', fontSize: 13 }}>
-                              Workout logged ✓
-                            </Text>
-                          </View>
-                        ) : (
-                          <Pressable
-                            onPress={() => router.push(`/workout/${i}`)}
-                            style={{
-                              marginTop: 8,
-                              backgroundColor: theme.text,
-                              paddingVertical: 12,
-                              borderRadius: 12,
-                              alignItems: 'center',
-                            }}
-                          >
-                            <Text allowFontScaling style={{ color: theme.background, fontWeight: '700', fontSize: 13 }}>
-                              Start workout →
-                            </Text>
-                          </Pressable>
-                        )}
-                      </View>
+                      </Pressable>
                     )}
-                  </View>
+                    {showPastDays && pastDays.map(({ day, i }) => {
+                      const dayLogged = false; // past unlogged by definition
+                      const isMissed = true;
+                      return renderPlanCard(day, i, dayLogged, false, isMissed);
+                    })}
+                    {upcomingDays.map(({ day, i }) => {
+                      const dayLogged = todayLoggedDays.has(day.dayName.toLowerCase());
+                      const isNext = i === nextPlanIdx && !dayLogged;
+                      return renderPlanCard(day, i, dayLogged, isNext, false);
+                    })}
+                  </>
                 );
-              })}
+              })()}
+
+
               </>
             )}
           </View>

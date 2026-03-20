@@ -24,6 +24,11 @@ export function formatNumber(n: number): string {
   return n >= 1000 ? n.toLocaleString() : String(Math.round(n));
 }
 
+/** Strip parenthetical text from workout names, e.g. "Pull Day (Back, Biceps)" → "Pull Day" */
+export function stripParens(name: string): string {
+  return name.replace(/\s*\(.*?\)\s*/g, '').trim();
+}
+
 /**
  * Shared smooth layout animation config (400ms easeInEaseOut).
  * Use before any state change that affects layout.
