@@ -98,6 +98,9 @@ export default function HomeScreen() {
 
   const [volumeInsight, setVolumeInsight] = useState<string | null>(null);
 
+  // Selected day on calendar (null = today)
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
+
   // Active workout indicator
   const activeWorkout = useWorkoutStore((s) => s.activeWorkout);
   const clearWorkout = useWorkoutStore((s) => s.clearWorkout);
@@ -112,13 +115,18 @@ export default function HomeScreen() {
   todayMidnight.setHours(0, 0, 0, 0);
   const todayStr = dateKey(todayMidnight);
 
+  const activeDate = selectedDate ?? todayStr;
+  const activeDateObj = selectedDate ? new Date(selectedDate + 'T12:00:00') : now;
+  const activeDayName = activeDateObj.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
+  const activeWorkoutDay = plan?.weeklyPlan.find((d) => d.dayName.toLowerCase() === activeDayName);
+
   const jsDayName = now.toLocaleDateString('en-US', { weekday: 'long' }).toLowerCase();
-  const todayWorkout = plan?.weeklyPlan.find((d) => d.dayName.toLowerCase() === jsDayName);
   const todayIdx = now.getDay();
 
+  const activeIdx = activeDateObj.getDay();
   const nextWorkout = plan?.weeklyPlan.find((d) => {
     const idx = DAY_NAMES_FULL.findIndex((n) => n.toLowerCase() === d.dayName.toLowerCase());
-    return idx > todayIdx;
+    return idx > activeIdx;
   });
 
   const planDayNames = new Set(plan?.weeklyPlan.map((d) => d.dayName.toLowerCase()) ?? []);
@@ -141,10 +149,10 @@ export default function HomeScreen() {
       if (logs) {
         const days = new Set(logs.map((l) => l.completed_at?.split('T')[0]).filter(Boolean) as string[]);
         setCompletedDays(days);
-        setTodayCompleted(days.has(todayStr));
+        setTodayCompleted(days.has(activeDate));
 
-        // Find today's completed session for the session card
-        const todayLog = logs.find((l) => l.completed_at?.startsWith(todayStr));
+        // Find active day's completed session for the session card
+        const todayLog = logs.find((l) => l.completed_at?.startsWith(activeDate));
         if (todayLog) {
           setTodaySession({
             id: todayLog.id,
@@ -161,7 +169,7 @@ export default function HomeScreen() {
         .from('meals')
         .select('calories')
         .eq('user_id', user.id)
-        .eq('date', todayStr);
+        .eq('date', activeDate);
 
       if (meals && meals.length > 0) {
         setTodayCalories(meals.reduce((s, m) => s + (m.calories ?? 0), 0));
@@ -173,15 +181,15 @@ export default function HomeScreen() {
         .from('meals')
         .select('id, name, calories, protein, carbs')
         .eq('user_id', user.id)
-        .eq('date', todayStr);
+        .eq('date', activeDate);
       setTodayMeals(mealsData ?? []);
 
-      // Load today's activities
+      // Load selected day's activities
       const { data: activities } = await supabase
         .from('activities')
         .select('id, type, duration_minutes, notes')
         .eq('user_id', user.id)
-        .eq('date', todayStr)
+        .eq('date', activeDate)
         .order('created_at', { ascending: true });
       setTodayActivities((activities as Activity[]) ?? []);
 
@@ -237,7 +245,7 @@ export default function HomeScreen() {
         setVolumeInsight(checkVolumeInsight(thisVol, lastVol, { thisWeekSessions, hasEnoughHistory }));
       } catch {}
     } catch {}
-  }, [todayStr]);
+  }, [activeDate]);
 
   useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
 
@@ -277,11 +285,9 @@ export default function HomeScreen() {
 
 
 
-  const handleDayPress = (date: Date, i: number) => {
-    router.push({
-      pathname: '/workout/day-view',
-      params: { dateStr: dateKey(date), dayName: DAY_NAMES_FULL[i] },
-    });
+  const handleDayPress = (date: Date, _i: number) => {
+    const key = dateKey(date);
+    setSelectedDate(key === todayStr ? null : key);
   };
 
   const saveActivity = async () => {
@@ -291,7 +297,7 @@ export default function HomeScreen() {
       if (!user) return;
       await supabase.from('activities').insert({
         user_id: user.id,
-        date: todayStr,
+        date: activeDate,
         type: activityType,
         duration_minutes: parseInt(activityDuration) || null,
         notes: activityNotes.trim() || null,
@@ -312,7 +318,7 @@ export default function HomeScreen() {
       if (!user) return;
       await supabase.from('meals').insert({
         user_id: user.id,
-        date: todayStr,
+        date: activeDate,
         name: mealName.trim() || null,
         calories: parseFloat(mealCal) || 0,
         protein: parseFloat(mealProtein) || 0,
@@ -380,6 +386,7 @@ export default function HomeScreen() {
             completedDays={completedDays}
             onDayPress={handleDayPress}
             planDayNames={planDayNames}
+            selectedDay={selectedDate}
           />
         )}
 
@@ -414,7 +421,7 @@ export default function HomeScreen() {
                   params: {
                     exercises: JSON.stringify(todaySession?.exercises ?? []),
                     dayName: todaySession?.day_name ?? '',
-                    focus: todayWorkout?.focus ?? todaySession?.day_name ?? '',
+                    focus: activeWorkoutDay?.focus ?? todaySession?.day_name ?? '',
                     durationMinutes: String(todaySession?.duration_minutes ?? 0),
                     completedAt: new Date().toISOString(),
                     logId: todaySession?.id ?? '',
@@ -436,7 +443,7 @@ export default function HomeScreen() {
                     params: {
                       exercises: JSON.stringify(todaySession.exercises),
                       dayName: todaySession.day_name,
-                      focus: todayWorkout?.focus ?? todaySession.day_name,
+                      focus: activeWorkoutDay?.focus ?? todaySession.day_name,
                       durationMinutes: String(todaySession.duration_minutes ?? 0),
                     },
                   })}
@@ -448,7 +455,7 @@ export default function HomeScreen() {
                   >
                     {/* Header row: workout name + muscle tags */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{todayWorkout?.focus ?? todaySession.day_name}</Text>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{activeWorkoutDay?.focus ?? todaySession.day_name}</Text>
                       <MuscleGroupPills categories={getExerciseCategories(todaySession.exercises)} size="small" />
                     </View>
                     {/* Hero volume */}
@@ -488,7 +495,7 @@ export default function HomeScreen() {
               </Pressable>
             </View>
 
-          ) : !todayWorkout ? (
+          ) : !activeWorkoutDay ? (
             <View style={{ gap: 12 }}>
               <View style={{ backgroundColor: theme.surface, borderRadius: 24, padding: 16, borderWidth: 1, borderColor: theme.border }}>
                 <Text allowFontScaling style={{ fontSize: 18, fontWeight: '800', color: theme.text, marginBottom: 6 }}>Rest day</Text>
@@ -541,9 +548,9 @@ export default function HomeScreen() {
               )}
               {nextWorkout && (() => {
                 const nextDayIdx = DAY_NAMES_FULL.findIndex((n) => n.toLowerCase() === nextWorkout.dayName.toLowerCase());
-                const daysUntil = nextDayIdx > todayIdx ? nextDayIdx - todayIdx : nextDayIdx + 7 - todayIdx;
-                const nextDate = new Date(now);
-                nextDate.setDate(now.getDate() + daysUntil);
+                const daysUntil = nextDayIdx > activeIdx ? nextDayIdx - activeIdx : nextDayIdx + 7 - activeIdx;
+                const nextDate = new Date(activeDateObj);
+                nextDate.setDate(activeDateObj.getDate() + daysUntil);
                 const dateLabel = nextDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
                 return (
                   <View style={{ backgroundColor: focusCardColor, borderRadius: 16, padding: 20 }}>
@@ -637,7 +644,7 @@ export default function HomeScreen() {
               })() : (
                 <Pressable
                   onPress={() => {
-                    const idx = plan.weeklyPlan.indexOf(todayWorkout);
+                    const idx = plan.weeklyPlan.indexOf(activeWorkoutDay);
                     router.push(`/workout/${idx}`);
                   }}
                   style={{ borderRadius: 24, overflow: 'hidden', marginBottom: 12, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
@@ -651,25 +658,25 @@ export default function HomeScreen() {
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                       <View style={{ flex: 1 }}>
                         <Text allowFontScaling style={{ fontSize: 10, fontWeight: '600', color: '#FFFFFF80', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
-                          Today's Workout
+                          {selectedDate ? activeDayName.charAt(0).toUpperCase() + activeDayName.slice(1) + "'s Workout" : "Today's Workout"}
                         </Text>
                         <Text allowFontScaling style={{ fontSize: 26, fontWeight: '800', color: '#FFFFFF', lineHeight: 32 }}>
-                          {todayWorkout.focus.includes('(') ? todayWorkout.focus.split('(')[0].trim() : todayWorkout.focus}
-                          {todayWorkout.focus.includes('(') && (
+                          {activeWorkoutDay.focus.includes('(') ? activeWorkoutDay.focus.split('(')[0].trim() : activeWorkoutDay.focus}
+                          {activeWorkoutDay.focus.includes('(') && (
                             <Text style={{ fontSize: 16, fontWeight: '600', color: '#FFFFFFAA' }}>
-                              {' '}({todayWorkout.focus.split('(').slice(1).join('(')}
+                              {' '}({activeWorkoutDay.focus.split('(').slice(1).join('(')}
                             </Text>
                           )}
                         </Text>
                         <Text allowFontScaling style={{ fontSize: 14, color: '#FFFFFFAA', marginTop: 6 }}>
-                          {todayWorkout.exercises.length} exercises
+                          {activeWorkoutDay.exercises.length} exercises
                         </Text>
                       </View>
                       <Ionicons name="play-circle" size={48} color="#FFFFFFCC" />
                     </View>
                     {/* Exercise list preview */}
                     <View style={{ marginTop: 16, gap: 6 }}>
-                      {todayWorkout.exercises.map((ex, i) => (
+                      {activeWorkoutDay.exercises.map((ex, i) => (
                         <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
                           <Text style={{ fontSize: 13, color: '#FFFFFFAA', fontWeight: '400' }}>
                             {i + 1}. {ex.name}

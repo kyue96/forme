@@ -67,11 +67,11 @@ export function ReactionBar({ likeCount, userReactions, onToggle }: ReactionBarP
       {/* Expanded emoji picker */}
       {pickerOpen && (
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-          {REACTION_EMOJIS.map((emoji) => {
+          {REACTION_EMOJIS.map((emoji, idx) => {
             const isActive = activeEmoji === emoji;
             return (
               <Pressable
-                key={emoji}
+                key={`${emoji}-${idx}`}
                 onPress={() => handleSelect(emoji)}
                 style={{
                   paddingHorizontal: 10,

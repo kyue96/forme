@@ -100,7 +100,9 @@ export const useSocialStore = create<SocialState>((set, get) => ({
       const reactionMap: Record<string, string[]> = {};
       for (const r of reactions ?? []) {
         if (!reactionMap[r.post_id]) reactionMap[r.post_id] = [];
-        reactionMap[r.post_id].push(r.emoji);
+        if (!reactionMap[r.post_id].includes(r.emoji)) {
+          reactionMap[r.post_id].push(r.emoji);
+        }
       }
 
       const enrichedPosts: PostWithAuthor[] = (posts ?? []).map((p) => ({
@@ -112,8 +114,13 @@ export const useSocialStore = create<SocialState>((set, get) => ({
         ? enrichedPosts[enrichedPosts.length - 1].created_at
         : null;
 
+      // Deduplicate posts by ID when paginating
+      const existingPosts = refresh ? [] : get().feedPosts;
+      const existingIds = new Set(existingPosts.map((p) => p.id));
+      const newPosts = enrichedPosts.filter((p) => !existingIds.has(p.id));
+
       set({
-        feedPosts: refresh ? enrichedPosts : [...get().feedPosts, ...enrichedPosts],
+        feedPosts: refresh ? enrichedPosts : [...existingPosts, ...newPosts],
         cursor: newCursor,
         hasMore: (posts ?? []).length === PAGE_SIZE,
       });
