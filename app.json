@@ -41,6 +41,7 @@
       ],
       "expo-secure-store",
       "expo-notifications",
+      "expo-apple-authentication",
       [
         "react-native-health",
         {

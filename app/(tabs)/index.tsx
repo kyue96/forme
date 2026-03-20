@@ -87,6 +87,7 @@ export default function HomeScreen() {
   // Today's session
   const [todaySession, setTodaySession] = useState<TodaySession | null>(null);
   const sessionCardRef = useRef<View>(null);
+  const weekLogsRef = useRef<any[]>([]);
 
   // Meal logging sheet
   const [showMealSheet, setShowMealSheet] = useState(false);
@@ -147,6 +148,7 @@ export default function HomeScreen() {
         .lte('completed_at', weekEnd + 'T23:59:59');
 
       if (logs) {
+        weekLogsRef.current = logs;
         const days = new Set(logs.map((l) => l.completed_at?.split('T')[0]).filter(Boolean) as string[]);
         setCompletedDays(days);
         setTodayCompleted(days.has(activeDate));
@@ -287,6 +289,25 @@ export default function HomeScreen() {
 
   const handleDayPress = (date: Date, _i: number) => {
     const key = dateKey(date);
+    const newActiveDate = key === todayStr ? todayStr : key;
+    // Immediately update all state from cached data to prevent flash of stale content
+    setTodayCompleted(completedDays.has(newActiveDate));
+    const cachedLog = weekLogsRef.current.find((l: any) => l.completed_at?.startsWith(newActiveDate));
+    if (cachedLog) {
+      setTodaySession({
+        id: cachedLog.id,
+        day_name: cachedLog.day_name,
+        exercises: cachedLog.exercises as LoggedExercise[],
+        duration_minutes: cachedLog.duration_minutes,
+      });
+    } else {
+      setTodaySession(null);
+    }
+    // Clear day-specific data that will be re-fetched
+    setTodayCalories(null);
+    setTodayMeals([]);
+    setTodayActivities([]);
+    setVolumeInsight(null);
     setSelectedDate(key === todayStr ? null : key);
   };
 
@@ -369,7 +390,7 @@ export default function HomeScreen() {
   const sessionVolumeRaw = todaySession?.exercises.reduce(
     (sum, ex) => sum + ex.sets.filter(s => s.completed && s.weight != null).reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0), 0
   ) ?? 0;
-  const sessionVolume = weightUnit === 'lbs' ? Math.round(sessionVolumeRaw * 2.205) : Math.round(sessionVolumeRaw);
+  const sessionVolume = Math.round(sessionVolumeRaw);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
@@ -497,9 +518,11 @@ export default function HomeScreen() {
 
           ) : !activeWorkoutDay ? (
             <View style={{ gap: 12 }}>
-              <View style={{ backgroundColor: theme.surface, borderRadius: 24, padding: 16, borderWidth: 1, borderColor: theme.border }}>
-                <Text allowFontScaling style={{ fontSize: 18, fontWeight: '800', color: theme.text, marginBottom: 6 }}>Rest day</Text>
-                <Text allowFontScaling style={{ fontSize: 13, color: theme.text, lineHeight: 20 }}>{tip}</Text>
+              {/* Rest Day card — same size/position as Workout Complete card */}
+              <View style={{ backgroundColor: theme.surface, borderRadius: 24, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: theme.border, minHeight: 140, justifyContent: 'center' }}>
+                <Ionicons name="moon-outline" size={40} color={theme.chrome} />
+                <Text allowFontScaling style={{ fontSize: 20, fontWeight: '800', color: theme.text, marginTop: 12 }}>Rest Day</Text>
+                <Text allowFontScaling style={{ fontSize: 13, color: theme.textSecondary, textAlign: 'center', marginTop: 4 }}>{tip}</Text>
               </View>
               {todaySession && (
                 <Pressable
@@ -546,7 +569,7 @@ export default function HomeScreen() {
                   </View>
                 </Pressable>
               )}
-              {nextWorkout && (() => {
+              {nextWorkout && activeDate >= todayStr && (() => {
                 const nextDayIdx = DAY_NAMES_FULL.findIndex((n) => n.toLowerCase() === nextWorkout.dayName.toLowerCase());
                 const daysUntil = nextDayIdx > activeIdx ? nextDayIdx - activeIdx : nextDayIdx + 7 - activeIdx;
                 const nextDate = new Date(activeDateObj);

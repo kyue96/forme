@@ -53,7 +53,7 @@ export default function SessionViewScreen() {
   const sessionVolumeRaw = exercises.reduce(
     (sum, ex) => sum + ex.sets.filter(s => s.completed && s.weight != null).reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0), 0
   );
-  const sessionVolume = weightUnit === 'lbs' ? Math.round(sessionVolumeRaw * 2.205) : Math.round(sessionVolumeRaw);
+  const sessionVolume = Math.round(sessionVolumeRaw);
   const sessionTotalReps = exercises.reduce(
     (sum, ex) => sum + ex.sets.filter(s => s.completed).reduce((r, set) => r + set.reps, 0), 0
   );

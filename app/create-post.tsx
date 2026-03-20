@@ -85,7 +85,7 @@ export default function CreatePostScreen() {
       (s: number, ex: any) => s + (ex.sets ?? []).filter((st: any) => st.completed && st.weight != null)
         .reduce((v: number, st: any) => v + (st.weight ?? 0) * (st.reps ?? 0), 0), 0
     );
-    const displayVol = weightUnit === 'lbs' ? Math.round(totalVol * 2.205) : totalVol;
+    const displayVol = Math.round(totalVol);
 
     setCardData({
       focus: log.day_name,

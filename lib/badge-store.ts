@@ -114,18 +114,21 @@ export const useBadgeStore = create<BadgeStore>()(
         stats.categoriesUsed = Array.from(allCategories);
         stats.uniqueCategories = allCategories.size;
 
-        // Streak calculation
+        // Streak calculation — counts consecutive workout days, rest days don't break the streak.
+        // A gap of up to 3 days (rest days) is allowed. Only breaks if 4+ days pass without a workout.
         const today = workout.completedAt.split('T')[0];
         if (stats.lastWorkoutDate) {
-          const lastDate = new Date(stats.lastWorkoutDate);
-          const todayDate = new Date(today);
+          const lastDate = new Date(stats.lastWorkoutDate + 'T12:00:00');
+          const todayDate = new Date(today + 'T12:00:00');
           const diffDays = Math.round((todayDate.getTime() - lastDate.getTime()) / (1000 * 60 * 60 * 24));
-          if (diffDays === 1) {
+          if (diffDays >= 1 && diffDays <= 3) {
+            // Consecutive workout (rest days in between are fine)
             stats.currentStreak += 1;
-          } else if (diffDays > 1) {
+          } else if (diffDays > 3) {
+            // Too many days off — streak resets
             stats.currentStreak = 1;
           }
-          // same day = don't change streak
+          // same day (diffDays === 0) = don't change streak
         } else {
           stats.currentStreak = 1;
         }

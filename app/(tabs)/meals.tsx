@@ -189,7 +189,7 @@ export default function MealsScreen() {
           <WeeklyCalendar
             completedDays={mealDays}
             selectedDay={dk}
-            onDayPress={(date) => setSelectedDate(date)}
+            onDayPress={(date) => { setMeals([]); setSelectedDate(date); }}
           />
 
           {/* Daily totals */}

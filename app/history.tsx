@@ -84,6 +84,7 @@ export default function HistoryScreen() {
 
   const loadDayLogs = async (dateStr: string) => {
     setSelectedDate(dateStr);
+    setDayLogs([]); // clear stale data immediately to prevent flash
     setDayLogsLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -154,6 +155,7 @@ export default function HistoryScreen() {
         {/* Month navigation */}
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingVertical: 16 }}>
           <Pressable onPress={() => {
+            setLogDates(new Set()); setSelectedDate(null); setDayLogs([]);
             if (calMonth === 0) { setCalMonth(11); setCalYear(y => y - 1); }
             else setCalMonth(m => m - 1);
           }}>
@@ -161,6 +163,7 @@ export default function HistoryScreen() {
           </Pressable>
           <Text style={{ fontSize: 17, fontWeight: '700', color: theme.text }}>{monthLabel}</Text>
           <Pressable onPress={() => {
+            setLogDates(new Set()); setSelectedDate(null); setDayLogs([]);
             if (calMonth === 11) { setCalMonth(0); setCalYear(y => y + 1); }
             else setCalMonth(m => m + 1);
           }}>

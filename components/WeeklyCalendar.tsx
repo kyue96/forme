@@ -153,13 +153,13 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
                   alignItems: 'center',
                   justifyContent: 'center',
                   backgroundColor: theme.surface,
-                  borderWidth: isToday ? 2 : (isSelected ? 1.5 : 1),
+                  borderWidth: isToday ? 1.5 : (isSelected ? 1.5 : 1),
                   borderColor: isToday ? dotColor : (isSelected ? theme.text : theme.border),
                 }}>
                   <Text allowFontScaling style={{
                     fontSize: 13,
-                    fontWeight: isToday ? '800' : '600',
-                    color: done ? '#22C55E' : (isToday ? dotColor : theme.textSecondary),
+                    fontWeight: '600',
+                    color: done ? '#22C55E' : theme.textSecondary,
                   }}>
                     {date.getDate()}
                   </Text>

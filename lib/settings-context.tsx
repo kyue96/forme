@@ -78,7 +78,7 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         if (data) {
           if (data.weight_unit) setWeightUnitState(data.weight_unit);
           if (data.rest_timer_enabled !== null) setRestTimerEnabledState(data.rest_timer_enabled);
-          if (data.theme_mode) setThemeModeState(data.theme_mode);
+          if (data.theme_mode === 'light' || data.theme_mode === 'dark' || data.theme_mode === 'system') setThemeModeState(data.theme_mode);
         }
       }
     } catch {

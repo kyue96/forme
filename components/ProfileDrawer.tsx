@@ -130,7 +130,7 @@ export function ProfileDrawer() {
             }
           }
         }
-        setTotalVolume(weightUnit === 'lbs' ? Math.round(vol * 2.205) : Math.round(vol));
+        setTotalVolume(Math.round(vol));
       }
 
       const sevenDaysAgo = new Date();
