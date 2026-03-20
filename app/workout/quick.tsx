@@ -101,7 +101,12 @@ export default function QuickWorkoutScreen() {
   const [selectedForSuperset, setSelectedForSuperset] = useState<number[]>([]);
   const [unlinkConfirmIdx, setUnlinkConfirmIdx] = useState<number | null>(null);
   const [warmupChecked, setWarmupChecked] = useState<Record<string, boolean>>({});
-  const [warmupCollapsed, setWarmupCollapsed] = useState(activeWorkout?.warmupDone ?? false);
+  const [warmupCollapsed, setWarmupCollapsed] = useState(() => {
+    if (activeWorkout?.warmupDone) return true;
+    // Auto-collapse warmup if resuming with at least 1 completed set
+    if (activeWorkout?.dayIndex === -1 && getElapsedMs() > 0 && activeWorkout?.loggedExercises?.some(ex => ex.sets.some(s => s.completed))) return true;
+    return false;
+  });
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const discardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);

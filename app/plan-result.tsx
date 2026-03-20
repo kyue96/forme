@@ -149,7 +149,7 @@ export default function PlanResultScreen() {
 
           <View style={{ paddingHorizontal: 24, paddingBottom: 24, paddingTop: 8 }}>
             <Pressable
-              onPress={() => router.replace('/(tabs)')}
+              onPress={() => router.replace('/profile-setup')}
               style={{ backgroundColor: theme.text, paddingVertical: 16, borderRadius: 16, alignItems: 'center' }}
             >
               <Text style={{ color: theme.background, fontSize: 16, fontWeight: '600' }}>

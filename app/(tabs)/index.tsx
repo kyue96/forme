@@ -16,7 +16,6 @@ import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
 import * as MediaLibrary from 'expo-media-library';
 
-import { LinearGradient } from 'expo-linear-gradient';
 import { usePlan } from '@/lib/plan-context';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
@@ -27,7 +26,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { WeeklyCalendar, getWeekDates, dateKey, DAY_NAMES_FULL } from '@/components/WeeklyCalendar';
 import { LoggedExercise } from '@/lib/types';
 import { formatNumber, animateLayout } from '@/lib/utils';
-import { checkAndScheduleNudges, checkVolumeInsight } from '@/lib/nudge-service';
+import { checkAndScheduleNudges } from '@/lib/nudge-service';
 import { useHealthKit } from '@/hooks/useHealthKit';
 import { EXERCISE_DATABASE } from '@/lib/exercise-data';
 import { MuscleGroupPills } from '@/components/MuscleGroupPills';
@@ -97,7 +96,6 @@ export default function HomeScreen() {
   const [mealCarbs, setMealCarbs] = useState('');
   const [savingMeal, setSavingMeal] = useState(false);
 
-  const [volumeInsight, setVolumeInsight] = useState<string | null>(null);
 
   // Selected day on calendar (null = today)
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -244,7 +242,7 @@ export default function HomeScreen() {
         const thisVol = calcVolume(thisWeekLogs ?? []);
         const lastVol = calcVolume(lastWeekLogs ?? []);
         const thisWeekSessions = (thisWeekLogs ?? []).length;
-        setVolumeInsight(checkVolumeInsight(thisVol, lastVol, { thisWeekSessions, hasEnoughHistory }));
+        // Volume insight removed per user request
       } catch {}
     } catch {}
   }, [activeDate]);
@@ -303,11 +301,8 @@ export default function HomeScreen() {
     } else {
       setTodaySession(null);
     }
-    // Clear day-specific data that will be re-fetched
-    setTodayCalories(null);
-    setTodayMeals([]);
-    setTodayActivities([]);
-    setVolumeInsight(null);
+    // Don't clear calories/meals/activities — let the re-fetch overwrite them
+    // to avoid flashing stale "-" values while loading
     setSelectedDate(key === todayStr ? null : key);
   };
 
@@ -434,7 +429,7 @@ export default function HomeScreen() {
             </View>
 
           ) : (todayCompleted || todaySession) ? (
-            <View style={{ gap: 12 }}>
+            <View style={{ gap: 12, minHeight: 350 }}>
               {/* Workout complete card */}
               <Pressable
                 onPress={() => router.push({
@@ -517,9 +512,9 @@ export default function HomeScreen() {
             </View>
 
           ) : !activeWorkoutDay ? (
-            <View style={{ gap: 12 }}>
+            <View style={{ gap: 12, minHeight: 350 }}>
               {/* Rest Day card — same size/position as Workout Complete card */}
-              <View style={{ backgroundColor: theme.surface, borderRadius: 24, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: theme.border, minHeight: 140, justifyContent: 'center' }}>
+              <View style={{ backgroundColor: theme.surface, borderRadius: 24, padding: 16, alignItems: 'center', borderWidth: 1, borderColor: theme.border, flex: 1, justifyContent: 'center' }}>
                 <Ionicons name="moon-outline" size={40} color={theme.chrome} />
                 <Text allowFontScaling style={{ fontSize: 20, fontWeight: '800', color: theme.text, marginTop: 12 }}>Rest Day</Text>
                 <Text allowFontScaling style={{ fontSize: 13, color: theme.textSecondary, textAlign: 'center', marginTop: 4 }}>{tip}</Text>
@@ -610,7 +605,7 @@ export default function HomeScreen() {
             </View>
 
           ) : (
-            <View>
+            <View style={{ minHeight: 350 }}>
               {/* Focus card - shows resume state when workout is active */}
               {activeWorkout && !todayCompleted ? (() => {
                 const completedSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.filter((s) => s.completed).length, 0);
@@ -624,27 +619,24 @@ export default function HomeScreen() {
                         router.push(`/workout/${activeWorkout.dayIndex}`);
                       }
                     }}
-                    style={{ borderRadius: 24, overflow: 'hidden', marginBottom: 12, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
+                    style={{ borderRadius: 24, marginBottom: 12, flex: 1, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
                   >
-                    <LinearGradient
-                      colors={[focusCardColor, focusCardColor + 'CC']}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 0, y: 1 }}
-                      style={{ paddingHorizontal: 20, paddingVertical: 24 }}
-                    >
+                    <View style={{ paddingHorizontal: 20, paddingVertical: 24, flex: 1, backgroundColor: focusCardColor, borderRadius: 24 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                         <View style={{ flex: 1 }}>
-                          <Text allowFontScaling style={{ fontSize: 10, fontWeight: '600', color: '#FFFFFF80', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+                          <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
                             In Progress
                           </Text>
-                          <Text allowFontScaling style={{ fontSize: 26, fontWeight: '800', color: '#FFFFFF', lineHeight: 32 }}>
-                            Resume Workout
+                          <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: '#FFFFFF', lineHeight: 34 }}>
+                            {activeWorkout.dayName}
                           </Text>
-                          <Text allowFontScaling style={{ fontSize: 14, color: '#FFFFFFAA', marginTop: 6 }}>
-                            {activeWorkout.dayName} · {completedSets}/{totalSets} sets
+                          <Text allowFontScaling style={{ fontSize: 15, color: '#FFFFFFDD', marginTop: 6 }}>
+                            {completedSets}/{totalSets} sets
                           </Text>
                         </View>
-                        <Ionicons name="play-circle" size={48} color="#FFFFFFCC" />
+                        <View style={{ width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: '#FFFFFF99', alignItems: 'center', justifyContent: 'center' }}>
+                          <Ionicons name="arrow-forward" size={22} color="#FFFFFF" />
+                        </View>
                       </View>
                       {/* Exercise progress */}
                       <View style={{ marginTop: 16, gap: 6 }}>
@@ -652,16 +644,16 @@ export default function HomeScreen() {
                           const done = ex.sets.filter((s) => s.completed).length;
                           return (
                             <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                              <Ionicons name={done === ex.sets.length ? 'checkmark-circle' : 'ellipse-outline'} size={14} color={done === ex.sets.length ? '#FFFFFF' : '#FFFFFF66'} style={{ marginRight: 8 }} />
-                              <Text style={{ fontSize: 13, color: done === ex.sets.length ? '#FFFFFF' : '#FFFFFFAA', fontWeight: done === ex.sets.length ? '600' : '400' }}>
+                              <Ionicons name={done === ex.sets.length ? 'checkmark-circle' : 'ellipse-outline'} size={16} color={done === ex.sets.length ? '#FFFFFF' : '#FFFFFF99'} style={{ marginRight: 8 }} />
+                              <Text style={{ fontSize: 14, color: done === ex.sets.length ? '#FFFFFF' : '#FFFFFFCC', fontWeight: done === ex.sets.length ? '600' : '400' }}>
                                 {ex.name}
                               </Text>
-                              <Text style={{ fontSize: 11, color: '#FFFFFF66', marginLeft: 'auto' }}>{done}/{ex.sets.length}</Text>
+                              <Text style={{ fontSize: 12, color: '#FFFFFF99', marginLeft: 'auto' }}>{done}/{ex.sets.length}</Text>
                             </View>
                           );
                         })}
                       </View>
-                    </LinearGradient>
+                    </View>
                   </Pressable>
                 );
               })() : (
@@ -670,49 +662,42 @@ export default function HomeScreen() {
                     const idx = plan.weeklyPlan.indexOf(activeWorkoutDay);
                     router.push(`/workout/${idx}`);
                   }}
-                  style={{ borderRadius: 24, overflow: 'hidden', marginBottom: 12, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
+                  style={{ borderRadius: 24, marginBottom: 12, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
                 >
-                  <LinearGradient
-                    colors={[focusCardColor, focusCardColor + 'CC']}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 0, y: 1 }}
-                    style={{ paddingHorizontal: 20, paddingVertical: 24 }}
-                  >
+                  <View style={{ paddingHorizontal: 20, paddingVertical: 24, backgroundColor: focusCardColor, borderRadius: 24 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                       <View style={{ flex: 1 }}>
-                        <Text allowFontScaling style={{ fontSize: 10, fontWeight: '600', color: '#FFFFFF80', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+                        <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
                           {selectedDate ? activeDayName.charAt(0).toUpperCase() + activeDayName.slice(1) + "'s Workout" : "Today's Workout"}
                         </Text>
-                        <Text allowFontScaling style={{ fontSize: 26, fontWeight: '800', color: '#FFFFFF', lineHeight: 32 }}>
+                        <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: '#FFFFFF', lineHeight: 34 }}>
                           {activeWorkoutDay.focus.includes('(') ? activeWorkoutDay.focus.split('(')[0].trim() : activeWorkoutDay.focus}
-                          {activeWorkoutDay.focus.includes('(') && (
-                            <Text style={{ fontSize: 16, fontWeight: '600', color: '#FFFFFFAA' }}>
-                              {' '}({activeWorkoutDay.focus.split('(').slice(1).join('(')}
-                            </Text>
-                          )}
                         </Text>
-                        <Text allowFontScaling style={{ fontSize: 14, color: '#FFFFFFAA', marginTop: 6 }}>
+                        <Text allowFontScaling style={{ fontSize: 15, color: '#FFFFFFDD', marginTop: 6 }}>
                           {activeWorkoutDay.exercises.length} exercises
                         </Text>
                       </View>
-                      <Ionicons name="play-circle" size={48} color="#FFFFFFCC" />
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <MuscleGroupPills categories={getExerciseCategories(activeWorkoutDay.exercises)} size="small" />
+                        <Ionicons name="play-circle" size={48} color="#FFFFFFCC" style={{ marginTop: 8 }} />
+                      </View>
                     </View>
                     {/* Exercise list preview */}
                     <View style={{ marginTop: 16, gap: 6 }}>
                       {activeWorkoutDay.exercises.map((ex, i) => (
                         <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <Text style={{ fontSize: 13, color: '#FFFFFFAA', fontWeight: '400' }}>
+                          <Text style={{ fontSize: 14, color: '#FFFFFFCC', fontWeight: '400' }}>
                             {i + 1}. {ex.name}
                           </Text>
                         </View>
                       ))}
                     </View>
-                  </LinearGradient>
+                  </View>
                 </Pressable>
               )}
               <Pressable
                 onPress={() => router.push('/workout/quick')}
-                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center', marginBottom: 12 }}
+                style={{ backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
                   + Create Workout
@@ -721,7 +706,6 @@ export default function HomeScreen() {
             </View>
           )}
 
-
           {/* Today's stats + Add meal + Add cardio + Steps (four across) */}
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
             <Pressable
@@ -729,7 +713,7 @@ export default function HomeScreen() {
               style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 16, padding: 12, borderWidth: 1, borderColor: theme.border }}
             >
               <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text, marginBottom: 4 }}>Total Cal</Text>
-              <Text allowFontScaling style={{ fontSize: 24, fontWeight: '800', color: theme.text }}>
+              <Text allowFontScaling numberOfLines={1} adjustsFontSizeToFit style={{ fontSize: 20, fontWeight: '800', color: theme.text }}>
                 {todayCalories != null ? `${todayCalories}` : '-'}
               </Text>
             </Pressable>
@@ -757,13 +741,6 @@ export default function HomeScreen() {
             </View>
           </View>
 
-          {/* Volume insight */}
-          {volumeInsight && (
-            <View style={{ backgroundColor: theme.surface, borderRadius: 12, padding: 12, marginTop: 12, borderWidth: 1, borderColor: theme.border, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <Ionicons name={volumeInsight.includes('%') ? 'trending-up' : 'barbell-outline'} size={18} color={theme.chrome} />
-              <Text style={{ fontSize: 13, color: theme.text, flex: 1 }}>{volumeInsight}</Text>
-            </View>
-          )}
 
           {/* Today's activities */}
           {todayActivities.length > 0 && (

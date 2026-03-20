@@ -83,15 +83,17 @@ export default function CardPickerScreen() {
         .reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0),
     0
   );
-  const displayVolume = Math.round(totalVolumeRaw);
+  const displayVolume = weightUnit === 'lbs' ? Math.round(totalVolumeRaw * 2.205) : Math.round(totalVolumeRaw);
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
 
   const density = computeDensity(exercises, durationMinutes);
-  const displayDensity = Math.round(density);
+  const displayDensity = weightUnit === 'lbs' ? Math.round(density * 2.205) : Math.round(density);
   const avgIntensity = computeAvgIntensity(exercises);
   const topE1RMs = computeTopE1RMs(exercises, 1);
   const bestSet = computeBestSet(exercises);
-  const displayBestSet = bestSet;
+  const displayBestSet = bestSet && weightUnit === 'lbs'
+    ? { ...bestSet, weight: Math.round(bestSet.weight * 2.205) }
+    : bestSet;
   // For volume comparison strings, convert to lbs if user is in kg mode
   const volumeLbs = weightUnit === 'kg' ? Math.round(totalVolumeRaw * 2.205) : displayVolume;
   const volumeComparison = getVolumeComparison(volumeLbs);

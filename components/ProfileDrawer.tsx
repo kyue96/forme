@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Dimensions,
@@ -26,6 +26,7 @@ import { usePlan } from '@/lib/plan-context';
 import { useSettings } from '@/lib/settings-context';
 import { useUserStore } from '@/lib/user-store';
 import { AvatarInitial } from '@/components/AvatarInitial';
+import ColorWheel from '@/components/ColorWheel';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const DRAWER_WIDTH = Math.min(SCREEN_WIDTH * 0.85, 360);
@@ -44,10 +45,12 @@ export function ProfileDrawer() {
   const [nameInput, setNameInput] = useState(displayName);
   const [avatarUploading, setAvatarUploading] = useState(false);
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const [showWheel, setShowWheel] = useState(false);
+  const [scrollEnabled, setScrollEnabled] = useState(true);
 
   const AVATAR_PRESET_COLORS = [
     '#F59E0B', '#EF4444', '#3B82F6', '#10B981', '#8B5CF6',
-    '#EC4899', '#F97316', '#06B6D4',
+    '#EC4899', '#F97316',
   ];
 
   // Stats
@@ -269,7 +272,17 @@ export function ProfileDrawer() {
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingBottom: 48 }}
           showsVerticalScrollIndicator={false}
+          scrollEnabled={scrollEnabled}
         >
+          {/* Close arrow */}
+          <Pressable
+            onPress={closeDrawer}
+            hitSlop={16}
+            style={{ position: 'absolute', top: 56, right: 16, zIndex: 10, padding: 4 }}
+          >
+            <Ionicons name="arrow-back" size={22} color={theme.text} />
+          </Pressable>
+
           {/* User section */}
           <View style={{ paddingHorizontal: 24, paddingTop: 60, paddingBottom: 24, alignItems: 'center' }}>
             {/* Avatar */}
@@ -313,21 +326,56 @@ export function ProfileDrawer() {
               </Pressable>
             </View>
 
-            {/* Color picker row */}
+            {/* Color preset circles + rainbow wheel toggle */}
             {colorPickerOpen && (
-              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
-                {AVATAR_PRESET_COLORS.map((c) => (
+              <View style={{ marginBottom: 12 }}>
+                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', justifyContent: 'center', marginBottom: showWheel ? 12 : 0 }}>
+                  {AVATAR_PRESET_COLORS.map((c) => (
+                    <Pressable
+                      key={c}
+                      onPress={() => { updateAvatarColor(c); setShowWheel(false); }}
+                      style={{
+                        width: 28, height: 28, borderRadius: 14,
+                        backgroundColor: c,
+                        borderWidth: avatarColor === c && !showWheel ? 3 : 0,
+                        borderColor: '#FFFFFF',
+                      }}
+                    />
+                  ))}
+                  {/* Rainbow circle — toggles color wheel */}
                   <Pressable
-                    key={c}
-                    onPress={() => { updateAvatarColor(c); setColorPickerOpen(false); }}
+                    onPress={() => setShowWheel((prev) => !prev)}
                     style={{
-                      width: 28, height: 28, borderRadius: 14,
-                      backgroundColor: c,
-                      borderWidth: avatarColor === c ? 3 : 0,
-                      borderColor: theme.text,
+                      width: 32, height: 32, borderRadius: 16,
+                      borderWidth: showWheel ? 3 : 1.5,
+                      borderColor: showWheel ? '#FFFFFF' : 'rgba(255,255,255,0.3)',
+                      overflow: 'hidden',
+                      shadowColor: '#FF6BF5',
+                      shadowOffset: { width: 0, height: 0 },
+                      shadowOpacity: 0.8,
+                      shadowRadius: 6,
+                      elevation: 8,
                     }}
-                  />
-                ))}
+                  >
+                    <View style={{ flex: 1, borderRadius: 16, overflow: 'hidden', flexDirection: 'row', flexWrap: 'wrap' }}>
+                      {['#FF3B3B', '#FF8800', '#FFD600', '#00E05A', '#00BFFF', '#6B5BFF', '#D94BFF'].map((c, i) => (
+                        <View key={i} style={{ width: i < 4 ? '25%' : '33.33%', height: '50%', backgroundColor: c }} />
+                      ))}
+                    </View>
+                  </Pressable>
+                </View>
+                {/* Color wheel — shown when rainbow circle tapped */}
+                {showWheel && (
+                  <View style={{ alignItems: 'center', marginTop: 4 }}>
+                    <ColorWheel
+                      size={180}
+                      currentColor={avatarColor || '#F59E0B'}
+                      onColorSelect={(color) => updateAvatarColor(color)}
+                      onInteractionStart={() => setScrollEnabled(false)}
+                      onInteractionEnd={() => setScrollEnabled(true)}
+                    />
+                  </View>
+                )}
               </View>
             )}
 

@@ -90,7 +90,7 @@ export default function WorkoutScreen() {
   const [showFilterMenu, setShowFilterMenu] = useState(false);
   const confirmAddDoneRef = useRef(false);
   const [confirmAddDoneTick, setConfirmAddDoneTick] = useState(0);
-  const [workoutStarted, setWorkoutStarted] = useState(() => activeWorkout?.dayIndex === dayIdx && getElapsedMs() > 0);
+  const [workoutStarted, setWorkoutStarted] = useState(false);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [reorderMode, setReorderMode] = useState(false);
@@ -100,7 +100,13 @@ export default function WorkoutScreen() {
   const [selectedForSuperset, setSelectedForSuperset] = useState<number[]>([]);
   const [unlinkConfirmIdx, setUnlinkConfirmIdx] = useState<number | null>(null);
   const [warmupChecked, setWarmupChecked] = useState<Record<string, boolean>>({});
-  const [warmupCollapsed, setWarmupCollapsed] = useState(activeWorkout?.warmupDone ?? false);
+  const [warmupCollapsed, setWarmupCollapsed] = useState(() => {
+    if (activeWorkout?.warmupDone) return true;
+    // Auto-collapse warmup if resuming with at least 1 completed set
+    // Auto-collapse warmup if resuming with at least 1 completed set
+    if (activeWorkout?.dayIndex === dayIdx && getElapsedMs() > 0 && activeWorkout?.loggedExercises?.some(ex => ex.sets.some(s => s.completed))) return true;
+    return false;
+  });
   const [expandedCategories, setExpandedCategories] = useState<Set<string>>(new Set());
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -222,11 +228,7 @@ export default function WorkoutScreen() {
   useEffect(() => { activeWorkoutRef.current = activeWorkout; }, [activeWorkout]);
 
   useFocusEffect(useCallback(() => {
-    // Don't auto-resume on focus if we just started paused
-    if (startedRef.current) {
-      const aw = activeWorkoutRef.current;
-      if (aw?.isPaused && aw.elapsedMs > 0) resumeWorkout();
-    }
+    // Don't auto-resume on focus — user must tap RESUME + countdown
     return () => {
       const aw = activeWorkoutRef.current;
       if (aw && !aw.isPaused) pauseWorkout();
