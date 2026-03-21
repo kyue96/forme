@@ -1,7 +1,5 @@
 import { useCallback, useState } from 'react';
-import { useRouter } from 'expo-router';
 import {
-  ActivityIndicator,
   Pressable,
   ScrollView,
   Text,
@@ -14,16 +12,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { BadgesTab } from '@/components/BadgesTab';
 import { StreakRing } from '@/components/StreakRing';
 import { WeeklyVolumeCard } from '@/components/WeeklyVolumeCard';
-import { MuscleGroupPills } from '@/components/MuscleGroupPills';
 import { AppHeader } from '@/components/AppHeader';
 
-import { usePlan } from '@/lib/plan-context';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { useUserStore } from '@/lib/user-store';
 import { LoggedExercise } from '@/lib/types';
-import { animateLayout, stripParens } from '@/lib/utils';
-import { getExerciseCategories } from '@/lib/exercise-utils';
+import { animateLayout } from '@/lib/utils';
 import { dateKey, getWeekDates } from '@/components/WeeklyCalendar';
 
 interface WorkoutLog {
@@ -35,16 +30,11 @@ interface WorkoutLog {
 }
 
 export default function StatsScreen() {
-  const router = useRouter();
-  const { plan } = usePlan();
   const { theme, weightUnit } = useSettings();
   const avatarColor = useUserStore((s) => s.avatarColor);
   const focusCardColor = avatarColor || '#F59E0B';
 
   const [activeTab, setActiveTab] = useState<'stats' | 'badges'>('stats');
-  const [showAllWorkouts, setShowAllWorkouts] = useState(false);
-  const [logs, setLogs] = useState<WorkoutLog[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
 
   // Stats data
   const [streak, setStreak] = useState(0);
@@ -54,7 +44,6 @@ export default function StatsScreen() {
   const [volDelta, setVolDelta] = useState<number | null>(null);
 
   const loadAllData = useCallback(async () => {
-    setLogsLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -80,7 +69,6 @@ export default function StatsScreen() {
       ]);
 
       const allLogs = (recentLogs ?? []) as WorkoutLog[];
-      setLogs(allLogs.slice(0, 30));
 
       // --- Streak ---
       const streakDatesList = (streakLogs ?? []).map((l: any) => l.completed_at?.split('T')[0]).filter(Boolean);
@@ -154,9 +142,7 @@ export default function StatsScreen() {
         buildDailyVol(lastWeekLogs, lastWeekMon),
         buildDailyVol(thisWeekLogs, weekDates[0]),
       ]);
-    } catch {} finally {
-      setLogsLoading(false);
-    }
+    } catch {}
   }, [weightUnit]);
 
   useFocusEffect(useCallback(() => { loadAllData(); }, [loadAllData]));
@@ -203,79 +189,6 @@ export default function StatsScreen() {
               />
             )}
 
-            {/* Recent Workouts */}
-            <View style={{ marginTop: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <Text allowFontScaling style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>
-                  Recent Workouts
-                </Text>
-                {logs.length > 2 && (
-                  <Pressable onPress={() => { animateLayout(); setShowAllWorkouts(!showAllWorkouts); }} hitSlop={8}>
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: focusCardColor }}>
-                      {showAllWorkouts ? 'Show less' : 'View all'}
-                    </Text>
-                  </Pressable>
-                )}
-              </View>
-              {logsLoading ? (
-                <ActivityIndicator color={theme.chrome} />
-              ) : logs.length === 0 ? (
-                <View style={{ alignItems: 'center', paddingVertical: 24 }}>
-                  <Ionicons name="barbell-outline" size={28} color={theme.border} />
-                  <Text allowFontScaling style={{ color: theme.textSecondary, marginTop: 8, fontSize: 13 }}>
-                    No workouts logged yet.
-                  </Text>
-                </View>
-              ) : (
-                (showAllWorkouts ? logs : logs.slice(0, 2)).map((log) => {
-                  const totalSets = log.exercises.reduce((s, ex) => s + ex.sets.filter((se) => se.completed).length, 0);
-                  const dateObj = new Date(log.completed_at);
-                  const dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-                  const logPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
-                  return (
-                    <Pressable
-                      key={log.id}
-                      onPress={() => {
-                        router.push({
-                          pathname: '/workout/session-view',
-                          params: {
-                            exercises: JSON.stringify(log.exercises),
-                            dayName: log.day_name,
-                            focus: logPlanDay?.focus ?? log.day_name,
-                            durationMinutes: String(log.duration_minutes ?? 0),
-                            completedAt: log.completed_at,
-                            logId: log.id,
-                          },
-                        });
-                      }}
-                      style={{
-                        backgroundColor: theme.surface,
-                        borderRadius: 14,
-                        padding: 14,
-                        marginBottom: 8,
-                        borderWidth: 1,
-                        borderColor: theme.border,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <Text allowFontScaling style={{ fontSize: 14, fontWeight: '700', color: theme.text }} numberOfLines={1}>
-                            {stripParens(logPlanDay?.focus ?? log.day_name)}
-                          </Text>
-                          <MuscleGroupPills categories={getExerciseCategories(log.exercises)} size="small" />
-                        </View>
-                        <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 3 }}>
-                          {dateLabel} · {totalSets} sets · {log.duration_minutes}m
-                        </Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={16} color={theme.chrome} />
-                    </Pressable>
-                  );
-                })
-              )}
-            </View>
           </View>
         ) : (
           <BadgesTab />

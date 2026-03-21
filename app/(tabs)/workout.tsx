@@ -72,6 +72,7 @@ export default function WorkoutScreen() {
   const { logId } = useLocalSearchParams<{ logId?: string }>();
 
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
+  const [showAllWorkouts, setShowAllWorkouts] = useState(false);
   // selectedLog state removed - now navigates to session-view
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [todayLoggedDays, setTodayLoggedDays] = useState<Set<string>>(new Set());
@@ -554,6 +555,78 @@ export default function WorkoutScreen() {
                 </Pressable>
               </>
             )}
+
+            {/* Recent Workouts */}
+            <View style={{ marginTop: 24 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <Text allowFontScaling style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>
+                  Recent Workouts
+                </Text>
+                {logs.length > 3 && (
+                  <Pressable onPress={() => { animateLayout(); setShowAllWorkouts(!showAllWorkouts); }} hitSlop={8}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: focusCardColor }}>
+                      {showAllWorkouts ? 'Show less' : 'View all'}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+              {logs.length === 0 ? (
+                <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+                  <Ionicons name="barbell-outline" size={28} color={theme.border} />
+                  <Text allowFontScaling style={{ color: theme.textSecondary, marginTop: 8, fontSize: 13 }}>
+                    No workouts logged yet.
+                  </Text>
+                </View>
+              ) : (
+                (showAllWorkouts ? logs : logs.slice(0, 3)).map((log) => {
+                  const totalSets = log.exercises.reduce((s, ex) => s + ex.sets.filter((se) => se.completed).length, 0);
+                  const dateObj = new Date(log.completed_at);
+                  const dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                  const logPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
+                  return (
+                    <Pressable
+                      key={log.id}
+                      onPress={() => {
+                        router.push({
+                          pathname: '/workout/session-view',
+                          params: {
+                            exercises: JSON.stringify(log.exercises),
+                            dayName: log.day_name,
+                            focus: logPlanDay?.focus ?? log.day_name,
+                            durationMinutes: String(log.duration_minutes ?? 0),
+                            completedAt: log.completed_at,
+                            logId: log.id,
+                          },
+                        });
+                      }}
+                      style={{
+                        backgroundColor: theme.surface,
+                        borderRadius: 14,
+                        padding: 14,
+                        marginBottom: 8,
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Text allowFontScaling style={{ fontSize: 14, fontWeight: '700', color: theme.text }} numberOfLines={1}>
+                            {stripParens(logPlanDay?.focus ?? log.day_name)}
+                          </Text>
+                          <MuscleGroupPills categories={getExerciseCategories(log.exercises)} size="small" />
+                        </View>
+                        <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 3 }}>
+                          {dateLabel} · {totalSets} sets · {log.duration_minutes}m
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color={theme.chrome} />
+                    </Pressable>
+                  );
+                })
+              )}
+            </View>
           </View>
       </ScrollView>
 
