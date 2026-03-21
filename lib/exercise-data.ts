@@ -301,6 +301,21 @@ export interface ExerciseEntry {
 
 export const EXERCISE_CATEGORIES = ['Chest', 'Back', 'Shoulders', 'Traps', 'Biceps', 'Triceps', 'Legs', 'Core', 'Cardio', 'Bands', 'Full Body'] as const;
 
+export const EQUIPMENT_TYPES = ['Barbell', 'Dumbbell', 'Kettlebell', 'Machine', 'Cable', 'Bodyweight'] as const;
+
+export const CABLE_ATTACHMENTS = ['Straight Bar', 'EZ-Bar', 'V-Bar', 'Rope', 'Single Handle', 'D-Handle'] as const;
+
+// Exercises that use cable attachments but don't have "cable" in the name
+const IMPLICIT_CABLE_EXERCISES = ['lat pulldown', 'tricep pushdown', 'face pull'];
+
+/** Returns true if the exercise likely uses a cable machine with swappable attachments */
+export function isCableExercise(name: string, equipment?: string | null): boolean {
+  if (equipment === 'Cable') return true;
+  const lower = name.toLowerCase();
+  if (lower.includes('cable')) return true;
+  return IMPLICIT_CABLE_EXERCISES.some((kw) => lower.includes(kw));
+}
+
 export const EXERCISE_DATABASE: ExerciseEntry[] = [
   // === CHEST (19) ===
   { name: 'Barbell Bench Press', category: 'Chest' },

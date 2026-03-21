@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, Modal, Pressable, Text, View, ActivityIndicator } from 'react-native';
+import { Image, Modal, Pressable, ScrollView, Text, View, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { getExerciseImageUrls } from '@/lib/exercise-images';
@@ -79,21 +79,22 @@ export function ExerciseInfoButton({ exerciseName, theme }: ExerciseInfoButtonPr
       <Modal visible={showModal} transparent animationType="fade" onRequestClose={() => setShowModal(false)}>
         <Pressable
           onPress={() => setShowModal(false)}
-          style={{ flex: 1, backgroundColor: '#111', justifyContent: 'center', alignItems: 'center', padding: 24 }}
+          style={{ flex: 1, backgroundColor: '#111' }}
         >
+          <ScrollView contentContainerStyle={{ flexGrow: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
           <Text style={{ fontSize: 18, fontWeight: '700', color: '#fff', marginBottom: 24 }}>{exerciseName}</Text>
 
           {images ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            <View style={{ alignItems: 'center', gap: 12 }}>
               <View style={{ alignItems: 'center' }}>
-                <FilteredExerciseImage uri={images.start} size={150} />
+                <FilteredExerciseImage uri={images.start} size={240} />
                 <Text style={{ fontSize: 11, fontWeight: '600', color: '#555', marginTop: 8 }}>START</Text>
               </View>
 
-              <Ionicons name="arrow-forward" size={20} color="#444" />
+              <Ionicons name="arrow-down" size={20} color="#444" />
 
               <View style={{ alignItems: 'center' }}>
-                <FilteredExerciseImage uri={images.end} size={150} />
+                <FilteredExerciseImage uri={images.end} size={240} />
                 <Text style={{ fontSize: 11, fontWeight: '600', color: '#555', marginTop: 8 }}>END</Text>
               </View>
             </View>
@@ -104,20 +105,20 @@ export function ExerciseInfoButton({ exerciseName, theme }: ExerciseInfoButtonPr
               const isStatic = JSON.stringify(startPose) === JSON.stringify(endPose);
 
               return (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 20 }}>
+                <View style={{ alignItems: 'center', gap: 12 }}>
                   <View style={{ alignItems: 'center' }}>
                     <View style={{ backgroundColor: '#1a1a1a', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#222' }}>
-                      <PoseMannequin pose={startPose} size={140} variant="dark" />
+                      <PoseMannequin pose={startPose} size={200} variant="dark" />
                     </View>
                     {!isStatic && <Text style={{ fontSize: 11, fontWeight: '600', color: '#555', marginTop: 8 }}>START</Text>}
                   </View>
 
                   {!isStatic && (
                     <>
-                      <Ionicons name="arrow-forward" size={20} color="#444" />
+                      <Ionicons name="arrow-down" size={20} color="#444" />
                       <View style={{ alignItems: 'center' }}>
                         <View style={{ backgroundColor: '#1a1a1a', borderRadius: 16, padding: 16, borderWidth: 1, borderColor: '#222' }}>
-                          <PoseMannequin pose={endPose} size={140} variant="dark" />
+                          <PoseMannequin pose={endPose} size={200} variant="dark" />
                         </View>
                         <Text style={{ fontSize: 11, fontWeight: '600', color: '#555', marginTop: 8 }}>END</Text>
                       </View>
@@ -129,6 +130,7 @@ export function ExerciseInfoButton({ exerciseName, theme }: ExerciseInfoButtonPr
           )}
 
           <Text style={{ fontSize: 12, color: '#444', marginTop: 20 }}>Tap to close</Text>
+          </ScrollView>
         </Pressable>
       </Modal>
     </>

@@ -66,6 +66,7 @@ export interface LoggedExercise {
   name: string;
   sets: LoggedSet[];
   supersetGroupId?: string;
+  attachment?: string | null;
 }
 
 // Meal logging

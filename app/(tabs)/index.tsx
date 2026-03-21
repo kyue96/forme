@@ -27,6 +27,7 @@ import { BottomSheet } from '@/components/BottomSheet';
 import { WeeklyCalendar, getWeekDates, dateKey, DAY_NAMES_FULL } from '@/components/WeeklyCalendar';
 import { LoggedExercise } from '@/lib/types';
 import { formatNumber, animateLayout, stripParens } from '@/lib/utils';
+import { LinearGradient } from 'expo-linear-gradient';
 import { checkAndScheduleNudges } from '@/lib/nudge-service';
 import { useHealthKit } from '@/hooks/useHealthKit';
 import { EXERCISE_DATABASE } from '@/lib/exercise-data';
@@ -106,9 +107,25 @@ export default function HomeScreen() {
 
   // Active workout indicator
   const activeWorkout = useWorkoutStore((s) => s.activeWorkout);
+  const getElapsedMs = useWorkoutStore((s) => s.getElapsedMs);
   const clearWorkout = useWorkoutStore((s) => s.clearWorkout);
   const avatarColor = useUserStore((s) => s.avatarColor);
   const focusCardColor = avatarColor || '#F59E0B';
+
+  // Create gradient colors: lighter tint → base → darker shade
+  const lighten = (hex: string, amount: number) => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `#${Math.min(255, Math.round(r + (255 - r) * amount)).toString(16).padStart(2, '0')}${Math.min(255, Math.round(g + (255 - g) * amount)).toString(16).padStart(2, '0')}${Math.min(255, Math.round(b + (255 - b) * amount)).toString(16).padStart(2, '0')}`;
+  };
+  const darken = (hex: string, amount: number) => {
+    const r = parseInt(hex.slice(1, 3), 16);
+    const g = parseInt(hex.slice(3, 5), 16);
+    const b = parseInt(hex.slice(5, 7), 16);
+    return `#${Math.max(0, Math.round(r * (1 - amount))).toString(16).padStart(2, '0')}${Math.max(0, Math.round(g * (1 - amount))).toString(16).padStart(2, '0')}${Math.max(0, Math.round(b * (1 - amount))).toString(16).padStart(2, '0')}`;
+  };
+  const gradientColors: [string, string, string] = [darken(focusCardColor, 0.2), focusCardColor, lighten(focusCardColor, 0.25)];
 
   // FAB state
   const [fabOpen, setFabOpen] = useState(false);
@@ -405,13 +422,20 @@ export default function HomeScreen() {
                     logId: todaySession?.id ?? '',
                   },
                 })}
-                style={{ backgroundColor: focusCardColor, borderRadius: 16, paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: focusCardColor }}
+                style={{ borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: focusCardColor }}
               >
-                <Ionicons name="checkmark-circle" size={28} color="#FFFFFF" />
-                <Text allowFontScaling style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', marginLeft: 12, flex: 1 }}>
-                  Workout Complete
-                </Text>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFFAA', letterSpacing: 1 }}>DETAILS</Text>
+                <LinearGradient
+                  colors={gradientColors}
+                  start={{ x: 0, y: 0 }}
+                  end={{ x: 1, y: 1 }}
+                  style={{ paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center' }}
+                >
+                  <Ionicons name="checkmark-circle" size={28} color="#FFFFFF" />
+                  <Text allowFontScaling style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', marginLeft: 12, flex: 1 }}>
+                    Workout Complete
+                  </Text>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFFAA', letterSpacing: 1 }}>DETAILS</Text>
+                </LinearGradient>
               </Pressable>
               {/* Shareable session card */}
               {todaySession && (
@@ -570,7 +594,12 @@ export default function HomeScreen() {
                 nextDate.setDate(activeDateObj.getDate() + daysUntil);
                 const dateLabel = nextDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
                 return (
-                  <View style={{ backgroundColor: focusCardColor, borderRadius: 16, padding: 20 }}>
+                  <LinearGradient
+                    colors={gradientColors}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={{ borderRadius: 16, padding: 20 }}
+                  >
                     <Text allowFontScaling style={{ fontSize: 10, color: '#FFFFFF99', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
                       Up next · {dateLabel}
                     </Text>
@@ -590,7 +619,7 @@ export default function HomeScreen() {
                         </Text>
                       ))}
                     </View>
-                  </View>
+                  </LinearGradient>
                 );
               })()}
             </View>
@@ -598,7 +627,7 @@ export default function HomeScreen() {
           ) : (
             <View style={{ gap: 12 }}>
               {/* Focus card - shows resume state when workout is active */}
-              {activeWorkout && !todayCompleted && !selectedDate ? (() => {
+              {activeWorkout && !todayCompleted && !selectedDate && getElapsedMs() > 0 ? (() => {
                 const completedSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.filter((s) => s.completed).length, 0);
                 const totalSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.length, 0);
                 return (
@@ -612,28 +641,22 @@ export default function HomeScreen() {
                     }}
                     style={{ borderRadius: 24, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
                   >
-                    <View style={{ paddingHorizontal: 20, paddingVertical: 24, flex: 1, backgroundColor: focusCardColor, borderRadius: 24 }}>
+                    <LinearGradient
+                      colors={gradientColors}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 1 }}
+                      style={{ paddingHorizontal: 20, paddingVertical: 24, flex: 1, borderRadius: 24 }}
+                    >
                       <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                         <View style={{ flex: 1 }}>
-                          <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5 }}>
-                            Today's Workout
-                          </Text>
-                          <Text allowFontScaling style={{ fontSize: 11, fontWeight: '600', color: '#FFFFFF99', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 4 }}>
-                            In Progress
+                          <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+                            Today's Workout · In Progress
                           </Text>
                           <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: '#FFFFFF', lineHeight: 34 }}>
                             {stripParens(activeWorkout.dayName)}
                           </Text>
-                          <Text allowFontScaling style={{ fontSize: 15, color: '#FFFFFFDD', marginTop: 6 }}>
-                            {completedSets}/{totalSets} sets
-                          </Text>
                         </View>
-                        <View style={{ alignItems: 'flex-end', gap: 8 }}>
-                          <MuscleGroupPills categories={getExerciseCategories(activeWorkout.loggedExercises)} size="small" />
-                          <View style={{ width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: '#FFFFFF99', alignItems: 'center', justifyContent: 'center' }}>
-                            <Ionicons name="arrow-forward" size={22} color="#FFFFFF" />
-                          </View>
-                        </View>
+                        <Ionicons name="arrow-forward" size={24} color="#FFFFFF" />
                       </View>
                       {/* Exercise progress */}
                       <View style={{ marginTop: 16, gap: 6 }}>
@@ -641,7 +664,7 @@ export default function HomeScreen() {
                           const done = ex.sets.filter((s) => s.completed).length;
                           return (
                             <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                              <Ionicons name={done === ex.sets.length ? 'checkmark-circle' : 'ellipse-outline'} size={16} color={done === ex.sets.length ? '#FFFFFF' : '#FFFFFF99'} style={{ marginRight: 8 }} />
+                              <Ionicons name={done === ex.sets.length ? 'checkmark-circle' : 'ellipse-outline'} size={12} color={done === ex.sets.length ? '#FFFFFF' : '#FFFFFF99'} style={{ marginRight: 6 }} />
                               <Text style={{ fontSize: 14, color: done === ex.sets.length ? '#FFFFFF' : '#FFFFFFCC', fontWeight: done === ex.sets.length ? '600' : '400' }}>
                                 {ex.name}
                               </Text>
@@ -650,7 +673,10 @@ export default function HomeScreen() {
                           );
                         })}
                       </View>
-                    </View>
+                      <View style={{ marginTop: 12 }}>
+                        <MuscleGroupPills categories={getExerciseCategories(activeWorkout.loggedExercises)} size="small" />
+                      </View>
+                    </LinearGradient>
                   </Pressable>
                 );
               })() : (
@@ -661,7 +687,12 @@ export default function HomeScreen() {
                   }}
                   style={{ borderRadius: 24, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
                 >
-                  <View style={{ paddingHorizontal: 20, paddingVertical: 24, backgroundColor: focusCardColor, borderRadius: 24 }}>
+                  <LinearGradient
+                    colors={gradientColors}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={{ paddingHorizontal: 20, paddingVertical: 24, borderRadius: 24 }}
+                  >
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                       <View style={{ flex: 1 }}>
                         {!selectedDate && (
@@ -672,14 +703,8 @@ export default function HomeScreen() {
                         <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: '#FFFFFF', lineHeight: 34 }}>
                           {stripParens(activeWorkoutDay.focus)}
                         </Text>
-                        <Text allowFontScaling style={{ fontSize: 15, color: '#FFFFFFDD', marginTop: 6 }}>
-                          {activeWorkoutDay.exercises.length} exercises
-                        </Text>
                       </View>
-                      <View style={{ alignItems: 'flex-end' }}>
-                        <MuscleGroupPills categories={getExerciseCategories(activeWorkoutDay.exercises)} size="small" />
-                        <Ionicons name="play-circle" size={48} color="#FFFFFFCC" style={{ marginTop: 8 }} />
-                      </View>
+                      <Ionicons name="arrow-forward" size={24} color="#FFFFFF" />
                     </View>
                     {/* Exercise list preview */}
                     <View style={{ marginTop: 16, gap: 6 }}>
@@ -691,7 +716,10 @@ export default function HomeScreen() {
                         </View>
                       ))}
                     </View>
-                  </View>
+                    <View style={{ marginTop: 12 }}>
+                      <MuscleGroupPills categories={getExerciseCategories(activeWorkoutDay.exercises)} size="small" />
+                    </View>
+                  </LinearGradient>
                 </Pressable>
               )}
             </View>

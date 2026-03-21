@@ -13,6 +13,7 @@ interface UserState {
   bio: string;
   gymName: string | null;
   gymPlaceId: string | null;
+  createdAt: string | null;
   drawerVisible: boolean;
 
   loadUser: () => Promise<void>;
@@ -40,6 +41,7 @@ export const useUserStore = create<UserState>((set, get) => ({
   bio: '',
   gymName: null,
   gymPlaceId: null,
+  createdAt: null,
   drawerVisible: false,
 
   loadUser: async () => {
@@ -71,6 +73,7 @@ export const useUserStore = create<UserState>((set, get) => ({
 
       set({
         userId: user.id,
+        createdAt: user.created_at ?? null,
         displayName: profile?.display_name ?? name,
         email: user.email ?? '',
         avatarUrl: profile?.avatar_url ?? null,

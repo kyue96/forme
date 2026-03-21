@@ -1,8 +1,10 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   Alert,
   Animated,
+  AppState,
+  Keyboard,
   Pressable,
   ScrollView,
   Share,
@@ -98,6 +100,18 @@ export default function SessionViewScreen() {
 
   // Plate calculator
   const [plateCalcTarget, setPlateCalcTarget] = useState<{ exIdx: number; setIdx: number } | null>(null);
+
+  // Scroll position preservation across background/foreground
+  const scrollViewRef = useRef<ScrollView>(null);
+  // Dismiss keyboard on background to prevent scroll position shift from layout reflow
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background' || nextState === 'inactive') {
+        Keyboard.dismiss();
+      }
+    });
+    return () => sub.remove();
+  }, []);
 
   // Edit buttons slide animation
   const editButtonsAnim = useRef(new Animated.Value(0)).current;
@@ -218,6 +232,9 @@ export default function SessionViewScreen() {
       </View>
 
       <ScrollView
+        ref={scrollViewRef}
+        onScroll={() => {}}
+        scrollEventThrottle={16}
         style={{ flex: 1 }}
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}

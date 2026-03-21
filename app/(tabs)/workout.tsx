@@ -3,6 +3,8 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
+  LayoutAnimation,
+  Modal,
   Pressable,
   ScrollView,
   Text,
@@ -11,7 +13,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
-import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
+import * as Haptics from 'expo-haptics';
 import { BadgesTab } from '@/components/BadgesTab';
 import { StreakRing } from '@/components/StreakRing';
 import { WeeklyVolumeCard } from '@/components/WeeklyVolumeCard';
@@ -23,9 +25,10 @@ import { useUserStore } from '@/lib/user-store';
 import { AppHeader } from '@/components/AppHeader';
 import { WeeklyCalendar, getWeekDates, dateKey, DAY_NAMES_FULL } from '@/components/WeeklyCalendar';
 import { MuscleGroupPills } from '@/components/MuscleGroupPills';
-import { LoggedExercise } from '@/lib/types';
+import { LoggedExercise, WorkoutDay, Exercise } from '@/lib/types';
 import { animateLayout } from '@/lib/utils';
-import { getExerciseCategories } from '@/lib/exercise-utils';
+import { getExerciseCategories, getExerciseCategory } from '@/lib/exercise-utils';
+import { EXERCISE_DATABASE, BODYWEIGHT_KEYWORDS } from '@/lib/exercise-data';
 
 interface WorkoutLog {
   id: string;
@@ -35,28 +38,29 @@ interface WorkoutLog {
   completed_at: string;
 }
 
-function formatDayDate(dayName: string): string {
-  // Calculate the target week's Monday (if Sat/Sun, use next week)
-  const now = new Date();
-  const dow = now.getDay(); // 0=Sun, 6=Sat
-  let mondayOffset: number;
-  if (dow === 0) {
-    // Sunday: show next week (tomorrow is Monday)
-    mondayOffset = 1;
-  } else if (dow === 6) {
-    // Saturday: show next week (Monday is +2 days)
-    mondayOffset = 2;
+function formatDayDate(dayName: string, refDate?: Date | null): string {
+  // If a reference date is provided, use its week; otherwise use current/next week
+  let monday: Date;
+  if (refDate) {
+    const ref = new Date(refDate);
+    const refDow = ref.getDay(); // 0=Sun
+    const monOffset = refDow === 0 ? -6 : 1 - refDow;
+    monday = new Date(ref);
+    monday.setDate(ref.getDate() + monOffset);
   } else {
-    // Mon-Fri: show current week
-    mondayOffset = 1 - dow;
+    const now = new Date();
+    const dow = now.getDay();
+    let mondayOffset: number;
+    if (dow === 0) mondayOffset = 1;
+    else if (dow === 6) mondayOffset = 2;
+    else mondayOffset = 1 - dow;
+    monday = new Date(now);
+    monday.setDate(now.getDate() + mondayOffset);
   }
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + mondayOffset);
 
   const dayIdx = DAY_NAMES_FULL.findIndex(d => d.toLowerCase() === dayName.toLowerCase());
   if (dayIdx < 0) return dayName;
 
-  // DAY_NAMES_FULL is Sun-Sat (0-6), convert to Mon-based offset (Mon=0)
   const monBasedIdx = dayIdx === 0 ? 6 : dayIdx - 1;
   const dayDate = new Date(monday);
   dayDate.setDate(monday.getDate() + monBasedIdx);
@@ -65,20 +69,23 @@ function formatDayDate(dayName: string): string {
 
 export default function WorkoutScreen() {
   const router = useRouter();
-  const { plan, loading } = usePlan();
+  const { plan, loading, refetch } = usePlan();
   const { theme, weightUnit } = useSettings();
   const avatarColor = useUserStore((s) => s.avatarColor);
   const focusCardColor = avatarColor || '#F59E0B';
   const { logId } = useLocalSearchParams<{ logId?: string }>();
 
-  const [activeTab, setActiveTab] = useState<'plan' | 'history' | 'badges' | 'stats'>('plan');
-  const [showPastDays, setShowPastDays] = useState(false);
+  const [activeTab, setActiveTab] = useState<'plan' | 'badges' | 'stats'>('stats');
+  const [showAllWorkouts, setShowAllWorkouts] = useState(false);
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
   const [logsLoading, setLogsLoading] = useState(false);
   // selectedLog state removed - now navigates to session-view
-  const [expandedDay, setExpandedDay] = useState<number | null>(null);
+  const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [todayLoggedDays, setTodayLoggedDays] = useState<Set<string>>(new Set());
   const [completedDays, setCompletedDays] = useState<Set<string>>(new Set());
+  const [swapTarget, setSwapTarget] = useState<{ dayIdx: number; exIdx: number } | null>(null);
+  const [editMode, setEditMode] = useState(false);
+  const [selectedWeekDate, setSelectedWeekDate] = useState<Date | null>(null);
 
   // Stats tab data
   const [streak, setStreak] = useState(0);
@@ -94,7 +101,6 @@ export default function WorkoutScreen() {
       const match = logs.find((l) => l.id === logId);
       if (match) {
         consumedLogId.current = logId;
-        setActiveTab('history');
         const matchPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === match.day_name.toLowerCase());
         router.push({
           pathname: '/workout/session-view',
@@ -111,53 +117,50 @@ export default function WorkoutScreen() {
     }
   }, [logId, logs]);
 
-  const loadHistory = useCallback(async () => {
+  const loadAllData = useCallback(async () => {
     setLogsLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      const { data } = await supabase
-        .from('workout_logs')
-        .select('id, day_name, exercises, duration_minutes, completed_at')
-        .eq('user_id', user.id)
-        .order('completed_at', { ascending: false })
-        .limit(30);
-      setLogs((data as WorkoutLog[]) ?? []);
 
-      // Check which days have been logged today
-      const todayStr = dateKey(new Date());
-      const todayLogs = (data ?? []).filter((l: any) => l.completed_at?.startsWith(todayStr));
-      setTodayLoggedDays(new Set(todayLogs.map((l: any) => l.day_name?.toLowerCase())));
-
-      // Build completedDays for the weekly calendar
+      // Date ranges
       const weekDates = getWeekDates();
       const weekStart = dateKey(weekDates[0]);
       const weekEnd = dateKey(weekDates[6]);
-      const weekLogs = (data ?? []).filter((l: any) => {
+      const w1Mon = new Date(weekDates[0]); w1Mon.setDate(w1Mon.getDate() - 14);
+
+      // Single query: all logs from 2 weeks ago onwards (covers history, stats, streak, volume)
+      const [{ data: recentLogs }, { data: streakLogs }] = await Promise.all([
+        supabase
+          .from('workout_logs')
+          .select('id, day_name, exercises, duration_minutes, completed_at')
+          .eq('user_id', user.id)
+          .gte('completed_at', dateKey(w1Mon))
+          .order('completed_at', { ascending: false }),
+        supabase
+          .from('workout_logs')
+          .select('completed_at')
+          .eq('user_id', user.id)
+          .gte('completed_at', (() => { const d = new Date(); d.setDate(d.getDate() - 60); return dateKey(d); })())
+          .order('completed_at', { ascending: false }),
+      ]);
+
+      const allLogs = (recentLogs ?? []) as WorkoutLog[];
+
+      // --- History ---
+      setLogs(allLogs.slice(0, 30));
+
+      const todayStr = dateKey(new Date());
+      const todayLogs = allLogs.filter((l) => l.completed_at?.startsWith(todayStr));
+      setTodayLoggedDays(new Set(todayLogs.map((l) => l.day_name?.toLowerCase())));
+
+      const weekLogs = allLogs.filter((l) => {
         const dk = l.completed_at?.split('T')[0];
-        return dk >= weekStart && dk <= weekEnd;
+        return dk && dk >= weekStart && dk <= weekEnd;
       });
-      setCompletedDays(new Set(weekLogs.map((l: any) => l.completed_at?.split('T')[0])));
-    } catch {} finally {
-      setLogsLoading(false);
-    }
-  }, []);
+      setCompletedDays(new Set(weekLogs.map((l) => l.completed_at?.split('T')[0])));
 
-  const loadStats = useCallback(async () => {
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      // Streak
-      const streakStart = new Date();
-      streakStart.setDate(streakStart.getDate() - 60);
-      const { data: streakLogs } = await supabase
-        .from('workout_logs')
-        .select('completed_at')
-        .eq('user_id', user.id)
-        .gte('completed_at', dateKey(streakStart))
-        .order('completed_at', { ascending: false });
-
+      // --- Streak ---
       const streakDatesList = (streakLogs ?? []).map((l: any) => l.completed_at?.split('T')[0]).filter(Boolean);
       const streakDatesSet = new Set(streakDatesList);
 
@@ -177,51 +180,46 @@ export default function WorkoutScreen() {
       }
       setMaxStreak(Math.max(best, run));
 
-      // Weekly volume (3 weeks)
-      const weekDates = getWeekDates();
-      const weekStart = dateKey(weekDates[0]);
-      const weekEnd = dateKey(weekDates[6]);
+      // --- Weekly volume (3 weeks) — computed from the single query ---
       const lastWeekMon = new Date(weekDates[0]); lastWeekMon.setDate(lastWeekMon.getDate() - 7);
       const lastWeekSun = new Date(weekDates[0]); lastWeekSun.setDate(lastWeekSun.getDate() - 1);
-      const w1Mon = new Date(weekDates[0]); w1Mon.setDate(w1Mon.getDate() - 14);
-      const w1Sun = new Date(weekDates[0]); w1Sun.setDate(w1Sun.getDate() - 8);
 
-      const { data: thisWeekLogs } = await supabase
-        .from('workout_logs').select('exercises, completed_at').eq('user_id', user.id)
-        .gte('completed_at', weekStart).lte('completed_at', weekEnd + 'T23:59:59');
-      const { data: lastWeekLogs } = await supabase
-        .from('workout_logs').select('exercises, completed_at').eq('user_id', user.id)
-        .gte('completed_at', dateKey(lastWeekMon)).lte('completed_at', dateKey(lastWeekSun) + 'T23:59:59');
-      const { data: w1Logs } = await supabase
-        .from('workout_logs').select('exercises, completed_at').eq('user_id', user.id)
-        .gte('completed_at', dateKey(w1Mon)).lte('completed_at', dateKey(w1Sun) + 'T23:59:59');
+      const filterByRange = (start: string, end: string) =>
+        allLogs.filter((l) => {
+          const dk = l.completed_at?.split('T')[0];
+          return dk && dk >= start && dk <= end;
+        });
 
-      const calcVolume = (logsList: any[]) =>
-        (logsList ?? []).reduce((total, log) => {
+      const thisWeekLogs = filterByRange(weekStart, weekEnd);
+      const lastWeekLogs = filterByRange(dateKey(lastWeekMon), dateKey(lastWeekSun));
+      const w1Logs = filterByRange(dateKey(w1Mon), dateKey(new Date(weekDates[0].getTime() - 8 * 86400000)));
+
+      const calcVolume = (logsList: WorkoutLog[]) =>
+        logsList.reduce((total, log) => {
           const exs = log.exercises as LoggedExercise[];
           return total + exs.reduce((s2, ex) =>
             s2 + ex.sets.filter(se => se.completed && se.weight != null).reduce((v, se) => v + (se.weight ?? 0) * se.reps, 0), 0);
         }, 0);
 
-      const calcLogVolume = (log: any) => {
+      const calcLogVolume = (log: WorkoutLog) => {
         const exs = log.exercises as LoggedExercise[];
         return exs.reduce((s2, ex) =>
           s2 + ex.sets.filter(se => se.completed && se.weight != null).reduce((v, se) => v + (se.weight ?? 0) * se.reps, 0), 0);
       };
 
-      const thisVol = calcVolume(thisWeekLogs ?? []);
-      const lastVol = calcVolume(lastWeekLogs ?? []);
+      const thisVol = calcVolume(thisWeekLogs);
+      const lastVol = calcVolume(lastWeekLogs);
       const conv = weightUnit === 'lbs' ? 2.205 : 1;
       setWeekVolume(Math.round(thisVol * conv));
       setVolDelta(lastVol > 0 ? ((thisVol - lastVol) / lastVol) * 100 : null);
 
-      const buildDailyVol = (logsList: any[], mondayDate: Date) => {
+      const buildDailyVol = (logsList: WorkoutLog[], mondayDate: Date) => {
         const days = Array.from({ length: 7 }, (_, i) => {
           const dd = new Date(mondayDate);
           dd.setDate(dd.getDate() + i);
           return { day: dateKey(dd), volume: 0 };
         });
-        (logsList ?? []).forEach((log: any) => {
+        logsList.forEach((log) => {
           const logDate = log.completed_at?.split('T')[0];
           const entry = days.find((dd) => dd.day === logDate);
           if (entry) entry.volume += Math.round(calcLogVolume(log) * conv);
@@ -230,14 +228,16 @@ export default function WorkoutScreen() {
       };
 
       setWeeklyVolData([
-        buildDailyVol(w1Logs ?? [], w1Mon),
-        buildDailyVol(lastWeekLogs ?? [], lastWeekMon),
-        buildDailyVol(thisWeekLogs ?? [], weekDates[0]),
+        buildDailyVol(w1Logs, w1Mon),
+        buildDailyVol(lastWeekLogs, lastWeekMon),
+        buildDailyVol(thisWeekLogs, weekDates[0]),
       ]);
-    } catch {}
+    } catch {} finally {
+      setLogsLoading(false);
+    }
   }, [weightUnit]);
 
-  useFocusEffect(useCallback(() => { loadHistory(); loadStats(); }, [loadHistory, loadStats]));
+  useFocusEffect(useCallback(() => { loadAllData(); }, [loadAllData]));
 
   const removeLog = (logId: string) => {
     Alert.alert('Remove workout', 'Delete this workout log?', [
@@ -247,7 +247,7 @@ export default function WorkoutScreen() {
         style: 'destructive',
         onPress: async () => {
           await supabase.from('workout_logs').delete().eq('id', logId);
-          loadHistory();
+          loadAllData();
         },
       },
     ]);
@@ -281,15 +281,97 @@ export default function WorkoutScreen() {
 
   const handleCalendarDayPress = (date: Date, dayIndex: number) => {
     if (!plan) return;
-    // Find the plan day matching this calendar day
     const dayName = DAY_NAMES_FULL[dayIndex].toLowerCase();
-    const planIdx = plan.weeklyPlan.findIndex((d) => d.dayName.toLowerCase() === dayName);
-    if (planIdx >= 0) {
+    const planDay = plan.weeklyPlan.find((d) => d.dayName.toLowerCase() === dayName);
+    // Store the selected week so card dates reflect the viewed week
+    setSelectedWeekDate(date);
+    if (planDay) {
       animateLayout();
       setActiveTab('plan');
-      setExpandedDay(expandedDay === planIdx ? null : planIdx);
+      setExpandedDay(expandedDay === planDay.dayName ? null : planDay.dayName);
     }
   };
+
+  const reorderDays = useCallback(async (reorderedDays: WorkoutDay[]) => {
+    if (!plan) return;
+    // Collect the original dayName slots in order
+    const originalDayNames = plan.weeklyPlan.map((d) => d.dayName);
+    // Assign original dayName slots to the reordered focuses
+    const updatedPlan = reorderedDays.map((day, i) => ({
+      ...day,
+      dayName: originalDayNames[i],
+    }));
+    const newPlan = { ...plan, weeklyPlan: updatedPlan };
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      await supabase
+        .from('workout_plans')
+        .update({ plan: newPlan })
+        .eq('id', plan.id)
+        .eq('user_id', user.id);
+
+      refetch();
+    } catch (err) {
+      console.error('Failed to reorder days:', err);
+      Alert.alert('Error', 'Failed to reorder days');
+    }
+  }, [plan, refetch]);
+
+  const swapAdjacentDays = useCallback((fromIdx: number, direction: 'up' | 'down') => {
+    if (!plan) return;
+    const toIdx = direction === 'up' ? fromIdx - 1 : fromIdx + 1;
+    if (toIdx < 0 || toIdx >= plan.weeklyPlan.length) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    const reordered = [...plan.weeklyPlan];
+    [reordered[fromIdx], reordered[toIdx]] = [reordered[toIdx], reordered[fromIdx]];
+    reorderDays(reordered);
+  }, [plan, reorderDays]);
+
+  const swapExercise = useCallback(async (newExerciseName: string) => {
+    if (!plan || !swapTarget) return;
+
+    const dayIdx = swapTarget.dayIdx;
+    const exIdx = swapTarget.exIdx;
+
+    const newPlan = {
+      ...plan,
+      weeklyPlan: plan.weeklyPlan.map((day, i) => {
+        if (i === dayIdx) {
+          return {
+            ...day,
+            exercises: day.exercises.map((ex, j) => {
+              if (j === exIdx) {
+                return { ...ex, name: newExerciseName };
+              }
+              return ex;
+            }),
+          };
+        }
+        return day;
+      }),
+    };
+
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+
+      await supabase
+        .from('workout_plans')
+        .update({ plan: newPlan })
+        .eq('id', plan.id)
+        .eq('user_id', user.id);
+
+      refetch();
+      setSwapTarget(null);
+      animateLayout();
+    } catch (err) {
+      console.error('Failed to swap exercise:', err);
+      Alert.alert('Error', 'Failed to swap exercise');
+    }
+  }, [plan, swapTarget, refetch]);
 
   const swipeDelete = (logId: string) => {
     Alert.alert('Delete workout?', 'This cannot be undone.', [
@@ -299,7 +381,7 @@ export default function WorkoutScreen() {
         style: 'destructive',
         onPress: async () => {
           await supabase.from('workout_logs').delete().eq('id', logId);
-          loadHistory();
+          loadAllData();
         },
       },
     ]);
@@ -322,11 +404,11 @@ export default function WorkoutScreen() {
     </Pressable>
   );
 
-  const renderPlanCard = (day: typeof plan.weeklyPlan[0], i: number, dayLogged: boolean, isNext: boolean, isMissed: boolean) => {
-    const isOpen = expandedDay === i;
+  const renderPlanCard = (day: WorkoutDay, i: number, dayLogged: boolean, isNext: boolean, isMissed: boolean, totalDays: number) => {
+    const isOpen = expandedDay === day.dayName;
     return (
       <View
-        key={i}
+        key={day.dayName}
         style={{
           marginBottom: 10,
           borderRadius: 16,
@@ -334,58 +416,93 @@ export default function WorkoutScreen() {
           borderWidth: dayLogged ? 1 : 0,
           borderColor: dayLogged ? '#22C55E' : 'transparent',
           overflow: 'hidden',
-          opacity: 1,
         }}
       >
-        <Pressable
-          onPress={() => {
-            animateLayout();
-            setExpandedDay(isOpen ? null : i);
-          }}
-          style={{
-            flexDirection: 'row',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            paddingHorizontal: 16,
-            paddingVertical: 14,
-          }}
-        >
-          <View style={{ flex: 1 }}>
-            <Text allowFontScaling style={{ fontSize: 11, color: isNext ? '#FFFFFF99' : theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
-              {formatDayDate(day.dayName)}
-            </Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: isNext ? '#FFFFFF' : theme.text }}>
-                {day.focus}
-              </Text>
-              {!isNext && <MuscleGroupPills categories={getExerciseCategories(day.exercises)} size="normal" />}
+        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+          {/* Edit mode: reorder arrows */}
+          {editMode && (
+            <View style={{ paddingLeft: 12, paddingRight: 4, justifyContent: 'center', gap: 2 }}>
+              <Pressable
+                onPress={() => swapAdjacentDays(i, 'up')}
+                hitSlop={4}
+                style={{ opacity: i === 0 ? 0.25 : 1 }}
+                disabled={i === 0}
+              >
+                <Ionicons name="chevron-up" size={18} color={isNext ? '#FFFFFFCC' : theme.chrome} />
+              </Pressable>
+              <Pressable
+                onPress={() => swapAdjacentDays(i, 'down')}
+                hitSlop={4}
+                style={{ opacity: i === totalDays - 1 ? 0.25 : 1 }}
+                disabled={i === totalDays - 1}
+              >
+                <Ionicons name="chevron-down" size={18} color={isNext ? '#FFFFFFCC' : theme.chrome} />
+              </Pressable>
             </View>
-            <Text allowFontScaling style={{ fontSize: 12, color: isNext ? '#FFFFFFCC' : theme.textSecondary, marginTop: 2 }}>
-              {day.exercises.length} exercises
-            </Text>
-          </View>
-          <Ionicons
-            name={isOpen ? 'chevron-up' : 'chevron-down'}
-            size={18}
-            color={isNext ? '#FFFFFFCC' : theme.chrome}
-          />
-        </Pressable>
+          )}
 
-        {isOpen && (
+          <Pressable
+            onPress={() => {
+              if (editMode) return;
+              animateLayout();
+              setExpandedDay(isOpen ? null : day.dayName);
+            }}
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              paddingLeft: editMode ? 8 : 16,
+              paddingRight: 16,
+              paddingVertical: 14,
+            }}
+          >
+            <View style={{ flex: 1 }}>
+              <Text allowFontScaling style={{ fontSize: 11, color: isNext ? '#FFFFFF99' : theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
+                {formatDayDate(day.dayName, selectedWeekDate)}
+              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: isNext ? '#FFFFFF' : theme.text }}>
+                  {day.focus}
+                </Text>
+              </View>
+              <Text allowFontScaling style={{ fontSize: 12, color: isNext ? '#FFFFFFCC' : theme.textSecondary, marginTop: 2 }}>
+                {day.exercises.length} exercises
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <MuscleGroupPills categories={getExerciseCategories(day.exercises)} size="small" />
+              {!editMode && (
+                <Ionicons
+                  name={isOpen ? 'chevron-up' : 'chevron-down'}
+                  size={18}
+                  color={isNext ? '#FFFFFFCC' : theme.chrome}
+                />
+              )}
+            </View>
+          </Pressable>
+        </View>
+
+        {isOpen && !editMode && (
           <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
-            <View style={{ height: 1, backgroundColor: theme.border, marginBottom: 12 }} />
-            {day.exercises.map((ex, j) => (
-              <View key={j} style={{ flexDirection: 'row', alignItems: 'flex-start', marginBottom: 10 }}>
-                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: theme.chrome, marginTop: 6, marginRight: 10 }} />
+            <View style={{ height: 1, backgroundColor: isNext ? '#FFFFFF30' : theme.border, marginBottom: 12 }} />
+            {day.exercises.map((ex: Exercise, j: number) => (
+              <Pressable
+                key={j}
+                onPress={() => setSwapTarget({ dayIdx: i, exIdx: j })}
+                style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}
+              >
+                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isNext ? '#FFFFFF80' : theme.chrome, marginRight: 10 }} />
                 <View style={{ flex: 1 }}>
-                  <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>
+                  <Text allowFontScaling style={{ fontSize: 13, fontWeight: '600', color: isNext ? '#FFFFFF' : theme.text }}>
                     {ex.name}
                   </Text>
-                  <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 1 }}>
+                  <Text allowFontScaling style={{ fontSize: 11, color: isNext ? '#FFFFFFAA' : theme.textSecondary, marginTop: 1 }}>
                     {ex.sets} sets · {ex.reps} reps
                   </Text>
                 </View>
-              </View>
+                <Ionicons name="repeat-outline" size={16} color={isNext ? '#FFFFFF80' : theme.chrome} />
+              </Pressable>
             ))}
 
             {dayLogged ? (
@@ -423,13 +540,13 @@ export default function WorkoutScreen() {
                 onPress={() => router.push(`/workout/${i}`)}
                 style={{
                   marginTop: 8,
-                  backgroundColor: theme.text,
+                  backgroundColor: isNext ? '#FFFFFF' : theme.text,
                   paddingVertical: 12,
                   borderRadius: 12,
                   alignItems: 'center',
                 }}
               >
-                <Text allowFontScaling style={{ color: theme.background, fontWeight: '700', fontSize: 13 }}>
+                <Text allowFontScaling style={{ color: isNext ? focusCardColor : theme.background, fontWeight: '700', fontSize: 13 }}>
                   Start workout
                 </Text>
               </Pressable>
@@ -441,7 +558,6 @@ export default function WorkoutScreen() {
   };
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
       <AppHeader />
 
@@ -451,162 +567,52 @@ export default function WorkoutScreen() {
           completedDays={completedDays}
           onDayPress={handleCalendarDayPress}
           planDayNames={planDayNames}
+          onWeekChange={(date) => setSelectedWeekDate(date)}
         />
       )}
 
+      {/* Header */}
+      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 8, paddingBottom: 12 }}>
+        <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>
+          {activeTab === 'plan' ? 'Plan' : activeTab === 'stats' ? 'Stats' : 'Achievements'}
+        </Text>
+        <View style={{ flexDirection: 'row', gap: 16 }}>
+          <Pressable
+            onPress={() => {
+              animateLayout();
+              setActiveTab('stats');
+            }}
+            hitSlop={8}
+          >
+            <Ionicons name="analytics-outline" size={22} color={activeTab === 'stats' ? focusCardColor : theme.chrome} />
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              animateLayout();
+              setActiveTab('plan');
+            }}
+            hitSlop={8}
+          >
+            <Ionicons name="barbell" size={22} color={activeTab === 'plan' ? focusCardColor : theme.chrome} />
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              animateLayout();
+              setActiveTab('badges');
+            }}
+            hitSlop={8}
+          >
+            <Ionicons name="trophy-outline" size={22} color={activeTab === 'badges' ? focusCardColor : theme.chrome} />
+          </Pressable>
+        </View>
+      </View>
+
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 32 }}
+        contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Header */}
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-          <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>
-            {activeTab === 'plan' ? 'Plan' : activeTab === 'history' ? 'History' : activeTab === 'stats' ? 'Stats' : 'Achievements'}
-          </Text>
-          <View style={{ flexDirection: 'row', gap: 16 }}>
-            <Pressable
-              onPress={() => {
-                animateLayout();
-                setActiveTab('plan');
-              }}
-              hitSlop={8}
-            >
-              <Ionicons name="barbell" size={22} color={activeTab === 'plan' ? focusCardColor : theme.chrome} />
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                animateLayout();
-                setActiveTab('history');
-              }}
-              hitSlop={8}
-            >
-              <Ionicons name="calendar-outline" size={22} color={activeTab === 'history' ? focusCardColor : theme.chrome} />
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                animateLayout();
-                setActiveTab('stats');
-              }}
-              hitSlop={8}
-            >
-              <Ionicons name="analytics-outline" size={22} color={activeTab === 'stats' ? focusCardColor : theme.chrome} />
-            </Pressable>
-            <Pressable
-              onPress={() => {
-                animateLayout();
-                setActiveTab('badges');
-              }}
-              hitSlop={8}
-            >
-              <Ionicons name="trophy-outline" size={22} color={activeTab === 'badges' ? focusCardColor : theme.chrome} />
-            </Pressable>
-          </View>
-        </View>
-
-        {activeTab === 'history' ? (
-          /* Past workout history */
-          <View>
-            {logsLoading ? (
-              <ActivityIndicator color={theme.chrome} />
-            ) : logs.length === 0 ? (
-              <View style={{ alignItems: 'center', paddingVertical: 32 }}>
-                <Ionicons name="barbell-outline" size={32} color={theme.border} />
-                <Text allowFontScaling style={{ color: theme.textSecondary, marginTop: 8 }}>
-                  No workouts logged yet.
-                </Text>
-              </View>
-            ) : (
-              (() => {
-                // Group logs by date
-                const dateGroups: { [key: string]: typeof logs } = {};
-                logs.forEach((log) => {
-                  const dateStr = log.completed_at.split('T')[0];
-                  if (!dateGroups[dateStr]) {
-                    dateGroups[dateStr] = [];
-                  }
-                  dateGroups[dateStr].push(log);
-                });
-                const sortedDates = Object.keys(dateGroups).sort();
-
-                return sortedDates.map((dateStr) => {
-                  const dateObj = new Date(dateStr);
-                  const dayAbbr = dateObj.toLocaleDateString('en-US', { weekday: 'short' }).toUpperCase();
-                  const monthDay = dateObj.toLocaleDateString('en-US', { month: 'long', day: 'numeric' });
-
-                  return (
-                    <View key={dateStr} style={{ flexDirection: 'row', marginBottom: 16 }}>
-                      {/* Left column with date */}
-                      <View style={{ width: 60, paddingRight: 12, alignItems: 'center', paddingTop: 4, position: 'relative' }}>
-                        <Text allowFontScaling style={{ fontSize: 13, fontWeight: '700', color: theme.textSecondary }}>
-                          {dayAbbr}
-                        </Text>
-                        <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>
-                          {monthDay}
-                        </Text>
-                        {/* Vertical connector line */}
-                        <View style={{ position: 'absolute', left: 29, top: 40, bottom: -16, width: 1, backgroundColor: theme.border }} />
-                      </View>
-
-                      {/* Right column with cards */}
-                      <View style={{ flex: 1 }}>
-                        {dateGroups[dateStr].map((log) => {
-                          const totalSets = log.exercises.reduce((s, ex) => s + ex.sets.filter((se) => se.completed).length, 0);
-                          return (
-                            <Swipeable
-                              key={log.id}
-                              renderRightActions={renderHistoryRightActions(log.id)}
-                              overshootRight={false}
-                              friction={2}
-                            >
-                              <Pressable
-                                onPress={() => {
-                                  const logPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
-                                  router.push({
-                                    pathname: '/workout/session-view',
-                                    params: {
-                                      exercises: JSON.stringify(log.exercises),
-                                      dayName: log.day_name,
-                                      focus: logPlanDay?.focus ?? log.day_name,
-                                      durationMinutes: String(log.duration_minutes ?? 0),
-                                      completedAt: log.completed_at,
-                                      logId: log.id,
-                                    },
-                                  });
-                                }}
-                                style={{
-                                  backgroundColor: theme.surface,
-                                  borderRadius: 16,
-                                  padding: 16,
-                                  marginBottom: 10,
-                                  borderWidth: 1,
-                                  borderColor: theme.border,
-                                }}
-                              >
-                                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                                  <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>
-                                    {plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase())?.focus ?? log.day_name}
-                                  </Text>
-                                  <Ionicons name="chevron-forward" size={18} color={theme.chrome} />
-                                </View>
-                                <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary }}>
-                                  {totalSets} sets · {log.duration_minutes} min
-                                </Text>
-                                <View style={{ marginTop: 4 }}>
-                                  <MuscleGroupPills categories={getExerciseCategories(log.exercises)} size="small" />
-                                </View>
-                              </Pressable>
-                            </Swipeable>
-                          );
-                        })}
-                      </View>
-                    </View>
-                  );
-                });
-              })()
-            )}
-          </View>
-        ) : activeTab === 'stats' ? (
+        {activeTab === 'stats' ? (
           <View style={{ gap: 12 }}>
             <StreakRing streak={streak} maxStreak={maxStreak} size="large" color={focusCardColor} />
             {weeklyVolData[2].length > 0 && (
@@ -617,14 +623,85 @@ export default function WorkoutScreen() {
                 accentColor={focusCardColor}
               />
             )}
-            <View style={{ alignItems: 'center', paddingVertical: 24 }}>
-              <Text style={{ fontSize: 13, color: theme.textSecondary }}>More insights coming soon</Text>
+
+            {/* Recent Workouts — preview 2, expand to show all */}
+            <View style={{ marginTop: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                <Text allowFontScaling style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>
+                  Recent Workouts
+                </Text>
+                {logs.length > 2 && (
+                  <Pressable onPress={() => { animateLayout(); setShowAllWorkouts(!showAllWorkouts); }} hitSlop={8}>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: focusCardColor }}>
+                      {showAllWorkouts ? 'Show less' : 'View all'}
+                    </Text>
+                  </Pressable>
+                )}
+              </View>
+              {logsLoading ? (
+                <ActivityIndicator color={theme.chrome} />
+              ) : logs.length === 0 ? (
+                <View style={{ alignItems: 'center', paddingVertical: 24 }}>
+                  <Ionicons name="barbell-outline" size={28} color={theme.border} />
+                  <Text allowFontScaling style={{ color: theme.textSecondary, marginTop: 8, fontSize: 13 }}>
+                    No workouts logged yet.
+                  </Text>
+                </View>
+              ) : (
+                (showAllWorkouts ? logs : logs.slice(0, 2)).map((log) => {
+                  const totalSets = log.exercises.reduce((s, ex) => s + ex.sets.filter((se) => se.completed).length, 0);
+                  const dateObj = new Date(log.completed_at);
+                  const dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                  return (
+                    <Pressable
+                      key={log.id}
+                      onPress={() => {
+                        const logPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
+                        router.push({
+                          pathname: '/workout/session-view',
+                          params: {
+                            exercises: JSON.stringify(log.exercises),
+                            dayName: log.day_name,
+                            focus: logPlanDay?.focus ?? log.day_name,
+                            durationMinutes: String(log.duration_minutes ?? 0),
+                            completedAt: log.completed_at,
+                            logId: log.id,
+                          },
+                        });
+                      }}
+                      style={{
+                        backgroundColor: theme.surface,
+                        borderRadius: 14,
+                        padding: 14,
+                        marginBottom: 8,
+                        borderWidth: 1,
+                        borderColor: theme.border,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                          <Text allowFontScaling style={{ fontSize: 14, fontWeight: '700', color: theme.text }} numberOfLines={1}>
+                            {plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase())?.focus ?? log.day_name}
+                          </Text>
+                          <MuscleGroupPills categories={getExerciseCategories(log.exercises)} size="small" />
+                        </View>
+                        <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 3 }}>
+                          {dateLabel} · {totalSets} sets · {log.duration_minutes}m
+                        </Text>
+                      </View>
+                      <Ionicons name="chevron-forward" size={16} color={theme.chrome} />
+                    </Pressable>
+                  );
+                })
+              )}
             </View>
           </View>
         ) : activeTab === 'badges' ? (
           <BadgesTab />
         ) : (
-          /* Weekly plan - accordion */
+          /* Plan tab */
           <View>
             {!plan ? (
               <View style={{ marginTop: 32, alignItems: 'center' }}>
@@ -640,69 +717,187 @@ export default function WorkoutScreen() {
               </View>
             ) : (
               <>
-              <Pressable
-                onPress={() => router.push('/workout/quick')}
-                style={{ marginBottom: 12, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
-              >
-                <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  Create Workout
-                </Text>
-              </Pressable>
-              {(() => {
-                // Split plan into past and upcoming
-                const pastDays: { day: typeof plan.weeklyPlan[0]; i: number }[] = [];
-                const upcomingDays: { day: typeof plan.weeklyPlan[0]; i: number }[] = [];
-                plan.weeklyPlan.forEach((day, i) => {
+                {/* Edit / Done toggle */}
+                <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 12 }}>
+                  <Pressable
+                    onPress={() => {
+                      animateLayout();
+                      setEditMode(!editMode);
+                      if (editMode) setExpandedDay(null);
+                    }}
+                    hitSlop={8}
+                  >
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: focusCardColor }}>
+                      {editMode ? 'Done' : 'Edit'}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                {/* Weekly schedule bar */}
+                <View style={{ flexDirection: 'row', gap: 4, marginBottom: 16 }}>
+                  {DAY_NAMES_FULL.map((dayName, idx) => {
+                    const isWorkoutDay = plan.weeklyPlan.some(d => d.dayName.toLowerCase() === dayName.toLowerCase());
+                    const isLogged = todayLoggedDays.has(dayName.toLowerCase());
+                    const dayLabel = dayName.substring(0, 3);
+                    return (
+                      <View key={dayName} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
+                        <Text style={{ fontSize: 9, fontWeight: '500', color: theme.textSecondary }}>{dayLabel}</Text>
+                        <View style={{
+                          height: 28,
+                          borderRadius: 8,
+                          backgroundColor: isWorkoutDay ? focusCardColor : theme.surface,
+                          width: '100%',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          borderWidth: isWorkoutDay ? 0 : 1,
+                          borderColor: theme.border,
+                        }}>
+                          {isLogged && <Ionicons name="checkmark" size={14} color={isWorkoutDay ? '#FFFFFF' : '#22C55E'} />}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+
+                <Pressable
+                  onPress={() => router.push('/workout/quick')}
+                  style={{ marginBottom: 12, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
+                >
+                  <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
+                    Create Workout
+                  </Text>
+                </Pressable>
+
+                {/* Day cards */}
+                {plan.weeklyPlan.map((day, i) => {
+                  const dayLogged = todayLoggedDays.has(day.dayName.toLowerCase());
+                  const isNext = i === nextPlanIdx && !dayLogged;
                   const dIdx = DAY_NAMES_FULL.findIndex(d => d.toLowerCase() === day.dayName.toLowerCase());
-                  const logged = todayLoggedDays.has(day.dayName.toLowerCase());
-                  if (dIdx >= 0 && dIdx < jsDow && !logged) {
-                    pastDays.push({ day, i });
-                  } else {
-                    upcomingDays.push({ day, i });
-                  }
-                });
+                  // Only mark as missed Mon-Fri when the workout day is earlier this week
+                  // On Sat/Sun we show next week's dates, so nothing is "missed"
+                  const isMissed = jsDow >= 1 && jsDow <= 5 && dIdx >= 0 && dIdx < jsDow && !dayLogged;
+                  return renderPlanCard(day, i, dayLogged, isNext, isMissed, plan.weeklyPlan.length);
+                })}
 
-                return (
-                  <>
-                    {/* Past days toggle */}
-                    {pastDays.length > 0 && (
-                      <Pressable
-                        onPress={() => { animateLayout(); setShowPastDays(!showPastDays); }}
-                        style={{
-                          flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-                          paddingVertical: 10, marginBottom: 8, borderRadius: 12,
-                          backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border,
-                        }}
-                      >
-                        <Ionicons name={showPastDays ? 'chevron-up' : 'chevron-down'} size={14} color={theme.textSecondary} />
-                        <Text style={{ fontSize: 12, fontWeight: '600', color: theme.textSecondary }}>
-                          {showPastDays ? 'Hide' : 'Show'} previous days ({pastDays.length})
-                        </Text>
-                      </Pressable>
-                    )}
-                    {showPastDays && pastDays.map(({ day, i }) => {
-                      const dayLogged = false; // past unlogged by definition
-                      const isMissed = true;
-                      return renderPlanCard(day, i, dayLogged, false, isMissed);
-                    })}
-                    {upcomingDays.map(({ day, i }) => {
-                      const dayLogged = todayLoggedDays.has(day.dayName.toLowerCase());
-                      const isNext = i === nextPlanIdx && !dayLogged;
-                      return renderPlanCard(day, i, dayLogged, isNext, false);
-                    })}
-                  </>
-                );
-              })()}
-
-
+                <Pressable
+                  onPress={() => router.push('/quiz/1')}
+                  style={{ marginTop: 16, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
+                >
+                  <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
+                    Regenerate Plan
+                  </Text>
+                </Pressable>
               </>
             )}
           </View>
         )}
       </ScrollView>
 
+      {/* Exercise Swap Modal */}
+      {swapTarget && plan && (
+        <Modal
+          transparent
+          visible={!!swapTarget}
+          animationType="slide"
+          onRequestClose={() => setSwapTarget(null)}
+        >
+          <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' }}>
+            <View style={{ backgroundColor: theme.background, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: 24, paddingTop: 20, paddingBottom: 32, maxHeight: '80%' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text }}>Swap Exercise</Text>
+                <Pressable onPress={() => setSwapTarget(null)} hitSlop={8}>
+                  <Ionicons name="close" size={24} color={theme.chrome} />
+                </Pressable>
+              </View>
+
+              {(() => {
+                const currentExercise = plan.weeklyPlan[swapTarget.dayIdx].exercises[swapTarget.exIdx];
+                const currentCategory = getExerciseCategory(currentExercise.name);
+                const categoryPill = currentCategory || 'Unknown';
+
+                return (
+                  <>
+                    <View style={{ marginBottom: 20, paddingBottom: 16, borderBottomWidth: 1, borderBottomColor: theme.border }}>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 }}>Current Exercise</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '600', color: theme.text, flex: 1 }}>
+                          {currentExercise.name}
+                        </Text>
+                        <View style={{ backgroundColor: focusCardColor + '20', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8 }}>
+                          <Text style={{ fontSize: 10, fontWeight: '600', color: focusCardColor, textTransform: 'uppercase' }}>{categoryPill}</Text>
+                        </View>
+                      </View>
+                    </View>
+
+                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 12, textTransform: 'uppercase', letterSpacing: 0.5 }}>Swap with</Text>
+
+                    <ScrollView style={{ maxHeight: 350 }} showsVerticalScrollIndicator={false}>
+                      {(() => {
+                        const alternatives = currentCategory
+                          ? EXERCISE_DATABASE.filter(
+                              (ex) => ex.category === currentCategory && ex.name.toLowerCase() !== currentExercise.name.toLowerCase()
+                            )
+                          : [];
+
+                        if (alternatives.length === 0) {
+                          return (
+                            <Text style={{ color: theme.textSecondary, fontSize: 13, textAlign: 'center', paddingVertical: 16 }}>
+                              No alternatives found for this category.
+                            </Text>
+                          );
+                        }
+
+                        // Group by inferred equipment type
+                        const inferEquipment = (name: string): string => {
+                          const lower = name.toLowerCase();
+                          if (lower.includes('barbell') || lower.includes('bench press') || lower.includes('deadlift') || lower.includes('squat rack')) return 'Barbell';
+                          if (lower.includes('dumbbell') || lower.includes('db ')) return 'Dumbbell';
+                          if (lower.includes('cable') || lower.includes('pulldown') || lower.includes('pushdown') || lower.includes('face pull')) return 'Cable';
+                          if (lower.includes('machine') || lower.includes('smith') || lower.includes('leg press') || lower.includes('hack squat') || lower.includes('pec deck') || lower.includes('lat raise machine')) return 'Machine';
+                          if (lower.includes('kettlebell') || lower.includes('kb ')) return 'Kettlebell';
+                          if (BODYWEIGHT_KEYWORDS.some(kw => lower.includes(kw))) return 'Bodyweight';
+                          return 'Other';
+                        };
+
+                        const grouped: Record<string, typeof alternatives> = {};
+                        alternatives.forEach((alt) => {
+                          const equip = inferEquipment(alt.name);
+                          if (!grouped[equip]) grouped[equip] = [];
+                          grouped[equip].push(alt);
+                        });
+
+                        const equipOrder = ['Barbell', 'Dumbbell', 'Cable', 'Machine', 'Kettlebell', 'Bodyweight', 'Other'];
+                        return equipOrder
+                          .filter((eq) => grouped[eq]?.length)
+                          .map((equip) => (
+                            <View key={equip} style={{ marginBottom: 12 }}>
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 }}>
+                                {equip}
+                              </Text>
+                              {grouped[equip].map((alt, idx) => (
+                                <Pressable
+                                  key={idx}
+                                  onPress={() => swapExercise(alt.name)}
+                                  style={{ paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, marginBottom: 2, backgroundColor: theme.surface }}
+                                >
+                                  <Text style={{ fontSize: 14, color: theme.text, fontWeight: '500' }}>
+                                    {alt.name}
+                                  </Text>
+                                </Pressable>
+                              ))}
+                            </View>
+                          ));
+                      })()}
+                    </ScrollView>
+                  </>
+                );
+              })()}
+            </View>
+          </View>
+        </Modal>
+      )}
+
       {/* Log detail modal removed - now navigates to /workout/session-view */}
     </SafeAreaView>
-    </GestureHandlerRootView>
   );
 }

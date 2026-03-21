@@ -25,9 +25,12 @@ const BARBELL_KEYWORDS = [
   'barbell',
 ];
 
+const DUMBBELL_KEYWORDS = ['dumbbell', 'db '];
+
 /** Returns true if the exercise name suggests a barbell movement. */
 export function isBarbell(name: string): boolean {
   const lower = name.toLowerCase();
+  if (DUMBBELL_KEYWORDS.some((kw) => lower.includes(kw))) return false;
   return BARBELL_KEYWORDS.some((kw) => lower.includes(kw));
 }
 

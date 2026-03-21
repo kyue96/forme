@@ -46,6 +46,7 @@ interface SetRowProps {
   isSuperset?: boolean;
   isDropSet?: boolean;
   showLabels?: boolean;
+  equipment?: string | null;
 }
 
 export function SetRow({
@@ -65,6 +66,7 @@ export function SetRow({
   isSuperset,
   isDropSet,
   showLabels = true,
+  equipment,
 }: SetRowProps) {
   const { theme, weightUnit } = useSettings();
   const prevCompleted = useRef(data.completed);
@@ -72,12 +74,24 @@ export function SetRow({
   const userEdited = useRef(false);
   const weightStep = weightUnit === 'lbs' ? 5 : 2.5;
   const focusedField = useRef<'weight' | 'reps' | null>(null);
-  const isBarbellExercise = !isBodyweight && exerciseName !== '' && isBarbell(exerciseName);
+  const isBarbellExercise = !isBodyweight && exerciseName !== '' && (
+    equipment ? equipment === 'Barbell' : isBarbell(exerciseName)
+  );
   const showIncrement = setNumber >= 2 && !isBodyweight && !data.completed && !isBarbellExercise;
   const [showPlateCalc, setShowPlateCalc] = useState(false);
+  const localRepsRef = useRef<TextInput>(null);
   const showCalcIcon = isBarbellExercise && !data.completed;
+  // Local text state for weight input — preserves trailing dots/partial decimals while typing
+  const [weightText, setWeightText] = useState(data.weight != null ? String(data.weight) : '');
+  const weightTextInternal = useRef(false); // true when change came from local typing
   const swipeRef = useRef<Swipeable>(null);
   const repsTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Sync weightText from external data changes (e.g. plate calc, increment buttons)
+  useEffect(() => {
+    if (weightTextInternal.current) { weightTextInternal.current = false; return; }
+    setWeightText(data.weight != null ? String(data.weight) : '');
+  }, [data.weight]);
 
   // Auto-check: when both weight and reps have values, auto-complete
   // For the last set, delay 2s so user can blur to complete immediately
@@ -127,9 +141,12 @@ export function SetRow({
   };
 
   // After reps typing stops for 2s, auto-focus next set's reps
+  // Only fire when user actually edited, not on mount/re-mount of completed sets
+  const repsUserEdited = useRef(false);
   useEffect(() => {
     if (repsTimerRef.current) clearTimeout(repsTimerRef.current);
-    if (data.reps > 0 && onRepsSubmit) {
+    if (data.reps > 0 && onRepsSubmit && repsUserEdited.current) {
+      repsUserEdited.current = false;
       repsTimerRef.current = setTimeout(() => {
         onRepsSubmit();
       }, 2000);
@@ -148,7 +165,9 @@ export function SetRow({
 
   const handleWeightChange = (v: string) => {
     userEdited.current = true;
-    // Allow decimals: keep trailing dot and partial decimals
+    weightTextInternal.current = true;
+    setWeightText(v);
+    // Allow decimals: keep trailing dot and partial decimals in local text state
     if (v === '' || v === '.') {
       onChange({ ...data, weight: v === '' ? null : 0, suggestedWeight: undefined });
       return;
@@ -161,15 +180,19 @@ export function SetRow({
 
   const handleRepsChange = (v: string) => {
     userEdited.current = true;
+    repsUserEdited.current = true;
     const reps = parseInt(v) || 0;
     onChange({ ...data, reps });
   };
 
+  // Only uncheck on direct user tap, not programmatic focus or re-mount
+  const userTapped = useRef(false);
   const handleFocusUncheck = () => {
-    if (data.completed) {
+    if (data.completed && userTapped.current) {
       prevCompleted.current = false;
       onChange({ ...data, completed: false });
     }
+    userTapped.current = false;
   };
 
   const renderRightActions = () => {
@@ -240,9 +263,10 @@ export function SetRow({
                   placeholder={showLabels ? (weightUnit === 'lbs' ? 'lb' : 'kg') : ''}
                   placeholderTextColor={theme.textSecondary}
                   underlineColorAndroid="transparent"
-                  value={data.weight != null ? String(data.weight) : ''}
+                  value={weightText}
                   onChangeText={handleWeightChange}
                   onSubmitEditing={onWeightSubmit}
+                  onPressIn={() => { userTapped.current = true; }}
                   onFocus={() => { focusedField.current = 'weight'; activeNextHandler.current = () => onWeightSubmit?.(); handleFocusUncheck(); }}
                   {...(Platform.OS === 'ios' ? { inputAccessoryViewID: SET_ROW_ACCESSORY_ID } : {})}
                 />
@@ -261,11 +285,13 @@ export function SetRow({
                   </Pressable>
                 )}
               </View>
+              {/* Hidden: weight increment/decrement suggestion — re-enable when UX is finalized
               {data.suggestedWeight != null && data.suggestedWeight !== data.weight && (
                 <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 4, marginLeft: 2 }}>
                   {data.suggestedWeight > (data.weight ?? 0) ? '↑' : '↓'} {Math.abs((data.suggestedWeight ?? 0) - (data.weight ?? 0))} {weightUnit === 'lbs' ? 'lbs' : 'kg'} {data.suggestedWeight > (data.weight ?? 0) ? '(high reps)' : '(low reps)'}
                 </Text>
               )}
+              */}
             </View>
             <View style={{ width: 1, height: 32, backgroundColor: theme.border }} />
           </>
@@ -273,7 +299,7 @@ export function SetRow({
 
         <View style={{ flex: 1 }}>
           <TextInput
-            ref={repsInputRef}
+            ref={(el) => { localRepsRef.current = el; repsInputRef?.(el); }}
             style={{ fontSize: 16, fontWeight: '600', color: theme.text, backgroundColor: theme.surface, borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8 }}
             keyboardType="decimal-pad"
             returnKeyType="next"
@@ -283,6 +309,7 @@ export function SetRow({
             value={data.reps > 0 ? String(data.reps) : ''}
             onChangeText={handleRepsChange}
             onSubmitEditing={onRepsSubmit}
+            onPressIn={() => { userTapped.current = true; }}
             onFocus={() => { focusedField.current = 'reps'; activeNextHandler.current = () => onRepsSubmit?.(); handleFocusUncheck(); }}
             onBlur={handleRepsBlur}
             {...(Platform.OS === 'ios' ? { inputAccessoryViewID: SET_ROW_ACCESSORY_ID } : {})}
@@ -294,7 +321,7 @@ export function SetRow({
         <PlateCalculatorSheet
           visible={showPlateCalc}
           onClose={() => setShowPlateCalc(false)}
-          onConfirm={(weight) => { userEdited.current = true; onChange({ ...data, weight, suggestedWeight: undefined }); }}
+          onConfirm={(weight) => { userEdited.current = true; onChange({ ...data, weight, suggestedWeight: undefined }); setTimeout(() => localRepsRef.current?.focus(), 100); }}
           initialWeight={data.weight}
           exerciseName={exerciseName}
         />
