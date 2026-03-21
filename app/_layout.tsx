@@ -47,6 +47,7 @@ function RootLayoutNav({ session }: { session: Session | null }) {
         <Stack.Screen name="plan-result" />
         <Stack.Screen name="workout/[dayIndex]" />
         <Stack.Screen name="create-post" options={{ presentation: 'modal' }} />
+        <Stack.Screen name="barcode-scanner" options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }} />
         <Stack.Screen name="user/[userId]" />
         <Stack.Screen name="discover" />
       </Stack>

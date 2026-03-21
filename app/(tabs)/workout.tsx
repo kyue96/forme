@@ -3,7 +3,6 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
-  LayoutAnimation,
   Modal,
   Pressable,
   ScrollView,
@@ -14,9 +13,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { BadgesTab } from '@/components/BadgesTab';
-import { StreakRing } from '@/components/StreakRing';
-import { WeeklyVolumeCard } from '@/components/WeeklyVolumeCard';
 
 import { usePlan } from '@/lib/plan-context';
 import { supabase } from '@/lib/supabase';
@@ -26,7 +22,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { WeeklyCalendar, getWeekDates, dateKey, DAY_NAMES_FULL } from '@/components/WeeklyCalendar';
 import { MuscleGroupPills } from '@/components/MuscleGroupPills';
 import { LoggedExercise, WorkoutDay, Exercise } from '@/lib/types';
-import { animateLayout } from '@/lib/utils';
+import { animateLayout, stripParens } from '@/lib/utils';
 import { getExerciseCategories, getExerciseCategory } from '@/lib/exercise-utils';
 import { EXERCISE_DATABASE, BODYWEIGHT_KEYWORDS } from '@/lib/exercise-data';
 
@@ -70,15 +66,12 @@ function formatDayDate(dayName: string, refDate?: Date | null): string {
 export default function WorkoutScreen() {
   const router = useRouter();
   const { plan, loading, refetch } = usePlan();
-  const { theme, weightUnit } = useSettings();
+  const { theme } = useSettings();
   const avatarColor = useUserStore((s) => s.avatarColor);
   const focusCardColor = avatarColor || '#F59E0B';
   const { logId } = useLocalSearchParams<{ logId?: string }>();
 
-  const [activeTab, setActiveTab] = useState<'plan' | 'badges' | 'stats'>('stats');
-  const [showAllWorkouts, setShowAllWorkouts] = useState(false);
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
-  const [logsLoading, setLogsLoading] = useState(false);
   // selectedLog state removed - now navigates to session-view
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [todayLoggedDays, setTodayLoggedDays] = useState<Set<string>>(new Set());
@@ -87,12 +80,6 @@ export default function WorkoutScreen() {
   const [editMode, setEditMode] = useState(false);
   const [selectedWeekDate, setSelectedWeekDate] = useState<Date | null>(null);
 
-  // Stats tab data
-  const [streak, setStreak] = useState(0);
-  const [maxStreak, setMaxStreak] = useState(0);
-  const [weekVolume, setWeekVolume] = useState(0);
-  const [weeklyVolData, setWeeklyVolData] = useState<[any[], any[], any[]]>([[], [], []]);
-  const [volDelta, setVolDelta] = useState<number | null>(null);
 
   // Open a specific log when navigated from the home screen calendar.
   const consumedLogId = useRef<string | null>(null);
@@ -118,7 +105,6 @@ export default function WorkoutScreen() {
   }, [logId, logs]);
 
   const loadAllData = useCallback(async () => {
-    setLogsLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
@@ -129,25 +115,15 @@ export default function WorkoutScreen() {
       const weekEnd = dateKey(weekDates[6]);
       const w1Mon = new Date(weekDates[0]); w1Mon.setDate(w1Mon.getDate() - 14);
 
-      // Single query: all logs from 2 weeks ago onwards (covers history, stats, streak, volume)
-      const [{ data: recentLogs }, { data: streakLogs }] = await Promise.all([
-        supabase
-          .from('workout_logs')
-          .select('id, day_name, exercises, duration_minutes, completed_at')
-          .eq('user_id', user.id)
-          .gte('completed_at', dateKey(w1Mon))
-          .order('completed_at', { ascending: false }),
-        supabase
-          .from('workout_logs')
-          .select('completed_at')
-          .eq('user_id', user.id)
-          .gte('completed_at', (() => { const d = new Date(); d.setDate(d.getDate() - 60); return dateKey(d); })())
-          .order('completed_at', { ascending: false }),
-      ]);
+      const { data: recentLogs } = await supabase
+        .from('workout_logs')
+        .select('id, day_name, exercises, duration_minutes, completed_at')
+        .eq('user_id', user.id)
+        .gte('completed_at', dateKey(w1Mon))
+        .order('completed_at', { ascending: false });
 
       const allLogs = (recentLogs ?? []) as WorkoutLog[];
 
-      // --- History ---
       setLogs(allLogs.slice(0, 30));
 
       const todayStr = dateKey(new Date());
@@ -159,99 +135,10 @@ export default function WorkoutScreen() {
         return dk && dk >= weekStart && dk <= weekEnd;
       });
       setCompletedDays(new Set(weekLogs.map((l) => l.completed_at?.split('T')[0])));
-
-      // --- Streak ---
-      const streakDatesList = (streakLogs ?? []).map((l: any) => l.completed_at?.split('T')[0]).filter(Boolean);
-      const streakDatesSet = new Set(streakDatesList);
-
-      let s = 0;
-      const d = new Date();
-      d.setHours(0, 0, 0, 0);
-      if (!streakDatesSet.has(dateKey(d))) d.setDate(d.getDate() - 1);
-      while (streakDatesSet.has(dateKey(d))) { s++; d.setDate(d.getDate() - 1); }
-      setStreak(s);
-
-      const sorted = Array.from(streakDatesSet).sort();
-      let best = 0, run = 1;
-      for (let i = 1; i < sorted.length; i++) {
-        const prev = new Date(sorted[i - 1] + 'T12:00:00');
-        const curr = new Date(sorted[i] + 'T12:00:00');
-        if (Math.round((curr.getTime() - prev.getTime()) / 86400000) === 1) { run++; } else { best = Math.max(best, run); run = 1; }
-      }
-      setMaxStreak(Math.max(best, run));
-
-      // --- Weekly volume (3 weeks) — computed from the single query ---
-      const lastWeekMon = new Date(weekDates[0]); lastWeekMon.setDate(lastWeekMon.getDate() - 7);
-      const lastWeekSun = new Date(weekDates[0]); lastWeekSun.setDate(lastWeekSun.getDate() - 1);
-
-      const filterByRange = (start: string, end: string) =>
-        allLogs.filter((l) => {
-          const dk = l.completed_at?.split('T')[0];
-          return dk && dk >= start && dk <= end;
-        });
-
-      const thisWeekLogs = filterByRange(weekStart, weekEnd);
-      const lastWeekLogs = filterByRange(dateKey(lastWeekMon), dateKey(lastWeekSun));
-      const w1Logs = filterByRange(dateKey(w1Mon), dateKey(new Date(weekDates[0].getTime() - 8 * 86400000)));
-
-      const calcVolume = (logsList: WorkoutLog[]) =>
-        logsList.reduce((total, log) => {
-          const exs = log.exercises as LoggedExercise[];
-          return total + exs.reduce((s2, ex) =>
-            s2 + ex.sets.filter(se => se.completed && se.weight != null).reduce((v, se) => v + (se.weight ?? 0) * se.reps, 0), 0);
-        }, 0);
-
-      const calcLogVolume = (log: WorkoutLog) => {
-        const exs = log.exercises as LoggedExercise[];
-        return exs.reduce((s2, ex) =>
-          s2 + ex.sets.filter(se => se.completed && se.weight != null).reduce((v, se) => v + (se.weight ?? 0) * se.reps, 0), 0);
-      };
-
-      const thisVol = calcVolume(thisWeekLogs);
-      const lastVol = calcVolume(lastWeekLogs);
-      const conv = weightUnit === 'lbs' ? 2.205 : 1;
-      setWeekVolume(Math.round(thisVol * conv));
-      setVolDelta(lastVol > 0 ? ((thisVol - lastVol) / lastVol) * 100 : null);
-
-      const buildDailyVol = (logsList: WorkoutLog[], mondayDate: Date) => {
-        const days = Array.from({ length: 7 }, (_, i) => {
-          const dd = new Date(mondayDate);
-          dd.setDate(dd.getDate() + i);
-          return { day: dateKey(dd), volume: 0 };
-        });
-        logsList.forEach((log) => {
-          const logDate = log.completed_at?.split('T')[0];
-          const entry = days.find((dd) => dd.day === logDate);
-          if (entry) entry.volume += Math.round(calcLogVolume(log) * conv);
-        });
-        return days;
-      };
-
-      setWeeklyVolData([
-        buildDailyVol(w1Logs, w1Mon),
-        buildDailyVol(lastWeekLogs, lastWeekMon),
-        buildDailyVol(thisWeekLogs, weekDates[0]),
-      ]);
-    } catch {} finally {
-      setLogsLoading(false);
-    }
-  }, [weightUnit]);
+    } catch {}
+  }, []);
 
   useFocusEffect(useCallback(() => { loadAllData(); }, [loadAllData]));
-
-  const removeLog = (logId: string) => {
-    Alert.alert('Remove workout', 'Delete this workout log?', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          await supabase.from('workout_logs').delete().eq('id', logId);
-          loadAllData();
-        },
-      },
-    ]);
-  };
 
   if (loading) {
     return (
@@ -260,8 +147,6 @@ export default function WorkoutScreen() {
       </SafeAreaView>
     );
   }
-
-  const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
 
   // Build planDayNames set for the calendar
   const planDayNames = new Set(
@@ -287,7 +172,6 @@ export default function WorkoutScreen() {
     setSelectedWeekDate(date);
     if (planDay) {
       animateLayout();
-      setActiveTab('plan');
       setExpandedDay(expandedDay === planDay.dayName ? null : planDay.dayName);
     }
   };
@@ -463,7 +347,7 @@ export default function WorkoutScreen() {
               </Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                 <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: isNext ? '#FFFFFF' : theme.text }}>
-                  {day.focus}
+                  {stripParens(day.focus)}
                 </Text>
               </View>
               <Text allowFontScaling style={{ fontSize: 12, color: isNext ? '#FFFFFFCC' : theme.textSecondary, marginTop: 2 }}>
@@ -574,37 +458,8 @@ export default function WorkoutScreen() {
       {/* Header */}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 8, paddingBottom: 12 }}>
         <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>
-          {activeTab === 'plan' ? 'Plan' : activeTab === 'stats' ? 'Stats' : 'Achievements'}
+          Workout
         </Text>
-        <View style={{ flexDirection: 'row', gap: 16 }}>
-          <Pressable
-            onPress={() => {
-              animateLayout();
-              setActiveTab('stats');
-            }}
-            hitSlop={8}
-          >
-            <Ionicons name="analytics-outline" size={22} color={activeTab === 'stats' ? focusCardColor : theme.chrome} />
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              animateLayout();
-              setActiveTab('plan');
-            }}
-            hitSlop={8}
-          >
-            <Ionicons name="barbell" size={22} color={activeTab === 'plan' ? focusCardColor : theme.chrome} />
-          </Pressable>
-          <Pressable
-            onPress={() => {
-              animateLayout();
-              setActiveTab('badges');
-            }}
-            hitSlop={8}
-          >
-            <Ionicons name="trophy-outline" size={22} color={activeTab === 'badges' ? focusCardColor : theme.chrome} />
-          </Pressable>
-        </View>
       </View>
 
       <ScrollView
@@ -612,97 +467,7 @@ export default function WorkoutScreen() {
         contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
         showsVerticalScrollIndicator={false}
       >
-        {activeTab === 'stats' ? (
-          <View style={{ gap: 12 }}>
-            <StreakRing streak={streak} maxStreak={maxStreak} size="large" color={focusCardColor} />
-            {weeklyVolData[2].length > 0 && (
-              <WeeklyVolumeCard
-                weeks={weeklyVolData}
-                totalVolume={weekVolume}
-                deltaPercent={volDelta}
-                accentColor={focusCardColor}
-              />
-            )}
-
-            {/* Recent Workouts — preview 2, expand to show all */}
-            <View style={{ marginTop: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <Text allowFontScaling style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>
-                  Recent Workouts
-                </Text>
-                {logs.length > 2 && (
-                  <Pressable onPress={() => { animateLayout(); setShowAllWorkouts(!showAllWorkouts); }} hitSlop={8}>
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: focusCardColor }}>
-                      {showAllWorkouts ? 'Show less' : 'View all'}
-                    </Text>
-                  </Pressable>
-                )}
-              </View>
-              {logsLoading ? (
-                <ActivityIndicator color={theme.chrome} />
-              ) : logs.length === 0 ? (
-                <View style={{ alignItems: 'center', paddingVertical: 24 }}>
-                  <Ionicons name="barbell-outline" size={28} color={theme.border} />
-                  <Text allowFontScaling style={{ color: theme.textSecondary, marginTop: 8, fontSize: 13 }}>
-                    No workouts logged yet.
-                  </Text>
-                </View>
-              ) : (
-                (showAllWorkouts ? logs : logs.slice(0, 2)).map((log) => {
-                  const totalSets = log.exercises.reduce((s, ex) => s + ex.sets.filter((se) => se.completed).length, 0);
-                  const dateObj = new Date(log.completed_at);
-                  const dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-                  return (
-                    <Pressable
-                      key={log.id}
-                      onPress={() => {
-                        const logPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
-                        router.push({
-                          pathname: '/workout/session-view',
-                          params: {
-                            exercises: JSON.stringify(log.exercises),
-                            dayName: log.day_name,
-                            focus: logPlanDay?.focus ?? log.day_name,
-                            durationMinutes: String(log.duration_minutes ?? 0),
-                            completedAt: log.completed_at,
-                            logId: log.id,
-                          },
-                        });
-                      }}
-                      style={{
-                        backgroundColor: theme.surface,
-                        borderRadius: 14,
-                        padding: 14,
-                        marginBottom: 8,
-                        borderWidth: 1,
-                        borderColor: theme.border,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <Text allowFontScaling style={{ fontSize: 14, fontWeight: '700', color: theme.text }} numberOfLines={1}>
-                            {plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase())?.focus ?? log.day_name}
-                          </Text>
-                          <MuscleGroupPills categories={getExerciseCategories(log.exercises)} size="small" />
-                        </View>
-                        <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 3 }}>
-                          {dateLabel} · {totalSets} sets · {log.duration_minutes}m
-                        </Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={16} color={theme.chrome} />
-                    </Pressable>
-                  );
-                })
-              )}
-            </View>
-          </View>
-        ) : activeTab === 'badges' ? (
-          <BadgesTab />
-        ) : (
-          /* Plan tab */
-          <View>
+        <View>
             {!plan ? (
               <View style={{ marginTop: 32, alignItems: 'center' }}>
                 <Text allowFontScaling style={{ color: theme.textSecondary, fontSize: 15, textAlign: 'center', marginBottom: 24 }}>
@@ -790,7 +555,6 @@ export default function WorkoutScreen() {
               </>
             )}
           </View>
-        )}
       </ScrollView>
 
       {/* Exercise Swap Modal */}

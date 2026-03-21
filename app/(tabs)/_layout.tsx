@@ -65,9 +65,15 @@ export default function TabsLayout() {
           }}
         />
         <Tabs.Screen
+          name="stats"
+          options={{
+            tabBarIcon: ({ focused }) => <TabIcon icon="stats-chart" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
+          }}
+        />
+        <Tabs.Screen
           name="meals"
           options={{
-            tabBarIcon: ({ focused }) => <TabIcon icon="restaurant" focused={focused} activeColor={theme.text} inactiveColor={theme.chrome} />,
+            href: null,
           }}
         />
         <Tabs.Screen

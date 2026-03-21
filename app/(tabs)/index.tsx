@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
@@ -68,6 +68,7 @@ interface TodaySession {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { scannedMeal } = useLocalSearchParams<{ scannedMeal?: string }>();
   const { plan, loading } = usePlan();
   const { theme, weightUnit } = useSettings();
   const { steps } = useHealthKit();
@@ -90,6 +91,22 @@ export default function HomeScreen() {
   const [todaySession, setTodaySession] = useState<TodaySession | null>(null);
   const sessionCardRef = useRef<View>(null);
   const weekLogsRef = useRef<any[]>([]);
+
+  // Handle barcode scan result
+  const consumedScan = useRef<string | null>(null);
+  useEffect(() => {
+    if (scannedMeal && consumedScan.current !== scannedMeal) {
+      consumedScan.current = scannedMeal;
+      try {
+        const data = JSON.parse(scannedMeal);
+        setMealName(data.name || '');
+        setMealCal(data.calories || '');
+        setMealProtein(data.protein || '');
+        setMealCarbs(data.carbs || '');
+        setShowMealSheet(true);
+      } catch {}
+    }
+  }, [scannedMeal]);
 
   // Meal logging sheet
   const [showMealSheet, setShowMealSheet] = useState(false);
@@ -873,7 +890,17 @@ export default function HomeScreen() {
 
       {/* Meal logging bottom sheet */}
       <BottomSheet visible={showMealSheet} onClose={() => setShowMealSheet(false)}>
-        <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text, marginBottom: 16 }}>Add meal</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+          <Text style={{ fontSize: 18, fontWeight: '700', color: theme.text }}>Add meal</Text>
+          <Pressable
+            onPress={() => { setShowMealSheet(false); router.push('/barcode-scanner'); }}
+            hitSlop={8}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: theme.background, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 10, borderWidth: 1, borderColor: theme.border }}
+          >
+            <Ionicons name="barcode-outline" size={18} color={theme.text} />
+            <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Scan</Text>
+          </Pressable>
+        </View>
 
         <TextInput
           style={{ backgroundColor: theme.background, borderWidth: 1, borderColor: theme.border, borderRadius: 12, paddingHorizontal: 12, paddingVertical: 10, fontSize: 15, color: theme.text, marginBottom: 10 }}
