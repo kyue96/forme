@@ -458,9 +458,18 @@ export default function WorkoutScreen() {
 
       {/* Header */}
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, paddingTop: 8, paddingBottom: 12 }}>
-        <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>
-          Workout
-        </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>
+            Workout
+          </Text>
+          {plan && (
+            <View style={{ backgroundColor: focusCardColor + '20', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 10 }}>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: focusCardColor }}>
+                {plan.weeklyPlan.length} days/week
+              </Text>
+            </View>
+          )}
+        </View>
       </View>
 
       <ScrollView
@@ -499,77 +508,41 @@ export default function WorkoutScreen() {
                   </Pressable>
                 </View>
 
-                {/* Weekly schedule bar */}
-                <View style={{ flexDirection: 'row', gap: 4, marginBottom: 16 }}>
-                  {DAY_NAMES_FULL.map((dayName, idx) => {
-                    const isWorkoutDay = plan.weeklyPlan.some(d => d.dayName.toLowerCase() === dayName.toLowerCase());
-                    const isLogged = todayLoggedDays.has(dayName.toLowerCase());
-                    const dayLabel = dayName.substring(0, 3);
-                    return (
-                      <View key={dayName} style={{ flex: 1, alignItems: 'center', gap: 4 }}>
-                        <Text style={{ fontSize: 9, fontWeight: '500', color: theme.textSecondary }}>{dayLabel}</Text>
-                        <View style={{
-                          height: 28,
-                          borderRadius: 8,
-                          backgroundColor: isWorkoutDay ? focusCardColor : theme.surface,
-                          width: '100%',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          borderWidth: isWorkoutDay ? 0 : 1,
-                          borderColor: theme.border,
-                        }}>
-                          {isLogged && <Ionicons name="checkmark" size={14} color={isWorkoutDay ? '#FFFFFF' : '#22C55E'} />}
-                        </View>
-                      </View>
-                    );
-                  })}
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
+                  <Pressable
+                    onPress={() => router.push('/workout/quick')}
+                    style={{ flex: 1, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
+                  >
+                    <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
+                      Create Workout
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => router.push('/quiz/1')}
+                    style={{ flex: 1, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
+                  >
+                    <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
+                      Rebuild Plan
+                    </Text>
+                  </Pressable>
                 </View>
-
-                <Pressable
-                  onPress={() => router.push('/workout/quick')}
-                  style={{ marginBottom: 12, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
-                >
-                  <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                    Create Workout
-                  </Text>
-                </Pressable>
 
                 {/* Day cards */}
                 {plan.weeklyPlan.map((day, i) => {
                   const dayLogged = todayLoggedDays.has(day.dayName.toLowerCase());
                   const isNext = i === nextPlanIdx && !dayLogged;
                   const dIdx = DAY_NAMES_FULL.findIndex(d => d.toLowerCase() === day.dayName.toLowerCase());
-                  // Only mark as missed Mon-Fri when the workout day is earlier this week
-                  // On Sat/Sun we show next week's dates, so nothing is "missed"
                   const isMissed = jsDow >= 1 && jsDow <= 5 && dIdx >= 0 && dIdx < jsDow && !dayLogged;
                   return renderPlanCard(day, i, dayLogged, isNext, isMissed, plan.weeklyPlan.length);
                 })}
-
-                <Pressable
-                  onPress={() => router.push('/quiz/1')}
-                  style={{ marginTop: 16, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
-                >
-                  <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                    Regenerate Plan
-                  </Text>
-                </Pressable>
               </>
             )}
 
             {/* Recent Workouts */}
             <View style={{ marginTop: 24 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                <Text allowFontScaling style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>
-                  Recent Workouts
-                </Text>
-                {logs.length > 3 && (
-                  <Pressable onPress={() => { animateLayout(); setShowAllWorkouts(!showAllWorkouts); }} hitSlop={8}>
-                    <Text style={{ fontSize: 13, fontWeight: '600', color: focusCardColor }}>
-                      {showAllWorkouts ? 'Show less' : 'View all'}
-                    </Text>
-                  </Pressable>
-                )}
-              </View>
+              <Text allowFontScaling style={{ fontSize: 16, fontWeight: '700', color: theme.text, marginBottom: 12 }}>
+                Recent Workouts
+              </Text>
               {logs.length === 0 ? (
                 <View style={{ alignItems: 'center', paddingVertical: 24 }}>
                   <Ionicons name="barbell-outline" size={28} color={theme.border} />
@@ -578,53 +551,139 @@ export default function WorkoutScreen() {
                   </Text>
                 </View>
               ) : (
-                (showAllWorkouts ? logs : logs.slice(0, 3)).map((log) => {
-                  const totalSets = log.exercises.reduce((s, ex) => s + ex.sets.filter((se) => se.completed).length, 0);
-                  const dateObj = new Date(log.completed_at);
-                  const dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-                  const logPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
-                  return (
-                    <Pressable
-                      key={log.id}
-                      onPress={() => {
-                        router.push({
-                          pathname: '/workout/session-view',
-                          params: {
-                            exercises: JSON.stringify(log.exercises),
-                            dayName: log.day_name,
-                            focus: logPlanDay?.focus ?? log.day_name,
-                            durationMinutes: String(log.duration_minutes ?? 0),
-                            completedAt: log.completed_at,
-                            logId: log.id,
-                          },
-                        });
-                      }}
-                      style={{
-                        backgroundColor: theme.surface,
-                        borderRadius: 14,
-                        padding: 14,
-                        marginBottom: 8,
-                        borderWidth: 1,
-                        borderColor: theme.border,
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <View style={{ flex: 1 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <Text allowFontScaling style={{ fontSize: 14, fontWeight: '700', color: theme.text }} numberOfLines={1}>
-                            {stripParens(logPlanDay?.focus ?? log.day_name)}
-                          </Text>
-                          <MuscleGroupPills categories={getExerciseCategories(log.exercises)} size="small" />
+                <>
+                  {/* Always show the most recent workout */}
+                  {(() => {
+                    const log = logs[0];
+                    const dateObj = new Date(log.completed_at);
+                    const dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+                    const logPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
+                    return (
+                      <Pressable
+                        key={log.id}
+                        onPress={() => {
+                          router.push({
+                            pathname: '/workout/session-view',
+                            params: {
+                              exercises: JSON.stringify(log.exercises),
+                              dayName: log.day_name,
+                              focus: logPlanDay?.focus ?? log.day_name,
+                              durationMinutes: String(log.duration_minutes ?? 0),
+                              completedAt: log.completed_at,
+                              logId: log.id,
+                            },
+                          });
+                        }}
+                        style={{
+                          backgroundColor: theme.surface,
+                          borderRadius: 16,
+                          marginBottom: 10,
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <View style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          paddingLeft: 16,
+                          paddingRight: 16,
+                          paddingVertical: 14,
+                        }}>
+                          <View style={{ flex: 1 }}>
+                            <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
+                              {dateLabel}
+                            </Text>
+                            <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: theme.text }} numberOfLines={1}>
+                              {stripParens(logPlanDay?.focus ?? log.day_name)}
+                            </Text>
+                            <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
+                              {log.exercises.length} exercises
+                            </Text>
+                          </View>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <MuscleGroupPills categories={getExerciseCategories(log.exercises)} size="small" />
+                            <Ionicons name="chevron-forward" size={18} color={theme.chrome} />
+                          </View>
                         </View>
-                        <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, marginTop: 3 }}>
-                          {dateLabel} · {totalSets} sets · {log.duration_minutes}m
+                      </Pressable>
+                    );
+                  })()}
+
+                  {/* Expand to show older workouts */}
+                  {logs.length > 1 && (
+                    <>
+                      {showAllWorkouts && logs.slice(1).map((log) => {
+                        const dateObj = new Date(log.completed_at);
+                        const dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+                        const logPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
+                        return (
+                          <Pressable
+                            key={log.id}
+                            onPress={() => {
+                              router.push({
+                                pathname: '/workout/session-view',
+                                params: {
+                                  exercises: JSON.stringify(log.exercises),
+                                  dayName: log.day_name,
+                                  focus: logPlanDay?.focus ?? log.day_name,
+                                  durationMinutes: String(log.duration_minutes ?? 0),
+                                  completedAt: log.completed_at,
+                                  logId: log.id,
+                                },
+                              });
+                            }}
+                            style={{
+                              backgroundColor: theme.surface,
+                              borderRadius: 16,
+                              marginBottom: 10,
+                              overflow: 'hidden',
+                            }}
+                          >
+                            <View style={{
+                              flexDirection: 'row',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              paddingLeft: 16,
+                              paddingRight: 16,
+                              paddingVertical: 14,
+                            }}>
+                              <View style={{ flex: 1 }}>
+                                <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
+                                  {dateLabel}
+                                </Text>
+                                <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: theme.text }} numberOfLines={1}>
+                                  {stripParens(logPlanDay?.focus ?? log.day_name)}
+                                </Text>
+                                <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
+                                  {log.exercises.length} exercises
+                                </Text>
+                              </View>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                                <MuscleGroupPills categories={getExerciseCategories(log.exercises)} size="small" />
+                                <Ionicons name="chevron-forward" size={18} color={theme.chrome} />
+                              </View>
+                            </View>
+                          </Pressable>
+                        );
+                      })}
+                      <Pressable
+                        onPress={() => { animateLayout(); setShowAllWorkouts(!showAllWorkouts); }}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: 6,
+                          paddingVertical: 10,
+                        }}
+                      >
+                        <Ionicons name={showAllWorkouts ? 'chevron-up' : 'chevron-down'} size={14} color={theme.textSecondary} />
+                        <Text style={{ fontSize: 12, fontWeight: '600', color: theme.textSecondary }}>
+                          {showAllWorkouts ? 'Show less' : `Show ${logs.length - 1} more`}
                         </Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={16} color={theme.chrome} />
-                    </Pressable>
-                  );
-                })
+                      </Pressable>
+                    </>
+                  )}
+                </>
               )}
             </View>
           </View>
