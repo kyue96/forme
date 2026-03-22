@@ -87,6 +87,7 @@ export default function WorkoutScreen() {
   const [selectedHistoryDate, setSelectedHistoryDate] = useState<string>(dateKey(now));
   const [historyLogs, setHistoryLogs] = useState<WorkoutLog[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyCalExpanded, setHistoryCalExpanded] = useState(false);
   const historyLogDates = useMemo(() => new Set(historyLogs.map(l => l.completed_at?.split('T')[0])), [historyLogs]);
 
   // Min date for history calendar (month user joined)
@@ -519,6 +520,7 @@ export default function WorkoutScreen() {
                       setHistoryMonth({ year: latest.getFullYear(), month: latest.getMonth() });
                       setSelectedHistoryDate(logs[0].completed_at.split('T')[0]);
                     }
+                    setHistoryCalExpanded(false);
                     setShowHistory(true);
                   }}
                   hitSlop={8}
@@ -542,7 +544,7 @@ export default function WorkoutScreen() {
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
           showsVerticalScrollIndicator={false}
         >
-          {/* Monthly Calendar */}
+          {/* Monthly Calendar — collapsed (week) / expanded (full month) */}
           {(() => {
             const { year, month } = historyMonth;
             const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
@@ -569,14 +571,74 @@ export default function WorkoutScreen() {
             for (let d = 1; d <= daysInMonth; d++) cells.push(d);
             while (cells.length % 7 !== 0) cells.push(null);
 
+            const allRows = Array.from({ length: cells.length / 7 }, (_, i) => cells.slice(i * 7, i * 7 + 7));
+
+            // Find the row containing the selected date
+            const selectedDayNum = parseInt(selectedHistoryDate.split('-')[2], 10);
+            const selectedCellIdx = cells.findIndex(c => c === selectedDayNum);
+            const selectedRowIdx = selectedCellIdx >= 0 ? Math.floor(selectedCellIdx / 7) : 0;
+            const visibleRows = historyCalExpanded ? allRows : [allRows[selectedRowIdx] ?? allRows[0]];
+
+            const renderCell = (day: number | null, col: number) => {
+              if (day === null) return <View key={col} style={{ flex: 1, height: 40 }} />;
+              const dk = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+              const isToday = dk === todayStr;
+              const isSelected = dk === selectedHistoryDate;
+              const hasWorkout = historyLogDates.has(dk);
+              const isFuture = dk > todayStr;
+
+              return (
+                <Pressable
+                  key={col}
+                  onPress={() => {
+                    if (!isFuture) {
+                      setSelectedHistoryDate(dk);
+                    }
+                  }}
+                  style={{ flex: 1, height: 40, alignItems: 'center', justifyContent: 'center' }}
+                  disabled={isFuture}
+                >
+                  <View style={{
+                    width: 32, height: 32, borderRadius: 16,
+                    alignItems: 'center', justifyContent: 'center',
+                    backgroundColor: isSelected ? focusCardColor : 'transparent',
+                    borderWidth: isToday && !isSelected ? 1.5 : 0,
+                    borderColor: focusCardColor,
+                  }}>
+                    <Text style={{
+                      fontSize: 14,
+                      fontWeight: isSelected || isToday ? '700' : '400',
+                      color: isFuture ? theme.border : isSelected ? '#FFFFFF' : theme.text,
+                    }}>
+                      {day}
+                    </Text>
+                  </View>
+                  {hasWorkout && !isSelected && (
+                    <View style={{
+                      width: 5, height: 5, borderRadius: 2.5,
+                      backgroundColor: focusCardColor,
+                      position: 'absolute', bottom: 2,
+                    }} />
+                  )}
+                </Pressable>
+              );
+            };
+
             return (
               <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginBottom: 16 }}>
                 {/* Month nav */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: historyCalExpanded ? 16 : 8 }}>
                   <Pressable onPress={() => goMonth(-1)} hitSlop={12} style={{ opacity: isAtMin ? 0.2 : 1 }} disabled={isAtMin}>
                     <Ionicons name="chevron-back" size={20} color={theme.text} />
                   </Pressable>
-                  <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>{monthLabel}</Text>
+                  <Pressable
+                    onPress={() => { animateLayout(); setHistoryCalExpanded(!historyCalExpanded); }}
+                    hitSlop={8}
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                  >
+                    <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>{monthLabel}</Text>
+                    <Ionicons name={historyCalExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={theme.chrome} />
+                  </Pressable>
                   <Pressable onPress={() => goMonth(1)} hitSlop={12} style={{ opacity: isAtMax ? 0.2 : 1 }} disabled={isAtMax}>
                     <Ionicons name="chevron-forward" size={20} color={theme.text} />
                   </Pressable>
@@ -585,57 +647,16 @@ export default function WorkoutScreen() {
                 {/* Day headers */}
                 <View style={{ flexDirection: 'row' }}>
                   {DAY_HEADERS.map((d, i) => (
-                    <View key={i} style={{ flex: 1, alignItems: 'center', marginBottom: 8 }}>
+                    <View key={i} style={{ flex: 1, alignItems: 'center', marginBottom: 4 }}>
                       <Text style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary }}>{d}</Text>
                     </View>
                   ))}
                 </View>
 
-                {/* Date grid */}
-                {Array.from({ length: cells.length / 7 }, (_, row) => (
-                  <View key={row} style={{ flexDirection: 'row', marginBottom: 4 }}>
-                    {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
-                      if (day === null) return <View key={col} style={{ flex: 1, height: 40 }} />;
-                      const dk = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-                      const isToday = dk === todayStr;
-                      const isSelected = dk === selectedHistoryDate;
-                      const hasWorkout = historyLogDates.has(dk);
-                      // Don't allow selecting future dates
-                      const isFuture = dk > todayStr;
-
-                      return (
-                        <Pressable
-                          key={col}
-                          onPress={() => !isFuture && setSelectedHistoryDate(dk)}
-                          style={{ flex: 1, height: 40, alignItems: 'center', justifyContent: 'center' }}
-                          disabled={isFuture}
-                        >
-                          <View style={{
-                            width: 32, height: 32, borderRadius: 16,
-                            alignItems: 'center', justifyContent: 'center',
-                            backgroundColor: isSelected ? focusCardColor : 'transparent',
-                            borderWidth: isToday && !isSelected ? 1.5 : 0,
-                            borderColor: focusCardColor,
-                          }}>
-                            <Text style={{
-                              fontSize: 14,
-                              fontWeight: isSelected || isToday ? '700' : '400',
-                              color: isFuture ? theme.border : isSelected ? '#FFFFFF' : theme.text,
-                            }}>
-                              {day}
-                            </Text>
-                          </View>
-                          {/* Workout dot */}
-                          {hasWorkout && !isSelected && (
-                            <View style={{
-                              width: 5, height: 5, borderRadius: 2.5,
-                              backgroundColor: focusCardColor,
-                              position: 'absolute', bottom: 2,
-                            }} />
-                          )}
-                        </Pressable>
-                      );
-                    })}
+                {/* Date rows — one row when collapsed, all rows when expanded */}
+                {visibleRows.map((row, rowIdx) => (
+                  <View key={rowIdx} style={{ flexDirection: 'row', marginBottom: 2 }}>
+                    {row.map((day, col) => renderCell(day, col))}
                   </View>
                 ))}
               </View>
