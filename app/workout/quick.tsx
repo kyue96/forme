@@ -1798,9 +1798,9 @@ export default function QuickWorkoutScreen() {
                                 setActiveExercise(exIdx + 1);
                                 scrollToExercise(exIdx + 1);
                               }}
-                              style={{ flex: 1, backgroundColor: theme.text, paddingVertical: 10, borderRadius: 16, alignItems: 'center' }}
+                              style={{ width: 44, height: 44, backgroundColor: '#22C55E', borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
                             >
-                              <Text style={{ fontSize: 13, fontWeight: '700', color: theme.background }}>Next</Text>
+                              <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
                             </Pressable>
                           )}
                         </View>

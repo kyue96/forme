@@ -113,7 +113,9 @@ export function SetRow({
     const hasWeight = isBodyweight || (data.weight != null && data.weight > 0);
     const hasReps = data.reps > 0;
     if (hasWeight && hasReps) {
-      if (isLastSet || isSuperset) {
+      if (isLastSet) {
+        // Last set: don't auto-complete — user manually checks then clicks Next arrow
+      } else if (isSuperset) {
         autoCompleteTimerRef.current = setTimeout(() => {
           onComplete();
         }, 2000);
@@ -126,19 +128,8 @@ export function SetRow({
     return () => { if (autoCompleteTimerRef.current) clearTimeout(autoCompleteTimerRef.current); };
   }, [data.weight, data.reps]);
 
-  // On last set reps blur: if reps entered, complete immediately
-  const handleRepsBlur = () => {
-    if (isLastSet && !data.completed && data.reps > 0) {
-      const hasWeight = isBodyweight || (data.weight != null && data.weight > 0);
-      if (hasWeight) {
-        if (autoCompleteTimerRef.current) clearTimeout(autoCompleteTimerRef.current);
-        if (repsTimerRef.current) clearTimeout(repsTimerRef.current);
-        prevCompleted.current = true;
-        onChange({ ...data, completed: true });
-        onComplete();
-      }
-    }
-  };
+  // On last set reps blur: no auto-complete — user manually clicks checkmark then Next arrow
+  const handleRepsBlur = () => {};
 
   // After reps typing stops for 2s, auto-focus next set's reps
   // Only fire when user actually edited, not on mount/re-mount of completed sets
@@ -321,7 +312,7 @@ export function SetRow({
         <PlateCalculatorSheet
           visible={showPlateCalc}
           onClose={() => setShowPlateCalc(false)}
-          onConfirm={(weight) => { userEdited.current = true; onChange({ ...data, weight, suggestedWeight: undefined }); setTimeout(() => localRepsRef.current?.focus(), 100); }}
+          onConfirm={(weight) => { userEdited.current = true; onChange({ ...data, weight, suggestedWeight: undefined }); setTimeout(() => localRepsRef.current?.focus(), 350); }}
           initialWeight={data.weight}
           exerciseName={exerciseName}
         />

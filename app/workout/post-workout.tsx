@@ -340,7 +340,7 @@ export default function PostWorkoutScreen() {
           </View>
         </View>
       </View>
-      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40 }} showsVerticalScrollIndicator={false} scrollEnabled={scrollEnabled}>
+      <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 40, paddingTop: 16 }} showsVerticalScrollIndicator={false} scrollEnabled={scrollEnabled}>
 
         {/* Summary metrics */}
         <View style={{ paddingHorizontal: 24, marginBottom: 24 }}>
