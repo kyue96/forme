@@ -422,6 +422,7 @@ export default function WorkoutScreen() {
   };
 
   return (
+    <GestureHandlerRootView style={{ flex: 1 }}>
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
       <AppHeader />
 
@@ -553,7 +554,7 @@ export default function WorkoutScreen() {
           )}
         </ScrollView>
       ) : (
-        <GestureHandlerRootView style={{ flex: 1, backgroundColor: theme.background }}>
+        <View style={{ flex: 1, backgroundColor: theme.background }}>
           <DraggableFlatList
             data={plan?.weeklyPlan ?? []}
             scrollEnabled
@@ -612,7 +613,7 @@ export default function WorkoutScreen() {
               );
             }}
           />
-        </GestureHandlerRootView>
+        </View>
       )}
 
       {/* Exercise Swap Modal */}
@@ -721,5 +722,6 @@ export default function WorkoutScreen() {
 
       {/* Log detail modal removed - now navigates to /workout/session-view */}
     </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
