@@ -512,7 +512,15 @@ export default function WorkoutScreen() {
                   </Text>
                 </Pressable>
                 <Pressable
-                  onPress={() => setShowHistory(true)}
+                  onPress={() => {
+                    // Jump calendar to the most recent workout date
+                    if (logs.length > 0) {
+                      const latest = new Date(logs[0].completed_at);
+                      setHistoryMonth({ year: latest.getFullYear(), month: latest.getMonth() });
+                      setSelectedHistoryDate(logs[0].completed_at.split('T')[0]);
+                    }
+                    setShowHistory(true);
+                  }}
                   hitSlop={8}
                 >
                   <Ionicons name="time-outline" size={22} color={theme.text} />
