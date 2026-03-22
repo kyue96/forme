@@ -1,6 +1,7 @@
 import '../global.css';
 
 import { useEffect, useState } from 'react';
+import { Platform, Text, TextInput } from 'react-native';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
@@ -10,6 +11,35 @@ import { supabase } from '@/lib/supabase';
 import { QuizProvider } from '@/lib/quiz-store';
 import { PlanProvider } from '@/lib/plan-context';
 import { SettingsProvider, useSettings } from '@/lib/settings-context';
+
+// Fix Android text clipping — override render to inject includeFontPadding: false
+// This is a no-op on iOS. On Android it removes extra top/bottom padding that causes cutoff.
+if (Platform.OS === 'android') {
+  const origTextRender = (Text as any).render;
+  if (origTextRender) {
+    (Text as any).render = function (props: any, ref: any) {
+      const style = [{ includeFontPadding: false }, props.style];
+      return origTextRender.call(this, { ...props, style }, ref);
+    };
+  } else {
+    // Fallback for versions without .render
+    const OrigText = Text as any;
+    if (!OrigText.defaultProps) OrigText.defaultProps = {};
+    OrigText.defaultProps.includeFontPadding = false;
+  }
+
+  const origInputRender = (TextInput as any).render;
+  if (origInputRender) {
+    (TextInput as any).render = function (props: any, ref: any) {
+      const style = [{ includeFontPadding: false }, props.style];
+      return origInputRender.call(this, { ...props, style }, ref);
+    };
+  } else {
+    const OrigInput = TextInput as any;
+    if (!OrigInput.defaultProps) OrigInput.defaultProps = {};
+    OrigInput.defaultProps.includeFontPadding = false;
+  }
+}
 
 SplashScreen.preventAutoHideAsync();
 

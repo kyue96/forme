@@ -32,7 +32,8 @@ export function formatNumber(n: number): string {
 }
 
 /** Strip parenthetical text from workout names, e.g. "Pull Day (Back, Biceps)" → "Pull Day" */
-export function stripParens(name: string): string {
+export function stripParens(name: string | undefined | null): string {
+  if (!name) return '';
   return name.replace(/\s*\(.*?\)\s*/g, '').trim();
 }
 

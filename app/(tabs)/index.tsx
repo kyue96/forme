@@ -33,7 +33,13 @@ import { useHealthKit } from '@/hooks/useHealthKit';
 import { EXERCISE_DATABASE } from '@/lib/exercise-data';
 import { MuscleGroupPills } from '@/components/MuscleGroupPills';
 import { getExerciseCategories } from '@/lib/exercise-utils';
-import { computeVolumeByMuscle } from '@/lib/workout-metrics';
+import { computeVolumeByMuscle, computeTotalVolume } from '@/lib/workout-metrics';
+import NextWorkoutCard from '@/components/NextWorkoutCard';
+import TrainingReadinessRing from '@/components/TrainingReadinessRing';
+import FormeCoachCard from '@/components/FormeCoachCard';
+import ThisWeekCard from '@/components/ThisWeekCard';
+import StreakCard from '@/components/StreakCard';
+import { BreathingGradient } from '@/components/BreathingGradient';
 
 const MOTIVATIONAL = [
   'Your muscles grow during rest, not during the workout.',
@@ -91,6 +97,8 @@ export default function HomeScreen() {
   const [todaySession, setTodaySession] = useState<TodaySession | null>(null);
   const sessionCardRef = useRef<View>(null);
   const weekLogsRef = useRef<any[]>([]);
+  const [recentLogs, setRecentLogs] = useState<{ exercises: LoggedExercise[]; completed_at: string }[]>([]);
+  const [streak, setStreak] = useState(0);
 
   // Handle barcode scan result
   const consumedScan = useRef<string | null>(null);
@@ -238,6 +246,34 @@ export default function HomeScreen() {
 
       // Nudges: check inactivity
       checkAndScheduleNudges(user.id);
+
+      // Recent 7-day logs for training readiness + streak
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const { data: recentData } = await supabase
+        .from('workout_logs')
+        .select('exercises, completed_at')
+        .eq('user_id', user.id)
+        .gte('completed_at', dateKey(sevenDaysAgo))
+        .order('completed_at', { ascending: false });
+      setRecentLogs((recentData as { exercises: LoggedExercise[]; completed_at: string }[]) ?? []);
+
+      // Compute streak from last 60 days
+      const sixtyDaysAgo = new Date();
+      sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
+      const { data: streakLogs } = await supabase
+        .from('workout_logs')
+        .select('completed_at')
+        .eq('user_id', user.id)
+        .gte('completed_at', dateKey(sixtyDaysAgo))
+        .order('completed_at', { ascending: false });
+      const streakDates = new Set((streakLogs ?? []).map((l: any) => l.completed_at?.split('T')[0]).filter(Boolean));
+      let s = 0;
+      const d = new Date();
+      d.setHours(0, 0, 0, 0);
+      if (!streakDates.has(dateKey(d))) d.setDate(d.getDate() - 1);
+      while (streakDates.has(dateKey(d))) { s++; d.setDate(d.getDate() - 1); }
+      setStreak(s);
 
     } catch {}
   }, [activeDate]);
@@ -439,20 +475,17 @@ export default function HomeScreen() {
                     logId: todaySession?.id ?? '',
                   },
                 })}
-                style={{ borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: focusCardColor }}
+                style={{ borderRadius: 16, overflow: 'hidden' }}
               >
-                <LinearGradient
-                  colors={gradientColors}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={{ paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center' }}
-                >
-                  <Ionicons name="checkmark-circle" size={28} color="#FFFFFF" />
-                  <Text allowFontScaling style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', marginLeft: 12, flex: 1 }}>
-                    Workout Complete
-                  </Text>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFFAA', letterSpacing: 1 }}>DETAILS</Text>
-                </LinearGradient>
+                <BreathingGradient color={focusCardColor} style={{ borderRadius: 16, height: 56 }}>
+                  <View style={{ paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons name="checkmark-circle" size={28} color="#FFFFFF" />
+                    <Text allowFontScaling style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', marginLeft: 12, flex: 1 }}>
+                      Workout Complete
+                    </Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFFAA', letterSpacing: 1 }}>DETAILS</Text>
+                  </View>
+                </BreathingGradient>
               </Pressable>
               {/* Shareable session card */}
               {todaySession && (
@@ -529,116 +562,92 @@ export default function HomeScreen() {
               )}
             </View>
 
+          ) : !activeWorkoutDay && activeDate < todayStr ? (
+            /* Past rest day */
+            <View style={{ gap: 12 }}>
+              <BreathingGradient color={focusCardColor} style={{ borderRadius: 16, height: 56 }}>
+                <View style={{ paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="moon" size={28} color="#FFFFFF" />
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', marginLeft: 12 }}>Rest Day</Text>
+                </View>
+              </BreathingGradient>
+            </View>
+
           ) : !activeWorkoutDay ? (
             <View style={{ gap: 12 }}>
-              {/* Rest Day card — compact, matches Workout Complete */}
-              <View style={{ backgroundColor: theme.surface, borderRadius: 16, paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: theme.border }}>
-                <Ionicons name="moon" size={28} color={theme.chrome} />
-                <Text allowFontScaling style={{ fontSize: 16, fontWeight: '800', color: theme.text, marginLeft: 12 }}>Rest Day</Text>
-              </View>
-              {todaySession && (
-                <Pressable
-                  onPress={() => router.push({
-                    pathname: '/workout/post-workout',
-                    params: {
-                      exercises: JSON.stringify(todaySession.exercises),
-                      dayName: todaySession.day_name,
-                      focus: todaySession.day_name,
-                      durationMinutes: String(todaySession.duration_minutes ?? 0),
-                    },
-                  })}
-                >
-                  <View
-                    collapsable={false}
-                    style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{stripParens(todaySession.day_name)}</Text>
-                      <MuscleGroupPills categories={getExerciseCategories(todaySession.exercises)} size="small" />
-                    </View>
-                    <View style={{ alignItems: 'center', marginBottom: 12 }}>
-                      <Text style={{ fontSize: 32, fontWeight: '800', color: theme.text, lineHeight: 36 }}>
-                        {sessionVolume > 0 ? formatNumber(sessionVolume) : '\u2014'}
-                      </Text>
-                      <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>{weightUnit === 'lbs' ? 'pounds' : 'kg'} moved</Text>
-                    </View>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 10 }}>
-                      <View style={{ alignItems: 'center' }}>
-                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{sessionTotalSets}</Text>
-                        <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>sets</Text>
-                      </View>
-                      <View style={{ alignItems: 'center' }}>
-                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>
-                          {todaySession.exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).reduce((r, set) => r + set.reps, 0), 0)}
-                        </Text>
-                        <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>reps</Text>
-                      </View>
-                      <View style={{ alignItems: 'center' }}>
-                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{todaySession.duration_minutes}m</Text>
-                        <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>time</Text>
-                      </View>
-                    </View>
-                    {/* Muscle volume breakdown */}
-                    {(() => {
-                      const muscleVol = computeVolumeByMuscle(todaySession.exercises);
-                      if (muscleVol.length === 0) return null;
-                      return (
-                        <View style={{ marginTop: 12, gap: 8 }}>
-                          {muscleVol.map((item) => {
-                            const displayVol = weightUnit === 'lbs' ? Math.round(item.volume * 2.205) : item.volume;
-                            return (
-                              <View key={item.muscle} style={{ gap: 4 }}>
-                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <Text style={{ fontSize: 11, fontWeight: '600', color: theme.text }}>{item.muscle}</Text>
-                                  <Text style={{ fontSize: 11, color: theme.textSecondary }}>{formatNumber(displayVol)} {weightUnit === 'lbs' ? 'lbs' : 'kg'} ({item.percentage}%)</Text>
-                                </View>
-                                <View style={{ height: 6, backgroundColor: theme.border, borderRadius: 3, overflow: 'hidden' }}>
-                                  <View style={{ height: 6, backgroundColor: focusCardColor, borderRadius: 3, width: `${item.percentage}%` }} />
-                                </View>
-                              </View>
-                            );
-                          })}
-                        </View>
-                      );
-                    })()}
-                  </View>
-                </Pressable>
+              {/* Rest Day card — compact header */}
+              <BreathingGradient color={focusCardColor} style={{ borderRadius: 16, height: 56 }}>
+                <View style={{ paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="moon" size={28} color="#FFFFFF" />
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', marginLeft: 12 }}>Rest Day</Text>
+                </View>
+              </BreathingGradient>
+
+              {/* Streak badge */}
+              {activeDate === todayStr && streak >= 0 && (
+                <View style={{ backgroundColor: theme.surface, borderRadius: 16, paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: theme.border }}>
+                  <Ionicons name="flame" size={28} color={streak > 0 ? focusCardColor : theme.textSecondary} />
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, marginLeft: 12 }}>{streak}-day streak</Text>
+                </View>
               )}
+
+              {/* Training Readiness Ring */}
+              <TrainingReadinessRing recentLogs={recentLogs} />
+
+              {/* Forme Coach Card */}
+              <FormeCoachCard />
+
+              {/* Next Workout Preview */}
               {nextWorkout && activeDate >= todayStr && (() => {
                 const nextDayIdx = DAY_NAMES_FULL.findIndex((n) => n.toLowerCase() === nextWorkout.dayName.toLowerCase());
                 const daysUntil = nextDayIdx > activeIdx ? nextDayIdx - activeIdx : nextDayIdx + 7 - activeIdx;
-                const nextDate = new Date(activeDateObj);
-                nextDate.setDate(activeDateObj.getDate() + daysUntil);
-                const dateLabel = nextDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+                const nextDateLabel = daysUntil === 1 ? 'tomorrow' : DAY_NAMES_FULL[nextDayIdx];
                 return (
-                  <LinearGradient
-                    colors={gradientColors}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={{ borderRadius: 16, padding: 20 }}
-                  >
-                    <Text allowFontScaling style={{ fontSize: 10, color: '#FFFFFF99', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
-                      Up next · {dateLabel}
-                    </Text>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                      <Text allowFontScaling style={{ fontSize: 15, fontWeight: '800', color: '#FFFFFF' }}>
-                        {nextWorkout.focus}
-                      </Text>
-                      <MuscleGroupPills categories={getExerciseCategories(nextWorkout.exercises)} size="normal" />
-                    </View>
-                    <Text allowFontScaling style={{ fontSize: 12, color: '#FFFFFFCC', marginTop: 4 }}>
-                      {nextWorkout.exercises.length} exercises
-                    </Text>
-                    <View style={{ marginTop: 10, gap: 3 }}>
-                      {nextWorkout.exercises.map((ex: any, i: number) => (
-                        <Text key={i} allowFontScaling style={{ fontSize: 12, color: '#FFFFFFCC' }}>
-                          {`- ${ex.name}`}
-                        </Text>
-                      ))}
-                    </View>
-                  </LinearGradient>
+                  <NextWorkoutCard
+                    workoutName={stripParens(nextWorkout.focus)}
+                    dateLabel={nextDateLabel}
+                    exercises={nextWorkout.exercises.map((ex: any) => ({
+                      name: ex.name,
+                      sets: ex.sets,
+                      reps: ex.reps,
+                    }))}
+                    color={focusCardColor}
+                  />
                 );
               })()}
+
+              {/* This Week Card */}
+              {(() => {
+                const dayInitials = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
+                const weekData = weekDates.map((date, i) => {
+                  const dk = dateKey(date);
+                  const dayLog = weekLogsRef.current.find((l: any) => l.completed_at?.startsWith(dk));
+                  const rawVolume = dayLog ? computeTotalVolume(dayLog.exercises as LoggedExercise[]) : 0;
+                  const volume = Math.round(rawVolume);
+                  const isFuture = dk > todayStr;
+                  const dayName = DAY_NAMES_FULL[date.getDay()].toLowerCase();
+                  const isPlannedWorkout = planDayNames.has(dayName);
+                  const isRestDay = !isPlannedWorkout && !dayLog;
+                  return {
+                    day: dayInitials[i],
+                    volume,
+                    isWorkout: !!dayLog,
+                    isFuture,
+                    isRestDay,
+                  };
+                });
+                const totalVol = weekData.reduce((s, d) => s + d.volume, 0);
+                const sessionsCount = weekData.filter(d => d.isWorkout).length;
+                return (
+                  <ThisWeekCard
+                    weekData={weekData}
+                    totalVolume={totalVol}
+                    sessionsCount={sessionsCount}
+                    prCount={0}
+                  />
+                );
+              })()}
+
             </View>
 
           ) : (
@@ -658,12 +667,11 @@ export default function HomeScreen() {
                     }}
                     style={{ borderRadius: 24, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
                   >
-                    <LinearGradient
-                      colors={gradientColors}
-                      start={{ x: 0, y: 0 }}
-                      end={{ x: 1, y: 1 }}
-                      style={{ paddingHorizontal: 20, paddingVertical: 24, flex: 1, borderRadius: 24 }}
+                    <BreathingGradient
+                      color={focusCardColor}
+                      style={{ borderRadius: 24 }}
                     >
+                      <View style={{ paddingHorizontal: 20, paddingVertical: 24 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                         <View style={{ flex: 1 }}>
                           <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
@@ -693,7 +701,8 @@ export default function HomeScreen() {
                       <View style={{ marginTop: 12 }}>
                         <MuscleGroupPills categories={getExerciseCategories(activeWorkout.loggedExercises)} size="small" />
                       </View>
-                    </LinearGradient>
+                      </View>
+                    </BreathingGradient>
                   </Pressable>
                 );
               })() : (
@@ -704,12 +713,11 @@ export default function HomeScreen() {
                   }}
                   style={{ borderRadius: 24, shadowColor: focusCardColor, shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.45, shadowRadius: 16, elevation: 12 }}
                 >
-                  <LinearGradient
-                    colors={gradientColors}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={{ paddingHorizontal: 20, paddingVertical: 24, borderRadius: 24 }}
+                  <BreathingGradient
+                    color={focusCardColor}
+                    style={{ borderRadius: 24 }}
                   >
+                    <View style={{ paddingHorizontal: 20, paddingVertical: 24 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                       <View style={{ flex: 1 }}>
                         {!selectedDate && (
@@ -736,7 +744,8 @@ export default function HomeScreen() {
                     <View style={{ marginTop: 12 }}>
                       <MuscleGroupPills categories={getExerciseCategories(activeWorkoutDay.exercises)} size="small" />
                     </View>
-                  </LinearGradient>
+                    </View>
+                  </BreathingGradient>
                 </Pressable>
               )}
             </View>
