@@ -1387,9 +1387,18 @@ export default function WorkoutScreen() {
                           >
                             <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Add Dropset</Text>
                           </Pressable>
-                          {exIdx + 1 < loggedExercises.length && (
+                          {exIdx + 1 < loggedExercises.length ? (
                             <Pressable
                               onPress={() => {
+                                // Auto-complete all sets in current exercise
+                                setLoggedExercises((prev) => {
+                                  const updated = [...prev];
+                                  updated[exIdx] = {
+                                    ...updated[exIdx],
+                                    sets: updated[exIdx].sets.map((s) => ({ ...s, completed: true })),
+                                  };
+                                  return updated;
+                                });
                                 animateLayout();
                                 setActiveExercise(exIdx + 1);
                                 scrollToExercise(exIdx + 1);
@@ -1397,6 +1406,25 @@ export default function WorkoutScreen() {
                               style={{ width: 44, height: 44, backgroundColor: '#22C55E', borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
                             >
                               <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
+                            </Pressable>
+                          ) : (
+                            <Pressable
+                              onPress={() => {
+                                // Auto-complete all sets in current (last) exercise
+                                setLoggedExercises((prev) => {
+                                  const updated = [...prev];
+                                  updated[exIdx] = {
+                                    ...updated[exIdx],
+                                    sets: updated[exIdx].sets.map((s) => ({ ...s, completed: true })),
+                                  };
+                                  return updated;
+                                });
+                                animateLayout();
+                                setActiveExercise(null); // collapse all — overview mode
+                              }}
+                              style={{ paddingHorizontal: 16, height: 44, backgroundColor: '#22C55E', borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
+                            >
+                              <Text style={{ fontSize: 14, fontWeight: '800', color: '#FFFFFF', letterSpacing: 0.5 }}>FINISH</Text>
                             </Pressable>
                           )}
                         </View>

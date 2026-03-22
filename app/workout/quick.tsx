@@ -135,6 +135,12 @@ export default function QuickWorkoutScreen() {
   const [customEquipment, setCustomEquipment] = useState('Barbell');
   const [scanning, setScanning] = useState(false);
 
+  // Saved routines
+  interface SavedRoutine { id: string; name: string; exercises: { name: string; sets: number; reps: string }[]; last_used_at: string; }
+  const [savedRoutines, setSavedRoutines] = useState<SavedRoutine[]>([]);
+  const [savedRoutinesLoaded, setSavedRoutinesLoaded] = useState(false);
+  const activeRoutineRef = useRef<SavedRoutine | null>(null);
+
   // Rest timer state - epoch-based so it survives app backgrounding
   const [restStartEpoch, setRestStartEpoch] = useState<number | null>(null);
   const [restRemaining, setRestRemaining] = useState(0);
@@ -196,6 +202,25 @@ export default function QuickWorkoutScreen() {
 
   useEffect(() => { loadPreviousSets(); }, []);
   useEffect(() => { if (!customLoaded) loadCustomExercises(); }, []);
+
+  // Load saved routines
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+        const { data } = await supabase
+          .from('saved_routines')
+          .select('id, name, exercises, last_used_at')
+          .eq('user_id', user.id)
+          .order('last_used_at', { ascending: false })
+          .limit(20);
+        if (data) setSavedRoutines(data as SavedRoutine[]);
+      } catch {} finally {
+        setSavedRoutinesLoaded(true);
+      }
+    })();
+  }, []);
 
   useEffect(() => {
     if (phase === 'workout' && loggedExercises.length > 0) {
@@ -456,10 +481,17 @@ export default function QuickWorkoutScreen() {
 
   const startQuickWorkout = () => {
     if (selectedNames.length === 0) return;
-    const initial: LoggedExercise[] = selectedNames.map((name) => ({
-      name,
-      sets: Array.from({ length: 3 }, () => ({ weight: null, reps: 0, completed: false })),
-    }));
+    const routine = activeRoutineRef.current;
+    const routineMap = new Map(routine?.exercises.map(e => [e.name, e]) ?? []);
+    const initial: LoggedExercise[] = selectedNames.map((name) => {
+      const saved = routineMap.get(name);
+      const numSets = saved?.sets ?? 3;
+      return {
+        name,
+        sets: Array.from({ length: numSets }, () => ({ weight: null, reps: 0, completed: false })),
+      };
+    });
+    activeRoutineRef.current = null;
     startWorkout(-1, workoutName.trim() || 'My Workout', 'Custom', initial);
     setLoggedExercises(initial);
     startedRef.current = true;
@@ -735,14 +767,43 @@ export default function QuickWorkoutScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
+        const trimmedName = workoutName.trim() || 'My Workout';
         await supabase.from('workout_logs').insert({
           user_id: user.id,
           plan_id: null,
-          day_name: workoutName.trim() || 'My Workout',
+          day_name: trimmedName,
           exercises: loggedExercises,
           duration_minutes: durationMinutes,
           completed_at: new Date().toISOString(),
         });
+
+        // Save/update routine template so user can reuse it
+        const routineExercises = loggedExercises.map(ex => ({
+          name: ex.name,
+          sets: ex.sets.length,
+          reps: String(Math.max(...ex.sets.map(s => s.reps || 0)) || 10),
+        }));
+        // Check if a routine with the same name exists
+        const { data: existing } = await supabase
+          .from('saved_routines')
+          .select('id')
+          .eq('user_id', user.id)
+          .eq('name', trimmedName)
+          .limit(1)
+          .maybeSingle();
+        if (existing) {
+          await supabase.from('saved_routines').update({
+            exercises: routineExercises,
+            last_used_at: new Date().toISOString(),
+          }).eq('id', existing.id);
+        } else {
+          await supabase.from('saved_routines').insert({
+            user_id: user.id,
+            name: trimmedName,
+            exercises: routineExercises,
+            last_used_at: new Date().toISOString(),
+          });
+        }
       }
     } catch {} finally {
       setSaving(false);
@@ -843,6 +904,7 @@ export default function QuickWorkoutScreen() {
           <Pressable
             onPress={() => {
               if (selectedNames.length === 0) return;
+              activeRoutineRef.current = null;
               setWorkoutName('My Workout');
               setShowNamePrompt(true);
             }}
@@ -916,6 +978,52 @@ export default function QuickWorkoutScreen() {
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
         >
+          {/* Saved Routines */}
+          {savedRoutinesLoaded && savedRoutines.length > 0 && !search && (
+            <View style={{ marginBottom: 16 }}>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text, marginBottom: 8 }}>
+                Saved Routines
+              </Text>
+              {savedRoutines.map((routine) => (
+                <Pressable
+                  key={routine.id}
+                  onPress={() => {
+                    // Pre-fill exercises from saved routine
+                    const names = routine.exercises.map((e: any) => e.name);
+                    setSelectedNames(names);
+                    setWorkoutName(routine.name);
+                    activeRoutineRef.current = routine;
+                    setShowNamePrompt(true);
+                  }}
+                  onLongPress={() => {
+                    Alert.alert('Delete Routine', `Remove "${routine.name}" from saved routines?`, [
+                      { text: 'Cancel', style: 'cancel' },
+                      { text: 'Delete', style: 'destructive', onPress: async () => {
+                        await supabase.from('saved_routines').delete().eq('id', routine.id);
+                        setSavedRoutines(prev => prev.filter(r => r.id !== routine.id));
+                      }},
+                    ]);
+                  }}
+                  style={{
+                    backgroundColor: theme.surface,
+                    borderWidth: 1, borderColor: theme.border, borderRadius: 12,
+                    paddingHorizontal: 14, paddingVertical: 12,
+                    marginBottom: 8, flexDirection: 'row', alignItems: 'center',
+                  }}
+                >
+                  <Ionicons name="bookmark" size={18} color={avatarColor} style={{ marginRight: 10 }} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>{routine.name}</Text>
+                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
+                      {routine.exercises.length} exercises
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={theme.chrome} />
+                </Pressable>
+              ))}
+            </View>
+          )}
+
           {/* Camera + Custom buttons */}
           <View style={{ flexDirection: 'row', gap: 8, marginBottom: 12 }}>
             <Pressable
@@ -1791,9 +1899,18 @@ export default function QuickWorkoutScreen() {
                           >
                             <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }}>Add Dropset</Text>
                           </Pressable>
-                          {exIdx + 1 < loggedExercises.length && (
+                          {exIdx + 1 < loggedExercises.length ? (
                             <Pressable
                               onPress={() => {
+                                // Auto-complete all sets in current exercise
+                                setLoggedExercises((prev) => {
+                                  const updated = [...prev];
+                                  updated[exIdx] = {
+                                    ...updated[exIdx],
+                                    sets: updated[exIdx].sets.map((s) => ({ ...s, completed: true })),
+                                  };
+                                  return updated;
+                                });
                                 animateLayout();
                                 setActiveExercise(exIdx + 1);
                                 scrollToExercise(exIdx + 1);
@@ -1801,6 +1918,25 @@ export default function QuickWorkoutScreen() {
                               style={{ width: 44, height: 44, backgroundColor: '#22C55E', borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
                             >
                               <Ionicons name="arrow-forward" size={20} color="#FFFFFF" />
+                            </Pressable>
+                          ) : (
+                            <Pressable
+                              onPress={() => {
+                                // Auto-complete all sets in current (last) exercise
+                                setLoggedExercises((prev) => {
+                                  const updated = [...prev];
+                                  updated[exIdx] = {
+                                    ...updated[exIdx],
+                                    sets: updated[exIdx].sets.map((s) => ({ ...s, completed: true })),
+                                  };
+                                  return updated;
+                                });
+                                animateLayout();
+                                setActiveExercise(null); // collapse all — overview mode
+                              }}
+                              style={{ paddingHorizontal: 16, height: 44, backgroundColor: '#22C55E', borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
+                            >
+                              <Text style={{ fontSize: 14, fontWeight: '800', color: '#FFFFFF', letterSpacing: 0.5 }}>FINISH</Text>
                             </Pressable>
                           )}
                         </View>

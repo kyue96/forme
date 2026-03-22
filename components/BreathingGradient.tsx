@@ -40,6 +40,14 @@ export function BreathingGradient({ color, style, children, duration = 2500 }: B
         end={{ x: 1, y: 1 }}
         style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius }}
       />
+      {/* Metallic silver sheen — subtle diagonal highlight */}
+      <LinearGradient
+        colors={['transparent', 'rgba(192,192,192,0.12)', 'rgba(220,220,220,0.18)', 'rgba(192,192,192,0.12)', 'transparent']}
+        locations={[0, 0.35, 0.5, 0.65, 1]}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, borderRadius }}
+      />
       {/* Breathing overlay — lighter gradient that pulses */}
       <Animated.View style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, opacity: breathAnim }}>
         <LinearGradient
