@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
@@ -79,6 +79,56 @@ export default function WorkoutScreen() {
   const [swapTarget, setSwapTarget] = useState<{ dayIdx: number; exIdx: number } | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
+  const createdAt = useUserStore((s) => s.createdAt);
+
+  // History calendar state
+  const now = new Date();
+  const [historyMonth, setHistoryMonth] = useState({ year: now.getFullYear(), month: now.getMonth() });
+  const [selectedHistoryDate, setSelectedHistoryDate] = useState<string>(dateKey(now));
+  const [historyLogs, setHistoryLogs] = useState<WorkoutLog[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const historyLogDates = useMemo(() => new Set(historyLogs.map(l => l.completed_at?.split('T')[0])), [historyLogs]);
+
+  // Min date for history calendar (month user joined)
+  const historyMinDate = useMemo(() => {
+    if (!createdAt) return null;
+    const d = new Date(createdAt);
+    return { year: d.getFullYear(), month: d.getMonth() };
+  }, [createdAt]);
+
+  // Load logs for the selected history month
+  const loadHistoryMonth = useCallback(async (year: number, month: number) => {
+    setHistoryLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const start = `${year}-${String(month + 1).padStart(2, '0')}-01`;
+      const endDate = new Date(year, month + 1, 0);
+      const end = `${year}-${String(month + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}T23:59:59`;
+      const { data } = await supabase
+        .from('workout_logs')
+        .select('id, day_name, exercises, duration_minutes, completed_at')
+        .eq('user_id', user.id)
+        .gte('completed_at', start)
+        .lte('completed_at', end)
+        .order('completed_at', { ascending: false });
+      setHistoryLogs((data as WorkoutLog[]) ?? []);
+    } catch {} finally {
+      setHistoryLoading(false);
+    }
+  }, []);
+
+  // Load history when month changes or history is shown
+  useEffect(() => {
+    if (showHistory) {
+      loadHistoryMonth(historyMonth.year, historyMonth.month);
+    }
+  }, [showHistory, historyMonth.year, historyMonth.month, loadHistoryMonth]);
+
+  const selectedDayLogs = useMemo(() =>
+    historyLogs.filter(l => l.completed_at?.startsWith(selectedHistoryDate)),
+    [historyLogs, selectedHistoryDate]
+  );
 
 
   // Open a specific log when navigated from the home screen calendar.
@@ -234,6 +284,7 @@ export default function WorkoutScreen() {
         onPress: async () => {
           await supabase.from('workout_logs').delete().eq('id', logId);
           loadAllData();
+          loadHistoryMonth(historyMonth.year, historyMonth.month);
         },
       },
     ]);
@@ -483,16 +534,118 @@ export default function WorkoutScreen() {
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
           showsVerticalScrollIndicator={false}
         >
-          {/* Recent Workouts List */}
-          {logs.length === 0 ? (
+          {/* Monthly Calendar */}
+          {(() => {
+            const { year, month } = historyMonth;
+            const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+            const daysInMonth = new Date(year, month + 1, 0).getDate();
+            const monthLabel = new Date(year, month).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+            const todayStr = dateKey(new Date());
+            const isAtMin = !!(historyMinDate && year === historyMinDate.year && month === historyMinDate.month);
+            const isAtMax = year === now.getFullYear() && month === now.getMonth();
+            const DAY_HEADERS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+
+            const goMonth = (dir: -1 | 1) => {
+              if (dir === -1 && isAtMin) return;
+              if (dir === 1 && isAtMax) return;
+              let newMonth = month + dir;
+              let newYear = year;
+              if (newMonth < 0) { newMonth = 11; newYear--; }
+              if (newMonth > 11) { newMonth = 0; newYear++; }
+              setHistoryMonth({ year: newYear, month: newMonth });
+            };
+
+            // Build grid cells
+            const cells: (number | null)[] = [];
+            for (let i = 0; i < firstDay; i++) cells.push(null);
+            for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+            while (cells.length % 7 !== 0) cells.push(null);
+
+            return (
+              <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginBottom: 16 }}>
+                {/* Month nav */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                  <Pressable onPress={() => goMonth(-1)} hitSlop={12} style={{ opacity: isAtMin ? 0.2 : 1 }} disabled={isAtMin}>
+                    <Ionicons name="chevron-back" size={20} color={theme.text} />
+                  </Pressable>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>{monthLabel}</Text>
+                  <Pressable onPress={() => goMonth(1)} hitSlop={12} style={{ opacity: isAtMax ? 0.2 : 1 }} disabled={isAtMax}>
+                    <Ionicons name="chevron-forward" size={20} color={theme.text} />
+                  </Pressable>
+                </View>
+
+                {/* Day headers */}
+                <View style={{ flexDirection: 'row' }}>
+                  {DAY_HEADERS.map((d, i) => (
+                    <View key={i} style={{ flex: 1, alignItems: 'center', marginBottom: 8 }}>
+                      <Text style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary }}>{d}</Text>
+                    </View>
+                  ))}
+                </View>
+
+                {/* Date grid */}
+                {Array.from({ length: cells.length / 7 }, (_, row) => (
+                  <View key={row} style={{ flexDirection: 'row', marginBottom: 4 }}>
+                    {cells.slice(row * 7, row * 7 + 7).map((day, col) => {
+                      if (day === null) return <View key={col} style={{ flex: 1, height: 40 }} />;
+                      const dk = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                      const isToday = dk === todayStr;
+                      const isSelected = dk === selectedHistoryDate;
+                      const hasWorkout = historyLogDates.has(dk);
+                      // Don't allow selecting future dates
+                      const isFuture = dk > todayStr;
+
+                      return (
+                        <Pressable
+                          key={col}
+                          onPress={() => !isFuture && setSelectedHistoryDate(dk)}
+                          style={{ flex: 1, height: 40, alignItems: 'center', justifyContent: 'center' }}
+                          disabled={isFuture}
+                        >
+                          <View style={{
+                            width: 32, height: 32, borderRadius: 16,
+                            alignItems: 'center', justifyContent: 'center',
+                            backgroundColor: isSelected ? focusCardColor : 'transparent',
+                            borderWidth: isToday && !isSelected ? 1.5 : 0,
+                            borderColor: focusCardColor,
+                          }}>
+                            <Text style={{
+                              fontSize: 14,
+                              fontWeight: isSelected || isToday ? '700' : '400',
+                              color: isFuture ? theme.border : isSelected ? '#FFFFFF' : theme.text,
+                            }}>
+                              {day}
+                            </Text>
+                          </View>
+                          {/* Workout dot */}
+                          {hasWorkout && !isSelected && (
+                            <View style={{
+                              width: 5, height: 5, borderRadius: 2.5,
+                              backgroundColor: focusCardColor,
+                              position: 'absolute', bottom: 2,
+                            }} />
+                          )}
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                ))}
+              </View>
+            );
+          })()}
+
+          {/* Selected day workout(s) */}
+          {historyLoading ? (
+            <ActivityIndicator color={theme.chrome} style={{ marginTop: 16 }} />
+          ) : selectedDayLogs.length === 0 ? (
             <View style={{ alignItems: 'center', paddingVertical: 24 }}>
               <Ionicons name="barbell-outline" size={28} color={theme.border} />
               <Text allowFontScaling style={{ color: theme.textSecondary, marginTop: 8, fontSize: 13 }}>
-                No workouts logged yet.
+                {selectedHistoryDate === dateKey(new Date()) ? 'No workouts logged today.' : 'Rest day'}
               </Text>
             </View>
           ) : (
-            logs.map((log) => {
+            selectedDayLogs.map((log) => {
               const dateObj = new Date(log.completed_at);
               const dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
               const logPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
