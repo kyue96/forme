@@ -68,7 +68,7 @@ function formatDayDate(dayName: string, refDate?: Date | null): string {
 export default function WorkoutScreen() {
   const router = useRouter();
   const { plan, loading, refetch } = usePlan();
-  const { theme } = useSettings();
+  const { theme, weightUnit } = useSettings();
   const avatarColor = useUserStore((s) => s.avatarColor);
   const focusCardColor = avatarColor || '#F59E0B';
   const { logId } = useLocalSearchParams<{ logId?: string }>();
@@ -88,6 +88,7 @@ export default function WorkoutScreen() {
   const [historyLogs, setHistoryLogs] = useState<WorkoutLog[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyCalExpanded, setHistoryCalExpanded] = useState(false);
+  const [expandedLogId, setExpandedLogId] = useState<string | null>(null);
   const historyLogDates = useMemo(() => new Set(historyLogs.map(l => l.completed_at?.split('T')[0])), [historyLogs]);
 
   // Min date for history calendar (month user joined)
@@ -678,41 +679,34 @@ export default function WorkoutScreen() {
               const dateObj = new Date(log.completed_at);
               const dateLabel = dateObj.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
               const logPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
+              const isExpanded = expandedLogId === log.id;
               return (
                 <Swipeable
                   key={log.id}
                   renderRightActions={renderHistoryRightActions(log.id)}
                   overshootRight={false}
                 >
-                  <Pressable
-                    onPress={() => {
-                      router.push({
-                        pathname: '/workout/session-view',
-                        params: {
-                          exercises: JSON.stringify(log.exercises),
-                          dayName: log.day_name,
-                          focus: logPlanDay?.focus ?? log.day_name,
-                          durationMinutes: String(log.duration_minutes ?? 0),
-                          completedAt: log.completed_at,
-                          logId: log.id,
-                        },
-                      });
-                    }}
-                    style={{
-                      backgroundColor: theme.surface,
-                      borderRadius: 16,
-                      marginBottom: 10,
-                      overflow: 'hidden',
-                    }}
-                  >
-                    <View style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      paddingLeft: 16,
-                      paddingRight: 16,
-                      paddingVertical: 14,
-                    }}>
+                  <View style={{
+                    backgroundColor: theme.surface,
+                    borderRadius: 16,
+                    marginBottom: 10,
+                    overflow: 'hidden',
+                  }}>
+                    {/* Compact header — tap to expand */}
+                    <Pressable
+                      onPress={() => {
+                        animateLayout();
+                        setExpandedLogId(isExpanded ? null : log.id);
+                      }}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        paddingLeft: 16,
+                        paddingRight: 16,
+                        paddingVertical: 14,
+                      }}
+                    >
                       <View style={{ flex: 1 }}>
                         <Text allowFontScaling style={{ fontSize: 11, color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>
                           {dateLabel}
@@ -721,15 +715,48 @@ export default function WorkoutScreen() {
                           {stripParens(logPlanDay?.focus ?? log.day_name)}
                         </Text>
                         <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
-                          {log.exercises.length} exercises
+                          {log.exercises.length} exercises · {log.duration_minutes}m
                         </Text>
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                         <MuscleGroupPills categories={getExerciseCategories(log.exercises)} size="small" />
-                        <Ionicons name="chevron-forward" size={18} color={theme.chrome} />
+                        <Ionicons name={isExpanded ? 'chevron-down' : 'chevron-forward'} size={18} color={theme.chrome} />
                       </View>
-                    </View>
-                  </Pressable>
+                    </Pressable>
+
+                    {/* Expanded exercise details */}
+                    {isExpanded && (
+                      <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+                        <View style={{ height: 1, backgroundColor: theme.border, marginBottom: 12 }} />
+                        {log.exercises.map((ex, exIdx) => {
+                          const completedSets = ex.sets.filter(s => s.completed);
+                          if (completedSets.length === 0) return null;
+                          return (
+                            <View key={exIdx} style={{ marginBottom: 12 }}>
+                              <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text, marginBottom: 6 }}>
+                                {ex.name}
+                              </Text>
+                              {completedSets.map((set, setIdx) => {
+                                const displayWeight = set.weight != null
+                                  ? (weightUnit === 'lbs' ? Math.round(set.weight * 2.205) : Math.round(set.weight))
+                                  : null;
+                                return (
+                                  <View key={setIdx} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 3, paddingLeft: 8 }}>
+                                    <Text style={{ fontSize: 12, color: theme.textSecondary, width: 28 }}>
+                                      {set.isDropSet ? 'D' : `${setIdx + 1}`}
+                                    </Text>
+                                    <Text style={{ fontSize: 12, color: theme.text }}>
+                                      {displayWeight != null ? `${displayWeight} ${weightUnit} × ${set.reps}` : `${set.reps} reps`}
+                                    </Text>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          );
+                        })}
+                      </View>
+                    )}
+                  </View>
                 </Swipeable>
               );
             })
