@@ -35,6 +35,11 @@ export const StampCard = React.forwardRef<View, Props>(({ data }, ref) => {
       }}
     >
       <Text style={{ ...FONT.brand, color: accent || '#999999', marginBottom: 4 }}>FORME</Text>
+      {data.focus ? (
+        <Text style={{ fontSize: 12, fontWeight: '700', color: '#000000', marginBottom: 4 }} numberOfLines={1}>
+          {data.focus}
+        </Text>
+      ) : null}
       <Text style={{ ...FONT.hero, color: '#000000' }}>
         {formatNumber(Math.round(data.totalVolume))}
       </Text>

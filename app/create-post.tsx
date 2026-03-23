@@ -38,10 +38,11 @@ export default function CreatePostScreen() {
   const params = useLocalSearchParams<{
     cardData?: string;
     workoutLogId?: string;
+    photoUri?: string;
   }>();
 
   const [caption, setCaption] = useState('');
-  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [imageUri, setImageUri] = useState<string | null>(params.photoUri ?? null);
   const [selectedLog, setSelectedLog] = useState<WorkoutLogEntry | null>(null);
   const [cardData, setCardData] = useState<CardData | null>(
     params.cardData ? JSON.parse(params.cardData) : null

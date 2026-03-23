@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Image, Modal, Pressable, Share, Text, TextInput, View } from 'react-native';
+import { Alert, Image, KeyboardAvoidingView, Modal, Platform, Pressable, Share, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
@@ -61,6 +61,8 @@ export function FeedPost({ post }: FeedPostProps) {
   const [deleteConfirm, setDeleteConfirm] = useState(false);
   const [editModalVisible, setEditModalVisible] = useState(false);
   const [editCaption, setEditCaption] = useState('');
+  const [editClearImage, setEditClearImage] = useState(false);
+  const [editClearCard, setEditClearCard] = useState(false);
   const [inlineComments, setInlineComments] = useState<Comment[]>([]);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [commentText, setCommentText] = useState('');
@@ -170,12 +172,18 @@ export function FeedPost({ post }: FeedPostProps) {
 
   const handleEdit = () => {
     setEditCaption(post.caption ?? '');
+    setEditClearImage(false);
+    setEditClearCard(false);
     setEditModalVisible(true);
     setMenuVisible(false);
   };
 
   const handleSaveEdit = async () => {
-    const ok = await updatePost(post.id, editCaption.trim());
+    const opts = {
+      ...(editClearImage ? { clearImage: true } : {}),
+      ...(editClearCard ? { clearCard: true } : {}),
+    };
+    const ok = await updatePost(post.id, editCaption.trim(), Object.keys(opts).length > 0 ? opts : undefined);
     if (ok) {
       setEditModalVisible(false);
     } else {
@@ -399,53 +407,93 @@ export function FeedPost({ post }: FeedPostProps) {
           <Pressable style={{ flex: 1 }} onPress={() => setEditModalVisible(false)}>
             <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} />
           </Pressable>
-          <View style={{
-            backgroundColor: theme.background,
-            borderTopLeftRadius: 20,
-            borderTopRightRadius: 20,
-            padding: 20,
-            borderTopWidth: 1,
-            borderTopColor: theme.border,
-          }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>Edit Post</Text>
-              <Pressable onPress={() => setEditModalVisible(false)} hitSlop={12}>
-                <Ionicons name="close" size={22} color={theme.chrome} />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            keyboardVerticalOffset={0}
+          >
+            <View style={{
+              backgroundColor: theme.background,
+              borderTopLeftRadius: 20,
+              borderTopRightRadius: 20,
+              padding: 20,
+              borderTopWidth: 1,
+              borderTopColor: theme.border,
+            }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>Edit Post</Text>
+                <Pressable onPress={() => setEditModalVisible(false)} hitSlop={12}>
+                  <Ionicons name="close" size={22} color={theme.chrome} />
+                </Pressable>
+              </View>
+              <TextInput
+                style={{
+                  fontSize: 16,
+                  color: theme.text,
+                  minHeight: 100,
+                  textAlignVertical: 'top',
+                  backgroundColor: theme.surface,
+                  borderRadius: 12,
+                  padding: 12,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                }}
+                value={editCaption}
+                onChangeText={setEditCaption}
+                multiline
+                maxLength={500}
+                placeholder="Write a caption..."
+                placeholderTextColor={theme.textSecondary}
+                autoFocus
+              />
+              {/* Remove attachment buttons */}
+              {(post.image_url && !editClearImage) || (post.card_data && !editClearCard) ? (
+                <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
+                  {post.image_url && !editClearImage && (
+                    <Pressable
+                      onPress={() => setEditClearImage(true)}
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', gap: 6,
+                        paddingHorizontal: 12, paddingVertical: 8,
+                        borderRadius: 10, backgroundColor: theme.surface,
+                        borderWidth: 1, borderColor: theme.border,
+                      }}
+                    >
+                      <Ionicons name="image-outline" size={16} color={theme.textSecondary} />
+                      <Text style={{ fontSize: 13, color: theme.textSecondary }}>Remove Photo</Text>
+                      <Ionicons name="close-circle" size={16} color={theme.chrome} />
+                    </Pressable>
+                  )}
+                  {post.card_data && !editClearCard && (
+                    <Pressable
+                      onPress={() => setEditClearCard(true)}
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', gap: 6,
+                        paddingHorizontal: 12, paddingVertical: 8,
+                        borderRadius: 10, backgroundColor: theme.surface,
+                        borderWidth: 1, borderColor: theme.border,
+                      }}
+                    >
+                      <Ionicons name="card-outline" size={16} color={theme.textSecondary} />
+                      <Text style={{ fontSize: 13, color: theme.textSecondary }}>Remove Card</Text>
+                      <Ionicons name="close-circle" size={16} color={theme.chrome} />
+                    </Pressable>
+                  )}
+                </View>
+              ) : null}
+              <Pressable
+                onPress={handleSaveEdit}
+                style={{
+                  marginTop: 16,
+                  backgroundColor: theme.text,
+                  paddingVertical: 14,
+                  borderRadius: 14,
+                  alignItems: 'center',
+                }}
+              >
+                <Text style={{ fontSize: 15, fontWeight: '700', color: theme.background }}>Save</Text>
               </Pressable>
             </View>
-            <TextInput
-              style={{
-                fontSize: 16,
-                color: theme.text,
-                minHeight: 100,
-                textAlignVertical: 'top',
-                backgroundColor: theme.surface,
-                borderRadius: 12,
-                padding: 12,
-                borderWidth: 1,
-                borderColor: theme.border,
-              }}
-              value={editCaption}
-              onChangeText={setEditCaption}
-              multiline
-              maxLength={500}
-              placeholder="Write a caption..."
-              placeholderTextColor={theme.textSecondary}
-              autoFocus
-            />
-            <Pressable
-              onPress={handleSaveEdit}
-              style={{
-                marginTop: 16,
-                backgroundColor: theme.text,
-                paddingVertical: 14,
-                borderRadius: 14,
-                alignItems: 'center',
-              }}
-            >
-              <Text style={{ fontSize: 15, fontWeight: '700', color: theme.background }}>Save</Text>
-            </Pressable>
-          </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </View>

@@ -20,7 +20,9 @@ interface Props {
 export const MagazineCard = React.forwardRef<View, Props>(({ data }, ref) => {
   const accent = data.accentColor || null;
   const unitWord = data.unitLabel === 'lbs' ? 'POUNDS' : 'KILOGRAMS';
-  const bestSetStr = data.bestSet ? `${formatNumber(data.bestSet.weight)} \u00D7 ${data.bestSet.reps}` : null;
+  const bestSetStr = data.bestSet
+    ? `${data.bestSet.exerciseName.split(/[\s(]/)[0]} ${formatNumber(data.bestSet.weight)} \u00D7 ${data.bestSet.reps}`
+    : null;
   const densityStr = data.density > 0 ? `${formatNumber(data.density)}` : null;
   const intensityStr = data.avgIntensity > 0 ? `${data.avgIntensity} / 100` : null;
   const durationStr = data.durationMinutes < 60
@@ -55,6 +57,11 @@ export const MagazineCard = React.forwardRef<View, Props>(({ data }, ref) => {
           </Text>
         </View>
         <View style={{ height: 2, backgroundColor: accent || '#000000', marginTop: 14 }} />
+        {data.focus ? (
+          <Text style={{ fontSize: 16, fontWeight: '800', color: '#000000', marginTop: 10 }} numberOfLines={1}>
+            {data.focus}
+          </Text>
+        ) : null}
       </View>
 
       {/* Hero volume */}

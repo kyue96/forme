@@ -8,6 +8,7 @@ import {
   Pressable,
   ScrollView,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -28,6 +29,7 @@ import { MuscleGroupPills } from '@/components/MuscleGroupPills';
 import { LoggedExercise, WorkoutDay, Exercise } from '@/lib/types';
 import { animateLayout, stripParens } from '@/lib/utils';
 import { getExerciseCategories, getExerciseCategory } from '@/lib/exercise-utils';
+import { useCustomExerciseStore } from '@/lib/custom-exercise-store';
 import { EXERCISE_DATABASE, BODYWEIGHT_KEYWORDS } from '@/lib/exercise-data';
 
 /**
@@ -128,6 +130,13 @@ export default function WorkoutScreen() {
   interface SavedRoutine { id: string; name: string; exercises: { name: string; sets: number; reps: string }[]; last_used_at: string; }
   const [savedRoutines, setSavedRoutines] = useState<SavedRoutine[]>([]);
   const [savedRoutinesLoading, setSavedRoutinesLoading] = useState(false);
+  const [expandedRoutineId, setExpandedRoutineId] = useState<string | null>(null);
+  const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
+  const [editingRoutineName, setEditingRoutineName] = useState('');
+  const customExercises = useCustomExerciseStore(s => s.exercises);
+  const customExercisesLoaded = useCustomExerciseStore(s => s.loaded);
+  const loadCustomExercises = useCustomExerciseStore(s => s.load);
+  const removeCustomExercise = useCustomExerciseStore(s => s.remove);
 
   // History calendar state
   const now = new Date();
@@ -259,7 +268,10 @@ export default function WorkoutScreen() {
   }, [storeUserId]);
 
   useEffect(() => {
-    if (viewMode === 'saved') loadSavedRoutines();
+    if (viewMode === 'saved') {
+      loadSavedRoutines();
+      if (!customExercisesLoaded) loadCustomExercises();
+    }
   }, [viewMode, loadSavedRoutines]);
 
   // Also reload saved routines on screen focus when in saved mode
@@ -281,6 +293,14 @@ export default function WorkoutScreen() {
     ]);
   }, []);
 
+  const renameRoutine = useCallback(async (routineId: string, newName: string) => {
+    const trimmed = newName.trim();
+    if (!trimmed) { setEditingRoutineId(null); return; }
+    await supabase.from('saved_routines').update({ name: trimmed }).eq('id', routineId);
+    setSavedRoutines(prev => prev.map(r => r.id === routineId ? { ...r, name: trimmed } : r));
+    setEditingRoutineId(null);
+  }, []);
+
   // Open a specific log when navigated from the home screen calendar.
   const consumedLogId = useRef<string | null>(null);
   useEffect(() => {
@@ -294,7 +314,7 @@ export default function WorkoutScreen() {
           params: {
             exercises: JSON.stringify(match.exercises),
             dayName: match.day_name,
-            focus: matchPlanDay?.focus ?? match.day_name,
+            focus: match.day_name || matchPlanDay?.focus || '',
             durationMinutes: String(match.duration_minutes ?? 0),
             completedAt: match.completed_at,
             logId: match.id,
@@ -1002,7 +1022,8 @@ export default function WorkoutScreen() {
               </Pressable>
             </View>
           ) : (
-            savedRoutines.map((routine) => {
+            <>
+            {savedRoutines.map((routine) => {
               const exerciseNames = routine.exercises.map((e: any) => e.name);
               const displayExercises = exerciseNames.length <= 3
                 ? exerciseNames.join(', ')
@@ -1015,6 +1036,8 @@ export default function WorkoutScreen() {
                     return `Last performed ${diff} days ago`;
                   })()
                 : '';
+              const isExpanded = expandedRoutineId === routine.id;
+              const isEditing = editingRoutineId === routine.id;
 
               return (
                 <View
@@ -1031,24 +1054,62 @@ export default function WorkoutScreen() {
                   <View style={{ padding: 16 }}>
                     {/* Header row */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 }}>
-                        <Ionicons name="bookmark" size={16} color={focusCardColor} />
-                        <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text, flex: 1 }} numberOfLines={1}>
-                          {routine.name}
-                        </Text>
-                      </View>
                       <Pressable
-                        onPress={() => deleteSavedRoutine(routine.id, routine.name)}
-                        hitSlop={8}
+                        onPress={() => { animateLayout(); setExpandedRoutineId(isExpanded ? null : routine.id); }}
+                        style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 }}
                       >
-                        <Ionicons name="trash-outline" size={16} color={theme.textSecondary} />
+                        <Ionicons name="bookmark" size={16} color={focusCardColor} />
+                        {isEditing ? (
+                          <TextInput
+                            style={{ fontSize: 15, fontWeight: '700', color: theme.text, flex: 1, padding: 0, borderBottomWidth: 1, borderBottomColor: focusCardColor }}
+                            value={editingRoutineName}
+                            onChangeText={setEditingRoutineName}
+                            onSubmitEditing={() => renameRoutine(routine.id, editingRoutineName)}
+                            onBlur={() => renameRoutine(routine.id, editingRoutineName)}
+                            autoFocus
+                            returnKeyType="done"
+                          />
+                        ) : (
+                          <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text, flex: 1 }} numberOfLines={1}>
+                            {routine.name}
+                          </Text>
+                        )}
+                        <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={16} color={theme.chrome} />
                       </Pressable>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginLeft: 8 }}>
+                        <Pressable
+                          onPress={() => {
+                            setEditingRoutineId(routine.id);
+                            setEditingRoutineName(routine.name);
+                          }}
+                          hitSlop={8}
+                        >
+                          <Ionicons name="pencil-outline" size={15} color={theme.textSecondary} />
+                        </Pressable>
+                        <Pressable
+                          onPress={() => deleteSavedRoutine(routine.id, routine.name)}
+                          hitSlop={8}
+                        >
+                          <Ionicons name="trash-outline" size={15} color={theme.textSecondary} />
+                        </Pressable>
+                      </View>
                     </View>
 
-                    {/* Exercise list */}
-                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4, marginLeft: 24 }}>
-                      {displayExercises}
-                    </Text>
+                    {/* Exercise summary or expanded list */}
+                    {isExpanded ? (
+                      <View style={{ marginLeft: 24, marginBottom: 8 }}>
+                        {routine.exercises.map((ex: any, i: number) => (
+                          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 6, borderBottomWidth: i < routine.exercises.length - 1 ? 1 : 0, borderBottomColor: theme.border }}>
+                            <Text style={{ fontSize: 13, color: theme.text, fontWeight: '500', flex: 1 }}>{ex.name}</Text>
+                            <Text style={{ fontSize: 12, color: theme.textSecondary }}>{ex.sets} × {ex.reps}</Text>
+                          </View>
+                        ))}
+                      </View>
+                    ) : (
+                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4, marginLeft: 24 }}>
+                        {displayExercises}
+                      </Text>
+                    )}
 
                     {/* Last performed */}
                     {lastUsed ? (
@@ -1079,7 +1140,48 @@ export default function WorkoutScreen() {
                   </View>
                 </View>
               );
-            })
+            })}
+
+            {/* Custom exercises section */}
+            {customExercises.length > 0 && (
+              <View style={{ marginTop: 16 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 10 }}>
+                  My Custom Exercises
+                </Text>
+                <View style={{ backgroundColor: theme.surface, borderRadius: 16, borderWidth: 1, borderColor: theme.border, overflow: 'hidden' }}>
+                  {customExercises.map((ce, i) => (
+                    <View
+                      key={ce.id}
+                      style={{
+                        flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                        paddingHorizontal: 16, paddingVertical: 12,
+                        borderBottomWidth: i < customExercises.length - 1 ? 1 : 0,
+                        borderBottomColor: theme.border,
+                      }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>{ce.name}</Text>
+                        <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
+                          {ce.muscleGroup}{ce.equipment ? ` · ${ce.equipment}` : ''}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() => {
+                          Alert.alert('Delete Exercise', `Remove "${ce.name}"?`, [
+                            { text: 'Cancel', style: 'cancel' },
+                            { text: 'Delete', style: 'destructive', onPress: () => removeCustomExercise(ce.id) },
+                          ]);
+                        }}
+                        hitSlop={8}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={theme.textSecondary} />
+                      </Pressable>
+                    </View>
+                  ))}
+                </View>
+              </View>
+            )}
+            </>
           )}
         </ScrollView>
       ) : (

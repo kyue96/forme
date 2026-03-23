@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   AppState,
+  InteractionManager,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -25,6 +26,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
 import { playRestTimerChime } from '@/lib/rest-timer-sound';
+import { useBadgeStore } from '@/lib/badge-store';
 import { useWorkoutStore } from '@/lib/workout-store';
 import { useCustomExerciseStore, CustomExercise } from '@/lib/custom-exercise-store';
 import { SetRow, SetRowKeyboardAccessory } from '@/components/SetRow';
@@ -90,6 +92,7 @@ export default function QuickWorkoutScreen() {
   const [search, setSearch] = useState('');
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+  const [selectedForAdd, setSelectedForAdd] = useState<Set<string>>(new Set());
   const [selectedNames, setSelectedNames] = useState<string[]>([]);
   const [workoutName, setWorkoutName] = useState(activeWorkout?.dayName ?? 'My Workout');
   const [editingName, setEditingName] = useState(false);
@@ -260,6 +263,25 @@ export default function QuickWorkoutScreen() {
       updateExercises(loggedExercises);
     }
   }, [loggedExercises, phase]);
+
+  // Recovery: if local state lost exercises but store still has them, recover
+  useEffect(() => {
+    if (phase !== 'workout') return;
+    const aw = useWorkoutStore.getState().activeWorkout;
+    if (loggedExercises.length === 0 && aw?.dayIndex === -1 && (aw.loggedExercises?.length ?? 0) > 0) {
+      setLoggedExercises(aw.loggedExercises);
+    }
+  }, [loggedExercises.length, phase]);
+
+  // Periodic backup — write to store every 15s as insurance
+  useEffect(() => {
+    if (phase !== 'workout') return;
+    const id = setInterval(() => {
+      const current = loggedExercisesRef.current;
+      if (current.length > 0) updateExercises(current);
+    }, 15000);
+    return () => clearInterval(id);
+  }, [phase]);
 
   const activeWorkoutRef = useRef(activeWorkout);
   useEffect(() => { activeWorkoutRef.current = activeWorkout; }, [activeWorkout]);
@@ -701,15 +723,25 @@ export default function QuickWorkoutScreen() {
         startRestTimer();
       }
     } else {
-      startRestTimer();
-      // No auto-advance — user clicks NEXT to move to the next exercise
+      // Drop set check: if the next set in this exercise is a drop set, don't start rest timer
+      const nextSetInExercise = loggedExercises[exIdx].sets[setIdx + 1];
+      const isCurrentDropSet = currentSet.isDropSet;
+      const isFollowedByDropSet = nextSetInExercise?.isDropSet && !nextSetInExercise.completed;
+
+      if (isCurrentDropSet || isFollowedByDropSet) {
+        // Don't start rest — drop sets are done back-to-back
+      } else {
+        startRestTimer();
+      }
     }
   };
 
   const addSet = (exIdx: number) => {
     animateLayout();
+    const groupId = loggedExercises[exIdx].supersetGroupId;
     setLoggedExercises((prev) => {
       const updated = [...prev];
+      // Add set to this exercise
       const lastSet = updated[exIdx].sets[updated[exIdx].sets.length - 1];
       const newSetIdx = updated[exIdx].sets.length;
       updated[exIdx] = {
@@ -720,6 +752,21 @@ export default function QuickWorkoutScreen() {
           completed: false,
         }],
       };
+      // If part of a superset, also add a set to the partner exercise
+      if (groupId) {
+        const partnerIdx = updated.findIndex((ex, i) => i !== exIdx && ex.supersetGroupId === groupId);
+        if (partnerIdx !== -1) {
+          const partnerLastSet = updated[partnerIdx].sets[updated[partnerIdx].sets.length - 1];
+          updated[partnerIdx] = {
+            ...updated[partnerIdx],
+            sets: [...updated[partnerIdx].sets, {
+              weight: partnerLastSet?.weight ?? null,
+              reps: 0,
+              completed: false,
+            }],
+          };
+        }
+      }
       // Auto-focus new set's reps input
       setTimeout(() => inputRefs.current[`${exIdx}-${newSetIdx}-r`]?.focus(), 100);
       return updated;
@@ -805,13 +852,57 @@ export default function QuickWorkoutScreen() {
     );
   };
 
+  // Find insertion index: after last completed exercise, or at end
+  const getInsertIndex = (exercises: LoggedExercise[]) => {
+    let lastCompleted = -1;
+    for (let i = exercises.length - 1; i >= 0; i--) {
+      if (exercises[i].sets.some(s => s.completed)) { lastCompleted = i; break; }
+    }
+    return lastCompleted >= 0 ? lastCompleted + 1 : exercises.length;
+  };
+
   const addExerciseDuringWorkout = (name: string) => {
-    animateLayout();
     const newEx: LoggedExercise = { name, sets: Array.from({ length: 3 }, () => ({ weight: null, reps: 0, completed: false })) };
-    setLoggedExercises((prev) => [...prev, newEx]);
+    let insertIdx = 0;
+    setLoggedExercises((prev) => {
+      insertIdx = getInsertIndex(prev);
+      const next = [...prev.slice(0, insertIdx), newEx, ...prev.slice(insertIdx)];
+      InteractionManager.runAfterInteractions(() => updateExercises(next));
+      return next;
+    });
     setAddExerciseOpen(false);
     setExerciseSearch('');
-    setTimeout(() => setActiveExercise(loggedExercises.length), 100);
+    setSelectedForAdd(new Set());
+    requestAnimationFrame(() => animateLayout());
+    setTimeout(() => setActiveExercise(insertIdx), 100);
+  };
+
+  const addMultipleExercises = (names: string[]) => {
+    const newExs: LoggedExercise[] = names.map(name => ({
+      name,
+      sets: Array.from({ length: 3 }, () => ({ weight: null, reps: 0, completed: false })),
+    }));
+    let insertIdx = 0;
+    setLoggedExercises((prev) => {
+      insertIdx = getInsertIndex(prev);
+      const next = [...prev.slice(0, insertIdx), ...newExs, ...prev.slice(insertIdx)];
+      InteractionManager.runAfterInteractions(() => updateExercises(next));
+      return next;
+    });
+    setAddExerciseOpen(false);
+    setExerciseSearch('');
+    setSelectedForAdd(new Set());
+    requestAnimationFrame(() => animateLayout());
+    setTimeout(() => setActiveExercise(insertIdx), 100);
+  };
+
+  const toggleExerciseForAdd = (name: string) => {
+    setSelectedForAdd(prev => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
   };
 
 
@@ -869,6 +960,11 @@ export default function QuickWorkoutScreen() {
           });
 
           detectAndSavePRs(user.id, exercisesSnapshot);
+          useBadgeStore.getState().updateStatsFromWorkout({
+            exercises: exercisesSnapshot,
+            completedAt: new Date().toISOString(),
+            categories: getExerciseCategories(exercisesSnapshot),
+          });
           updateIncrementsAfterWorkout(deltasSnapshot);
 
           // Save/update routine template so user can reuse it
@@ -1439,7 +1535,7 @@ export default function QuickWorkoutScreen() {
               onPress={async () => {
                 if (!customName.trim()) return;
                 await createCustomExercise(customName.trim(), customMuscleGroup, customEquipment);
-                addExercise(customName.trim());
+                addExerciseDuringWorkout(customName.trim());
                 setShowCreateCustom(false);
                 setCustomName('');
                 setCustomEquipment('Barbell');
@@ -1599,7 +1695,7 @@ export default function QuickWorkoutScreen() {
                 hitSlop={12}
                 style={{ padding: 4 }}
               >
-                <Ionicons name="checkmark-circle" size={22} color={SemanticColors.success} />
+                <Ionicons name="checkmark" size={22} color={SemanticColors.success} />
               </Pressable>
             ) : selectionMode ? (
               <Pressable
@@ -1864,7 +1960,7 @@ export default function QuickWorkoutScreen() {
                         {exIdx + 1}
                       </Text>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text, flexShrink: 1 }} numberOfLines={1}>
+                        <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text, flexShrink: 1 }} numberOfLines={2}>
                           {logged.name}
                         </Text>
                         <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
@@ -2138,28 +2234,32 @@ export default function QuickWorkoutScreen() {
                 </Pressable>
               )}
 
-              {/* Right: Finish */}
-              <Pressable
-                onPress={() => {
-                  if (confirmFinish) {
-                    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
-                    setConfirmFinish(false);
-                    handleFinish();
-                  } else {
-                    setConfirmFinish(true);
-                    confirmTimerRef.current = setTimeout(() => setConfirmFinish(false), 3000);
-                  }
-                }}
-                hitSlop={12}
-                style={{ padding: 8, width: 40, alignItems: 'center' }}
-                disabled={saving}
-              >
-                <Ionicons
-                  name="checkmark"
+              {/* Right: Finish (hidden during reorder) */}
+              {!reorderMode ? (
+                <Pressable
+                  onPress={() => {
+                    if (confirmFinish) {
+                      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+                      setConfirmFinish(false);
+                      handleFinish();
+                    } else {
+                      setConfirmFinish(true);
+                      confirmTimerRef.current = setTimeout(() => setConfirmFinish(false), 3000);
+                    }
+                  }}
+                  hitSlop={12}
+                  style={{ padding: 8, width: 40, alignItems: 'center' }}
+                  disabled={saving}
+                >
+                  <Ionicons
+                    name="checkmark"
                   size={22}
                   color={confirmFinish ? SemanticColors.success : '#FFFFFF'}
                 />
-              </Pressable>
+                </Pressable>
+              ) : (
+                <View style={{ width: 40 }} />
+              )}
             </View>
           </View>
         </View>
@@ -2176,11 +2276,11 @@ export default function QuickWorkoutScreen() {
               borderBottomWidth: 1,
               borderBottomColor: theme.border,
             }}>
-              <Pressable onPress={() => { setAddExerciseOpen(false); setExerciseSearch(''); }} hitSlop={12} style={{ padding: 4, marginRight: 8 }}>
+              <Pressable onPress={() => { setAddExerciseOpen(false); setExerciseSearch(''); setSelectedForAdd(new Set()); }} hitSlop={12} style={{ padding: 4, marginRight: 8 }}>
                 <Ionicons name="chevron-back" size={24} color={theme.text} />
               </Pressable>
               <Text style={{ fontSize: 17, fontWeight: '800', color: theme.text, flex: 1 }}>
-                Add Exercise
+                Add Exercise{selectedForAdd.size > 0 ? ` (${selectedForAdd.size})` : ''}
               </Text>
             </View>
 
@@ -2276,19 +2376,22 @@ export default function QuickWorkoutScreen() {
             <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingHorizontal: 20, paddingBottom: 40 }}>
               {customExercises
                 .filter((ce) => ce.name.toLowerCase().includes(exerciseSearch.toLowerCase()) && !loggedExercises.some((le) => le.name.toLowerCase() === ce.name.toLowerCase()))
-                .map((ce) => (
-                  <Pressable
-                    key={ce.id}
-                    onPress={() => addExerciseDuringWorkout(ce.name)}
-                    style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
-                  >
-                    <View>
-                      <Text style={{ fontSize: 16, color: theme.text, fontWeight: '500' }}>{ce.name}</Text>
-                      <Text style={{ fontSize: 13, color: theme.chrome, marginTop: 2 }}>{ce.muscleGroup} · Custom</Text>
-                    </View>
-                    <Ionicons name="add-circle-outline" size={22} color={theme.chrome} />
-                  </Pressable>
-                ))}
+                .map((ce) => {
+                  const isSelected = selectedForAdd.has(ce.name);
+                  return (
+                    <Pressable
+                      key={ce.id}
+                      onPress={() => toggleExerciseForAdd(ce.name)}
+                      style={{ paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.border, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}
+                    >
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 16, color: theme.text, fontWeight: '500' }}>{ce.name}</Text>
+                        <Text style={{ fontSize: 13, color: theme.chrome, marginTop: 2 }}>{ce.muscleGroup} · Custom</Text>
+                      </View>
+                      <Ionicons name={isSelected ? 'checkmark-circle' : 'add-circle-outline'} size={22} color={isSelected ? '#F59E0B' : theme.chrome} />
+                    </Pressable>
+                  );
+                })}
               {addGroupedByCategory.map(({ category, exercises: catExercises }) => {
                 const isSearching = exerciseSearch.trim().length > 0;
                 const isCatExpanded = isSearching || expandedCategories.has(category);
@@ -2329,27 +2432,31 @@ export default function QuickWorkoutScreen() {
                       </View>
                       <Text style={{ fontSize: 12, color: theme.textSecondary }}>{catExercises.length}</Text>
                     </Pressable>
-                    {isCatExpanded && catExercises.map((ex) => (
-                      <Pressable
-                        key={ex.name}
-                        onPress={() => addExerciseDuringWorkout(ex.name)}
-                        style={{
-                          paddingVertical: 12,
-                          paddingHorizontal: 12,
-                          marginBottom: 4,
-                          borderRadius: 12,
-                          flexDirection: 'row',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                        }}
-                      >
-                        <View>
-                          <Text style={{ fontSize: 16, color: theme.text, fontWeight: '500' }}>{ex.name}</Text>
-                          <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>{ex.category}</Text>
-                        </View>
-                        <Ionicons name="add-circle-outline" size={22} color={theme.chrome} />
-                      </Pressable>
-                    ))}
+                    {isCatExpanded && catExercises.map((ex) => {
+                      const isSelected = selectedForAdd.has(ex.name);
+                      return (
+                        <Pressable
+                          key={ex.name}
+                          onPress={() => toggleExerciseForAdd(ex.name)}
+                          style={{
+                            paddingVertical: 12,
+                            paddingHorizontal: 12,
+                            marginBottom: 4,
+                            borderRadius: 12,
+                            backgroundColor: isSelected ? '#F59E0B15' : 'transparent',
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                          }}
+                        >
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 16, color: theme.text, fontWeight: '500' }}>{ex.name}</Text>
+                            <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>{ex.category}</Text>
+                          </View>
+                          <Ionicons name={isSelected ? 'checkmark-circle' : 'add-circle-outline'} size={22} color={isSelected ? '#F59E0B' : theme.chrome} />
+                        </Pressable>
+                      );
+                    })}
                   </View>
                 );
               })}
@@ -2359,6 +2466,29 @@ export default function QuickWorkoutScreen() {
                 </Text>
               )}
             </ScrollView>
+
+            {/* Floating add button when exercises are selected */}
+            {selectedForAdd.size > 0 && (
+              <View style={{ position: 'absolute', bottom: 0, left: 0, right: 0, paddingHorizontal: 20, paddingBottom: 34, paddingTop: 12, backgroundColor: theme.background, borderTopWidth: 1, borderTopColor: theme.border }}>
+                <Pressable
+                  onPress={() => {
+                    if (selectedForAdd.size === 1) {
+                      addExerciseDuringWorkout(Array.from(selectedForAdd)[0]);
+                    } else {
+                      addMultipleExercises(Array.from(selectedForAdd));
+                    }
+                  }}
+                  style={{
+                    backgroundColor: '#F59E0B', borderRadius: 14, paddingVertical: 14,
+                    alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#FFFFFF' }}>
+                    Add {selectedForAdd.size} Exercise{selectedForAdd.size > 1 ? 's' : ''}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
           </SafeAreaView>
         </Modal>
 

@@ -22,7 +22,8 @@ export function WeeklyVolumeCard({ weeks, totalVolume, deltaPercent, accentColor
   const { theme, weightUnit } = useSettings();
   const highlight = accentColor || '#F59E0B';
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
-  const convert = (kg: number) => weightUnit === 'lbs' ? Math.round(kg * 2.205) : Math.round(kg);
+  // Workout log volumes are already in user's display unit — no conversion needed
+  const convert = (v: number) => Math.round(v);
 
   const [selectedBar, setSelectedBar] = useState<{ weekIdx: number; dayIdx: number } | null>(null);
 

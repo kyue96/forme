@@ -269,7 +269,7 @@ export default function HistoryScreen() {
                         params: {
                           exercises: JSON.stringify(log.exercises),
                           dayName: log.day_name,
-                          focus: histPlanDay?.focus ?? log.day_name,
+                          focus: log.day_name || histPlanDay?.focus || '',
                           durationMinutes: String(log.duration_minutes),
                           completedAt: log.completed_at,
                           logId: log.id,

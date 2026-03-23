@@ -29,7 +29,7 @@ interface SocialState {
   addComment: (postId: string, body: string) => Promise<Comment | null>;
   deleteComment: (commentId: string, postId: string) => Promise<void>;
   getGymBuddyCount: (placeId: string) => Promise<number>;
-  updatePost: (postId: string, caption: string) => Promise<boolean>;
+  updatePost: (postId: string, caption: string, opts?: { clearImage?: boolean; clearCard?: boolean }) => Promise<boolean>;
   saveWorkoutFromPost: (cardData: CardData) => Promise<boolean>;
 }
 
@@ -317,16 +317,24 @@ export const useSocialStore = create<SocialState>((set, get) => ({
     }
   },
 
-  updatePost: async (postId, caption) => {
+  updatePost: async (postId, caption, opts) => {
     try {
+      const updates: Record<string, any> = { caption };
+      if (opts?.clearImage) updates.image_url = null;
+      if (opts?.clearCard) updates.card_data = null;
       const { error } = await supabase
         .from('posts')
-        .update({ caption })
+        .update(updates)
         .eq('id', postId);
       if (error) throw error;
       set({
         feedPosts: get().feedPosts.map((p) =>
-          p.id === postId ? { ...p, caption } : p
+          p.id === postId ? {
+            ...p,
+            caption,
+            ...(opts?.clearImage ? { image_url: null } : {}),
+            ...(opts?.clearCard ? { card_data: null } : {}),
+          } : p
         ),
       });
       return true;

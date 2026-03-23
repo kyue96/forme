@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
+  Alert,
   LayoutAnimation,
   Platform,
   Pressable,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
@@ -132,6 +134,32 @@ export default function PostWorkoutScreen() {
   const displayVolume = Math.round(totalVolume);
   const unitLabel = weightUnit === 'lbs' ? 'lbs' : 'kg';
   const exerciseCategories = getExerciseCategories(exercises);
+
+  const handlePhotoAndPost = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow camera access to take a photo.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: false,
+      quality: 0.4,
+    });
+    if (result.canceled) return;
+    const photoUri = result.assets[0].uri;
+    const cardDataJson = JSON.stringify({
+      focus: params.focus ?? '',
+      dayName: params.dayName ?? '',
+      sets: totalSets,
+      reps: totalReps,
+      volume: displayVolume,
+      unitLabel,
+      durationMinutes,
+      muscles: exerciseCategories,
+      themeIdx: 0,
+    });
+    router.push({ pathname: '/create-post', params: { cardData: cardDataJson, photoUri } });
+  };
 
   // Advanced metrics
   const topE1RMs = computeTopE1RMs(exercises, 3);
@@ -352,31 +380,50 @@ export default function PostWorkoutScreen() {
         backgroundColor: theme.background,
         borderTopWidth: 1,
         borderTopColor: theme.border,
-        flexDirection: 'row',
-        gap: 10,
+        gap: 8,
       }}>
-        <Pressable
-          onPress={() => router.push({
-            pathname: '/workout/card-picker',
-            params: {
-              exercises: params.exercises ?? '[]',
-              dayName: params.dayName ?? '',
-              focus: params.focus ?? '',
-              durationMinutes: params.durationMinutes ?? '0',
-            },
-          })}
-          style={{
-            flex: 1,
-            borderRadius: 14,
-            paddingVertical: 14,
-            alignItems: 'center',
-            backgroundColor: theme.surface,
-            borderWidth: 1,
-            borderColor: theme.border,
-          }}
-        >
-          <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text, letterSpacing: 1 }}>SHARE</Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 10 }}>
+          <Pressable
+            onPress={() => router.push({
+              pathname: '/workout/card-picker',
+              params: {
+                exercises: params.exercises ?? '[]',
+                dayName: params.dayName ?? '',
+                focus: params.focus ?? '',
+                durationMinutes: params.durationMinutes ?? '0',
+              },
+            })}
+            style={{
+              flex: 1,
+              borderRadius: 14,
+              paddingVertical: 14,
+              alignItems: 'center',
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border,
+            }}
+          >
+            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text, letterSpacing: 1 }}>SHARE</Text>
+          </Pressable>
+          <Pressable
+            onPress={handlePhotoAndPost}
+            style={{
+              flex: 1,
+              borderRadius: 14,
+              paddingVertical: 14,
+              alignItems: 'center',
+              flexDirection: 'row',
+              justifyContent: 'center',
+              gap: 6,
+              backgroundColor: theme.surface,
+              borderWidth: 1,
+              borderColor: theme.border,
+            }}
+          >
+            <Ionicons name="camera" size={16} color={theme.text} />
+            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text, letterSpacing: 1 }}>SELFIE</Text>
+          </Pressable>
+        </View>
         <Pressable
           onPress={() => {
             const cardDataJson = JSON.stringify({
@@ -393,7 +440,6 @@ export default function PostWorkoutScreen() {
             router.push({ pathname: '/create-post', params: { cardData: cardDataJson } });
           }}
           style={{
-            flex: 1,
             borderRadius: 14,
             paddingVertical: 14,
             alignItems: 'center',

@@ -16,6 +16,7 @@ export interface BadgeStats {
   uniqueCategories: number;
   weekendWarrior: number;
   earlyBird: number;
+  nightOwl: number;
   exercisesUsed: string[];
   categoriesUsed: string[];
   lastWorkoutDate: string | null;
@@ -25,11 +26,16 @@ export interface BadgeStats {
 interface BadgeStore {
   earnedBadges: Record<string, { earnedAt: string }>;
   stats: BadgeStats;
+  hydrated: boolean;
   updateStatsFromWorkout: (workout: {
     exercises: { name: string; sets: { completed: boolean; weight: number | null; reps: number }[] }[];
     completedAt: string;
     categories: string[];
   }) => string[]; // returns newly earned badge IDs
+  hydrateFromLogs: (logs: {
+    exercises: { name: string; sets: { completed: boolean; weight: number | null; reps: number }[] }[];
+    completed_at: string;
+  }[], getCategoriesFn: (exercises: { name: string }[]) => string[]) => void;
   getProgress: (badge: BadgeDefinition) => { current: number; target: number; percent: number };
   resetStats: () => void;
 }
@@ -47,6 +53,7 @@ const DEFAULT_STATS: BadgeStats = {
   uniqueCategories: 0,
   weekendWarrior: 0,
   earlyBird: 0,
+  nightOwl: 0,
   exercisesUsed: [],
   categoriesUsed: [],
   lastWorkoutDate: null,
@@ -58,6 +65,7 @@ export const useBadgeStore = create<BadgeStore>()(
     (set, get) => ({
       earnedBadges: {},
       stats: { ...DEFAULT_STATS },
+      hydrated: false,
 
       updateStatsFromWorkout: (workout) => {
         const state = get();
@@ -143,10 +151,13 @@ export const useBadgeStore = create<BadgeStore>()(
           stats.weekendWarrior = 1;
         }
 
-        // Early bird check
+        // Early bird / night owl check
         const hour = new Date(workout.completedAt).getHours();
         if (hour < 7) {
           stats.earlyBird = 1;
+        }
+        if (hour >= 21) {
+          stats.nightOwl = 1;
         }
 
         // Check all badges
@@ -173,7 +184,26 @@ export const useBadgeStore = create<BadgeStore>()(
         };
       },
 
-      resetStats: () => set({ stats: { ...DEFAULT_STATS }, earnedBadges: {} }),
+      hydrateFromLogs: (logs, getCategoriesFn) => {
+        const state = get();
+        if (state.hydrated) return;
+        // Reset and replay all logs chronologically
+        const freshStats = { ...DEFAULT_STATS, exercisesUsed: [] as string[], categoriesUsed: [] as string[], personalRecords: {} as Record<string, number> };
+        const freshEarned: Record<string, { earnedAt: string }> = {};
+        set({ stats: freshStats, earnedBadges: freshEarned, hydrated: true });
+        // Sort by completed_at ascending
+        const sorted = [...logs].sort((a, b) => (a.completed_at ?? '').localeCompare(b.completed_at ?? ''));
+        for (const log of sorted) {
+          if (!log.exercises || !log.completed_at) continue;
+          get().updateStatsFromWorkout({
+            exercises: log.exercises,
+            completedAt: log.completed_at,
+            categories: getCategoriesFn(log.exercises),
+          });
+        }
+      },
+
+      resetStats: () => set({ stats: { ...DEFAULT_STATS }, earnedBadges: {}, hydrated: false }),
     }),
     {
       name: 'forme-badges',

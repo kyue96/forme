@@ -38,7 +38,8 @@ export function PersonalRecordsSection({ userId, accentColor }: PersonalRecordsS
   const [thisWeekPRs, setThisWeekPRs] = useState(0);
   const [thisMonthPRs, setThisMonthPRs] = useState(0);
 
-  const convert = (kg: number) => weightUnit === 'lbs' ? Math.round(kg * 2.205) : Math.round(kg);
+  // PRs are already stored in user's display unit — no conversion needed, just round
+  const convert = (v: number) => Math.round(v);
   const unit = weightUnit === 'lbs' ? 'lbs' : 'kg';
 
   const loadPRs = useCallback(async () => {
@@ -54,16 +55,18 @@ export function PersonalRecordsSection({ userId, accentColor }: PersonalRecordsS
         return;
       }
 
-      setTotalPRs(allPRs.length);
+      // Only count PRs that beat a previous record (not first-time baselines)
+      const realPRs = allPRs.filter(pr => pr.previous_e1rm != null);
+      setTotalPRs(realPRs.length);
 
-      // Count this week's and this month's PRs
+      // Count this week's and this month's PRs (excluding baselines)
       const now = new Date();
       const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
       const monthAgo = new Date(); monthAgo.setMonth(monthAgo.getMonth() - 1);
 
       let weekCount = 0;
       let monthCount = 0;
-      for (const pr of allPRs) {
+      for (const pr of realPRs) {
         const d = new Date(pr.achieved_at);
         if (d >= weekAgo) weekCount++;
         if (d >= monthAgo) monthCount++;
@@ -78,12 +81,14 @@ export function PersonalRecordsSection({ userId, accentColor }: PersonalRecordsS
         grouped[pr.exercise_name].push(pr as PRRecord);
       }
 
-      const exerciseList: ExercisePRHistory[] = Object.entries(grouped).map(([name, records]) => ({
-        exerciseName: name,
-        category: getExerciseCategory(name),
-        currentBest: records[0], // Most recent = highest (since each PR beats the last)
-        history: records,
-      }));
+      const exerciseList: ExercisePRHistory[] = Object.entries(grouped)
+        .filter(([, records]) => records.some(r => r.previous_e1rm != null)) // Only exercises with real PRs
+        .map(([name, records]) => ({
+          exerciseName: name,
+          category: getExerciseCategory(name),
+          currentBest: records[0], // Most recent = highest (since each PR beats the last)
+          history: records.filter(r => r.previous_e1rm != null), // Only show improvements, not baselines
+        }));
 
       // Sort by most recent PR first
       exerciseList.sort((a, b) =>

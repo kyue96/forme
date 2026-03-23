@@ -1,8 +1,9 @@
 import React, { useEffect, useState, useRef, useCallback } from 'react';
-import { View, Text, Pressable, TextInput } from 'react-native';
+import { View, Text, Pressable, TextInput, AppState } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 interface BodyStatsCardProps {
   userId: string;
@@ -11,19 +12,26 @@ interface BodyStatsCardProps {
 const SCALE_COLOR = '#3B82F6';
 const LOGGED_COLOR = '#22C55E';
 
+function getToday() {
+  return new Date().toISOString().split('T')[0];
+}
+
 export default function BodyStatsCard({ userId }: BodyStatsCardProps) {
   const { theme, weightUnit } = useSettings();
+  const router = useRouter();
   const [loggedToday, setLoggedToday] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showInput, setShowInput] = useState(false);
   const [weightInput, setWeightInput] = useState('');
   const [saving, setSaving] = useState(false);
-  const fetched = useRef(false);
+  const lastCheckedDate = useRef<string | null>(null);
 
   const unit = weightUnit === 'lbs' ? 'lbs' : 'kg';
-  const todayStr = new Date().toISOString().split('T')[0];
 
   const checkToday = useCallback(async () => {
+    const todayStr = getToday();
+    // Skip if already checked for today
+    if (lastCheckedDate.current === todayStr) return;
     try {
       const { data } = await supabase
         .from('body_stats')
@@ -34,15 +42,33 @@ export default function BodyStatsCard({ userId }: BodyStatsCardProps) {
         .limit(1);
 
       setLoggedToday((data?.length ?? 0) > 0);
+      lastCheckedDate.current = todayStr;
     } catch {} finally {
       setLoading(false);
     }
-  }, [userId, todayStr]);
+  }, [userId]);
 
+  // Re-check on tab focus (handles day rollover)
+  useFocusEffect(
+    useCallback(() => {
+      checkToday();
+    }, [checkToday])
+  );
+
+  // Re-check when app comes back to foreground (handles overnight)
   useEffect(() => {
-    if (fetched.current) return;
-    fetched.current = true;
-    checkToday();
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        // Date may have changed — force re-check
+        const todayStr = getToday();
+        if (lastCheckedDate.current !== todayStr) {
+          lastCheckedDate.current = null;
+          setLoggedToday(false);
+          checkToday();
+        }
+      }
+    });
+    return () => sub.remove();
   }, [checkToday]);
 
   const handleSave = async () => {
@@ -50,6 +76,7 @@ export default function BodyStatsCard({ userId }: BodyStatsCardProps) {
     if (isNaN(val) || val <= 0) return;
     setSaving(true);
     try {
+      const todayStr = getToday();
       const kg = weightUnit === 'lbs' ? val / 2.205 : val;
       await supabase
         .from('body_stats')
@@ -62,6 +89,7 @@ export default function BodyStatsCard({ userId }: BodyStatsCardProps) {
       setShowInput(false);
       setWeightInput('');
       setLoggedToday(true);
+      lastCheckedDate.current = getToday();
     } catch {} finally {
       setSaving(false);
     }
@@ -108,14 +136,17 @@ export default function BodyStatsCard({ userId }: BodyStatsCardProps) {
     );
   }
 
-  // Logged state: green icon with checkmark
+  // Logged state: green icon with checkmark — tap to view stats
   if (loggedToday) {
     return (
-      <View style={{
-        flex: 1, backgroundColor: theme.surface, borderRadius: 16,
-        borderWidth: 1, borderColor: theme.border, padding: 14,
-        flexDirection: 'row', alignItems: 'center', gap: 10,
-      }}>
+      <Pressable
+        onPress={() => router.push('/(tabs)/stats')}
+        style={{
+          flex: 1, backgroundColor: theme.surface, borderRadius: 16,
+          borderWidth: 1, borderColor: theme.border, padding: 14,
+          flexDirection: 'row', alignItems: 'center', gap: 10,
+        }}
+      >
         <View style={{
           width: 40, height: 40, borderRadius: 20,
           backgroundColor: `${LOGGED_COLOR}20`, alignItems: 'center', justifyContent: 'center',
@@ -130,7 +161,7 @@ export default function BodyStatsCard({ userId }: BodyStatsCardProps) {
           </View>
         </View>
         <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>Logged</Text>
-      </View>
+      </Pressable>
     );
   }
 

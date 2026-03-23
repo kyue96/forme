@@ -46,8 +46,9 @@ export default function TrophyCaseCard({ userId }: TrophyCaseCardProps) {
 
       if (prs && prs.length > 0) {
         // Only show PRs that beat a previous record (not first-time entries)
+        // Only show PRs that beat a previous record (not first-time baselines)
         const meaningful = prs.filter((p: PRRecord) => p.previous_e1rm != null);
-        setRecentPRs(meaningful.length > 0 ? meaningful : prs.slice(0, 1));
+        setRecentPRs(meaningful);
       } else {
         // No recent PRs — find closest-to-breaking
         // Get all-time best per exercise

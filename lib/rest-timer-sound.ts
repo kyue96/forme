@@ -1,19 +1,43 @@
 /**
  * Rest timer completion sound.
- * Uses expo-av to play a gentle chime when the rest timer reaches 0.
+ * Uses expo-av to play a chime when the rest timer reaches 0.
+ * Configured to:
+ *  - Play over background music (duck, don't interrupt)
+ *  - Play in silent mode on iOS
+ *  - Stay active in background so sound fires even when locked
+ *  - Play at full volume for audibility
  * NOTE: expo-av must be installed: npx expo install expo-av
  */
-import { Audio } from 'expo-av';
+import { Audio, InterruptionModeIOS, InterruptionModeAndroid } from 'expo-av';
+import * as Notifications from 'expo-notifications';
 
 let soundObject: Audio.Sound | null = null;
+let audioModeConfigured = false;
 
 /**
- * Generates a short, gentle chime sound as a WAV data URI.
- * This avoids needing an external sound file asset.
+ * Configure audio mode once — allows playback over other audio (music).
+ */
+async function ensureAudioMode() {
+  if (audioModeConfigured) return;
+  try {
+    await Audio.setAudioModeAsync({
+      playsInSilentModeIOS: true,
+      staysActiveInBackground: true,
+      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+      shouldDuckAndroid: true,
+    });
+    audioModeConfigured = true;
+  } catch {}
+}
+
+/**
+ * Generates a loud, clear chime sound as a WAV data URI.
+ * Two-tone bell (C5 + E5) with harmonics, played twice for emphasis.
  */
 function generateChimeWav(): string {
   const sampleRate = 22050;
-  const duration = 0.6; // seconds
+  const duration = 1.2; // longer for audibility
   const numSamples = Math.floor(sampleRate * duration);
   const numChannels = 1;
   const bitsPerSample = 16;
@@ -24,7 +48,6 @@ function generateChimeWav(): string {
   const buffer = new ArrayBuffer(headerSize + dataSize);
   const view = new DataView(buffer);
 
-  // WAV header
   const writeString = (offset: number, str: string) => {
     for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
   };
@@ -32,8 +55,8 @@ function generateChimeWav(): string {
   view.setUint32(4, 36 + dataSize, true);
   writeString(8, 'WAVE');
   writeString(12, 'fmt ');
-  view.setUint32(16, 16, true); // PCM
-  view.setUint16(20, 1, true); // PCM format
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
   view.setUint16(22, numChannels, true);
   view.setUint32(24, sampleRate, true);
   view.setUint32(28, byteRate, true);
@@ -42,24 +65,29 @@ function generateChimeWav(): string {
   writeString(36, 'data');
   view.setUint32(40, dataSize, true);
 
-  // Generate a gentle two-tone chime (C5 + E5 with quick decay)
   const freq1 = 523.25; // C5
   const freq2 = 659.25; // E5
+  const halfPoint = numSamples / 2;
+
   for (let i = 0; i < numSamples; i++) {
     const t = i / sampleRate;
-    // Exponential decay envelope
-    const envelope = Math.exp(-t * 6);
-    // Mix two sine waves for a pleasant bell-like tone
-    const sample =
-      Math.sin(2 * Math.PI * freq1 * t) * 0.5 +
-      Math.sin(2 * Math.PI * freq2 * t) * 0.3 +
-      Math.sin(2 * Math.PI * freq1 * 2 * t) * 0.1; // harmonic
-    const amplitude = Math.min(1, Math.max(-1, sample * envelope)) * 0.4; // Keep it gentle
-    const intSample = Math.round(amplitude * 32767);
-    view.setInt16(headerSize + i * 2, intSample, true);
+    // Two chime hits: first at 0s, second at ~0.6s
+    const t1 = t;
+    const t2 = Math.max(0, t - 0.6);
+    const env1 = t < 0.6 ? Math.exp(-t1 * 5) : 0;
+    const env2 = t >= 0.6 ? Math.exp(-t2 * 5) : 0;
+
+    const chime = (time: number) =>
+      Math.sin(2 * Math.PI * freq1 * time) * 0.5 +
+      Math.sin(2 * Math.PI * freq2 * time) * 0.35 +
+      Math.sin(2 * Math.PI * freq1 * 2 * time) * 0.15;
+
+    const sample = chime(t1) * env1 + chime(t2) * env2;
+    // Higher amplitude for audibility (0.85 instead of 0.4)
+    const amplitude = Math.min(1, Math.max(-1, sample)) * 0.85;
+    view.setInt16(headerSize + i * 2, Math.round(amplitude * 32767), true);
   }
 
-  // Convert to base64
   const bytes = new Uint8Array(buffer);
   let binary = '';
   for (let i = 0; i < bytes.length; i++) {
@@ -71,37 +99,31 @@ function generateChimeWav(): string {
 let chimeUri: string | null = null;
 
 function getChimeUri(): string {
-  if (!chimeUri) {
-    chimeUri = generateChimeWav();
-  }
+  if (!chimeUri) chimeUri = generateChimeWav();
   return chimeUri;
 }
 
 /**
  * Play the rest timer completion chime.
- * Safe to call multiple times — unloads the previous sound first.
+ * - Plays at full volume over background music
+ * - Safe to call multiple times
+ * - Falls back to notification sound when app is backgrounded
  */
 export async function playRestTimerChime(): Promise<void> {
   try {
-    // Unload previous sound if still loaded
     if (soundObject) {
       try { await soundObject.unloadAsync(); } catch {}
       soundObject = null;
     }
 
-    // Configure audio session for playback (works even in silent mode on iOS)
-    await Audio.setAudioModeAsync({
-      playsInSilentModeIOS: true,
-      shouldDuckAndroid: true,
-    });
+    await ensureAudioMode();
 
     const { sound } = await Audio.Sound.createAsync(
       { uri: getChimeUri() },
-      { shouldPlay: true, volume: 0.7 }
+      { shouldPlay: true, volume: 1.0 }
     );
     soundObject = sound;
 
-    // Auto-cleanup after playback
     sound.setOnPlaybackStatusUpdate((status) => {
       if ('didJustFinish' in status && status.didJustFinish) {
         sound.unloadAsync().catch(() => {});
@@ -109,7 +131,39 @@ export async function playRestTimerChime(): Promise<void> {
       }
     });
   } catch (err) {
-    // Silently fail — sound is a nice-to-have, not critical
     console.warn('Rest timer chime failed:', err);
   }
+}
+
+/**
+ * Schedule a notification for when the rest timer completes.
+ * This ensures the user hears a sound even when the phone is locked.
+ */
+export async function scheduleRestTimerNotification(seconds: number): Promise<string | null> {
+  try {
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Rest Complete',
+        body: 'Time to start your next set!',
+        sound: 'default',
+      },
+      trigger: {
+        type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL,
+        seconds: Math.max(1, seconds),
+      },
+    });
+    return id;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Cancel a previously scheduled rest timer notification.
+ */
+export async function cancelRestTimerNotification(id: string | null): Promise<void> {
+  if (!id) return;
+  try {
+    await Notifications.cancelScheduledNotificationAsync(id);
+  } catch {}
 }
