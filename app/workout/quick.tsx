@@ -1518,19 +1518,12 @@ export default function QuickWorkoutScreen() {
               }}
             >
               <View style={{
-                backgroundColor: isResting ? '#EAB308' : 'rgba(0,0,0,0.7)',
-                paddingHorizontal: 20,
-                paddingVertical: 8,
-                borderRadius: 24,
+                backgroundColor: isResting ? '#EAB308' : 'rgba(0,0,0,0.6)',
+                paddingHorizontal: 14,
+                paddingVertical: 6,
+                borderRadius: 20,
                 borderWidth: 1,
-                borderColor: isResting ? '#D97706' : 'rgba(255,255,255,0.2)',
-                shadowColor: '#000',
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: 0.4,
-                shadowRadius: 8,
-                elevation: 12,
-                borderTopWidth: 1.5,
-                borderTopColor: isResting ? '#FBBF24' : 'rgba(255,255,255,0.35)',
+                borderColor: isResting ? '#D97706' : 'rgba(255,255,255,0.15)',
               }}>
                 {isResting ? (
                   <Text style={{ fontSize: 16, fontWeight: '800', color: '#000000', fontVariant: ['tabular-nums'], letterSpacing: 1 }}>
@@ -1545,19 +1538,11 @@ export default function QuickWorkoutScreen() {
             <Pressable onPress={() => { if (isPaused) resumeWorkout(); else pauseWorkout(); }}>
               <View style={{
                 backgroundColor: avatarColor,
-                paddingHorizontal: 20,
-                paddingVertical: 8,
-                borderRadius: 24,
-                shadowColor: avatarColor,
-                shadowOffset: { width: 0, height: 4 },
-                shadowOpacity: isResting ? 0.25 : 0.5,
-                shadowRadius: 12,
-                elevation: 16,
+                paddingHorizontal: 14,
+                paddingVertical: 6,
+                borderRadius: 20,
                 borderWidth: 1,
-                borderColor: 'rgba(255,255,255,0.2)',
-                borderTopWidth: 1.5,
-                borderTopColor: 'rgba(255,255,255,0.35)',
-                opacity: isResting ? 0.4 : isPaused ? 0.6 : 1,
+                borderColor: 'rgba(255,255,255,0.15)',
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 6,
@@ -2062,13 +2047,15 @@ export default function QuickWorkoutScreen() {
         />
         </KeyboardAvoidingView>
 
-        {/* Bottom bar: Play | Timer (abs center) | Rest + Finish */}
+        {/* Bottom bar: [Play/Pause] [Rest] [Clock] [Finish ✓] */}
         <View style={{ backgroundColor: avatarColor, paddingHorizontal: 24, paddingTop: 10, paddingBottom: 28 }}>
-          <View style={{ position: 'relative', height: isResting ? 54 : 36 }}>
-            {/* Timer - absolutely centered, never moves */}
+          <View style={{ position: 'relative', height: 36 }}>
+            {/* Clock — absolutely centered */}
             <Pressable
               onPress={() => {
-                if (!workoutStarted && countdown === null) {
+                if (isResting) {
+                  skipRestTimer();
+                } else if (!workoutStarted && countdown === null) {
                   setCountdown(3);
                   let c = 3;
                   const id = setInterval(() => {
@@ -2084,29 +2071,27 @@ export default function QuickWorkoutScreen() {
                   }, 1000);
                 }
               }}
-              disabled={workoutStarted || countdown !== null}
+              disabled={workoutStarted && !isResting}
               style={{ position: 'absolute', top: 0, left: 40, right: 40, alignItems: 'center', justifyContent: 'center', height: 36 }}
             >
               <Text style={{
                 fontSize: 22, fontWeight: '700',
-                color: countdown !== null ? '#FFFFFF99' : isPaused ? '#FFFFFF99' : '#FFFFFF',
+                color: isResting ? '#EAB308' : (countdown !== null ? '#FFFFFF99' : (isPaused ? '#FFFFFF99' : '#FFFFFF')),
                 fontVariant: ['tabular-nums'], letterSpacing: 1,
               }}>
-                {countdown !== null ? String(countdown) : (!workoutStarted ? (isResuming.current ? 'RESUME' : 'START') : formatTimeMs(displayMs))}
+                {countdown !== null
+                  ? String(countdown)
+                  : !workoutStarted
+                    ? (isResuming.current ? 'RESUME' : 'START')
+                    : isResting
+                      ? formatTime(restRemaining)
+                      : formatTimeMs(displayMs)}
               </Text>
-              {/* Rest countdown subtitle */}
-              {isResting && (
-                <Pressable onPress={() => skipRestTimer()} hitSlop={8}>
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#EAB308', fontVariant: ['tabular-nums'], marginTop: 2 }}>
-                    Rest: {formatTime(restRemaining)}
-                  </Text>
-                </Pressable>
-              )}
             </Pressable>
 
-            {/* Left/right controls on top of timer */}
+            {/* Controls row */}
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 36, zIndex: 2 }}>
-              {/* Play / Pause */}
+              {/* Left: Play/Pause */}
               <Pressable
                 onPress={() => {
                   if (!workoutStarted && countdown === null) {
@@ -2139,42 +2124,42 @@ export default function QuickWorkoutScreen() {
                 />
               </Pressable>
 
-              {/* Rest timer toggle + Finish (right edge) */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                {workoutStarted && (
-                  <Pressable
-                    onPress={() => {
-                      if (isResting) skipRestTimer();
-                      else startRestTimer(true);
-                    }}
-                    hitSlop={12}
-                    style={{ padding: 8, width: 36, alignItems: 'center' }}
-                  >
-                    <Ionicons name="time" size={20} color={isResting ? '#EAB308' : '#FFFFFF'} />
-                  </Pressable>
-                )}
+              {/* Rest icon — centered between play/pause and clock */}
+              {workoutStarted && (
                 <Pressable
                   onPress={() => {
-                    if (confirmFinish) {
-                      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
-                      setConfirmFinish(false);
-                      handleFinish();
-                    } else {
-                      setConfirmFinish(true);
-                      confirmTimerRef.current = setTimeout(() => setConfirmFinish(false), 3000);
-                    }
+                    if (isResting) skipRestTimer();
+                    else startRestTimer(true);
                   }}
                   hitSlop={12}
-                  style={{ padding: 8, width: 40, alignItems: 'center' }}
-                  disabled={saving}
+                  style={{ position: 'absolute', left: 56, top: 0, height: 36, justifyContent: 'center', alignItems: 'center', width: 36, zIndex: 3 }}
                 >
-                  <Ionicons
-                    name="checkmark"
-                    size={22}
-                    color={confirmFinish ? SemanticColors.success : '#FFFFFF'}
-                  />
+                  <Ionicons name="time" size={20} color={isResting ? '#EAB308' : '#FFFFFF'} />
                 </Pressable>
-              </View>
+              )}
+
+              {/* Right: Finish */}
+              <Pressable
+                onPress={() => {
+                  if (confirmFinish) {
+                    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+                    setConfirmFinish(false);
+                    handleFinish();
+                  } else {
+                    setConfirmFinish(true);
+                    confirmTimerRef.current = setTimeout(() => setConfirmFinish(false), 3000);
+                  }
+                }}
+                hitSlop={12}
+                style={{ padding: 8, width: 40, alignItems: 'center' }}
+                disabled={saving}
+              >
+                <Ionicons
+                  name="checkmark"
+                  size={22}
+                  color={confirmFinish ? SemanticColors.success : '#FFFFFF'}
+                />
+              </Pressable>
             </View>
           </View>
         </View>

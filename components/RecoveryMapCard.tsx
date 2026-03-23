@@ -46,7 +46,8 @@ function FatiguedPill({ color, label, hoursAgo, volume, theme, weightUnit }: {
     return () => anim.stop();
   }, []);
 
-  const displayVol = weightUnit === 'lbs' ? Math.round(volume * 2.205) : Math.round(volume);
+  // Volumes are already in user's unit (stored as-entered), just round
+  const displayVol = Math.round(volume);
   const unit = weightUnit === 'lbs' ? 'lbs' : 'kg';
   const timeLabel = hoursAgo === null
     ? ''

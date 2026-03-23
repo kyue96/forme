@@ -9,6 +9,7 @@ import { formatNumber } from '@/lib/utils';
 interface DayVolume {
   date: string;
   dayAbbr: string;
+  focusLabel: string; // e.g. "Push", "Pull", "Legs"
   volume: number; // in kg (raw from DB)
 }
 
@@ -36,19 +37,26 @@ function getWeekRange(weeksAgo: number): { start: string; end: string } {
   return { start: fmt(startOfThisWeek), end: fmt(endOfWeek) };
 }
 
-function parseLogs(logs: { completed_at: string; exercises: LoggedExercise[] }[]): DayVolume[] {
-  const byDate: Record<string, number> = {};
+function parseLogs(logs: { completed_at: string; day_name?: string; exercises: LoggedExercise[] }[]): DayVolume[] {
+  // Group by date, keep the focus/day_name from the first log per date
+  const byDate: Record<string, { volume: number; focus: string }> = {};
   for (const log of logs) {
     const date = log.completed_at?.split('T')[0];
     if (!date) continue;
     const vol = computeTotalVolume(log.exercises ?? []);
-    byDate[date] = (byDate[date] ?? 0) + vol;
+    if (!byDate[date]) {
+      byDate[date] = { volume: vol, focus: log.day_name ?? '' };
+    } else {
+      byDate[date].volume += vol;
+    }
   }
   return Object.entries(byDate)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([date, volume]) => {
+    .map(([date, { volume, focus }]) => {
       const d = new Date(date + 'T12:00:00');
-      return { date, dayAbbr: DAY_ABBRS[d.getDay()], volume };
+      // Extract short focus label: "Push Day" -> "Push", "Upper Body" -> "Upper"
+      const focusLabel = focus ? focus.split(/[\s(]/)[0] : DAY_ABBRS[d.getDay()];
+      return { date, dayAbbr: DAY_ABBRS[d.getDay()], focusLabel, volume };
     });
 }
 
@@ -71,13 +79,13 @@ export default function WeeklyVolumeTrend({ userId, accentColor }: Props) {
       const [{ data: thisData }, { data: lastData }] = await Promise.all([
         supabase
           .from('workout_logs')
-          .select('completed_at, exercises')
+          .select('completed_at, day_name, exercises')
           .eq('user_id', userId)
           .gte('completed_at', thisRange.start)
           .lte('completed_at', thisRange.end + 'T23:59:59'),
         supabase
           .from('workout_logs')
-          .select('completed_at, exercises')
+          .select('completed_at, day_name, exercises')
           .eq('user_id', userId)
           .gte('completed_at', lastRange.start)
           .lte('completed_at', lastRange.end + 'T23:59:59'),
@@ -91,16 +99,13 @@ export default function WeeklyVolumeTrend({ userId, accentColor }: Props) {
     return () => { cancelled = true; };
   }, [userId]);
 
-  // Convert volumes for display
-  const convert = (kg: number) =>
-    weightUnit === 'lbs' ? Math.round(kg * 2.205) : Math.round(kg);
-
+  // Volumes are already in user's unit (stored as-entered), just round
   // Filter out days with 0 volume (rest days that somehow got logged)
   const thisWeekConverted = thisWeek
-    .map((d) => ({ ...d, volume: convert(d.volume) }))
+    .map((d) => ({ ...d, volume: Math.round(d.volume) }))
     .filter((d) => d.volume > 0);
   const lastWeekConverted = lastWeek
-    .map((d) => ({ ...d, volume: convert(d.volume) }))
+    .map((d) => ({ ...d, volume: Math.round(d.volume) }))
     .filter((d) => d.volume > 0);
 
   // Nothing to show if no workouts this week or last week
@@ -108,12 +113,12 @@ export default function WeeklyVolumeTrend({ userId, accentColor }: Props) {
 
   // Pair by index: 1st workout this week vs 1st workout last week, 2nd vs 2nd, etc.
   const maxLen = Math.max(thisWeekConverted.length, lastWeekConverted.length);
-  const showDays: { dayAbbr: string; date: string; volume: number; prevVolume: number }[] = [];
+  const showDays: { label: string; date: string; volume: number; prevVolume: number }[] = [];
   for (let i = 0; i < maxLen; i++) {
     const cur = thisWeekConverted[i];
     const prev = lastWeekConverted[i];
     showDays.push({
-      dayAbbr: cur?.dayAbbr ?? prev?.dayAbbr ?? `W${i + 1}`,
+      label: cur?.focusLabel ?? prev?.focusLabel ?? `W${i + 1}`,
       date: cur?.date ?? prev?.date ?? '',
       volume: cur?.volume ?? 0,
       prevVolume: prev?.volume ?? 0,
@@ -148,7 +153,7 @@ export default function WeeklyVolumeTrend({ userId, accentColor }: Props) {
       }}
     >
       {/* Header */}
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>
           Weekly Volume Trend
         </Text>
@@ -222,9 +227,9 @@ export default function WeeklyVolumeTrend({ userId, accentColor }: Props) {
                     }}
                   />
                 </View>
-                {/* Day label */}
-                <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 6 }}>
-                  {day.dayAbbr}
+                {/* Workout focus label */}
+                <Text style={{ fontSize: 9, color: theme.textSecondary, marginTop: 6 }} numberOfLines={1}>
+                  {day.label}
                 </Text>
               </View>
             );
@@ -246,10 +251,7 @@ export default function WeeklyVolumeTrend({ userId, accentColor }: Props) {
         </View>
       )}
 
-      {/* Y-axis unit label */}
-      <Text style={{ fontSize: 9, color: theme.textSecondary, textAlign: 'center', marginTop: 4 }}>
-        Volume ({weightUnit})
-      </Text>
+      {/* Y-axis unit already shown at top of axis */}
     </View>
   );
 }

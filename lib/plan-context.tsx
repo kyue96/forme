@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from './supabase';
 import { WorkoutPlan } from './types';
+import { useUserStore } from './user-store';
 
 interface PlanContextType {
   plan: WorkoutPlan | null;
@@ -14,17 +15,19 @@ const PlanContext = createContext<PlanContextType | null>(null);
 export function PlanProvider({ children }: { children: React.ReactNode }) {
   const [plan, setPlan] = useState<WorkoutPlan | null>(null);
   const [loading, setLoading] = useState(true);
+  const hasFetched = useRef(false);
 
   const fetchPlan = async () => {
-    setLoading(true);
+    // Only show loading spinner on first fetch — subsequent refetches keep stale plan visible
+    if (!hasFetched.current) setLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setLoading(false); return; }
+      const uid = useUserStore.getState().userId || (await supabase.auth.getUser()).data.user?.id;
+      if (!uid) { setLoading(false); return; }
 
       const { data } = await supabase
         .from('workout_plans')
         .select('*')
-        .eq('user_id', user.id)
+        .eq('user_id', uid)
         .order('created_at', { ascending: false })
         .limit(1)
         .single();
@@ -40,6 +43,7 @@ export function PlanProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // No plan found
     } finally {
+      hasFetched.current = true;
       setLoading(false);
     }
   };

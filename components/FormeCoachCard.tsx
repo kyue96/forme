@@ -53,6 +53,10 @@ function getDayOfYear(): number {
   return Math.floor(diff / (1000 * 60 * 60 * 24));
 }
 
+export function getTodayTip(): string {
+  return DAILY_TIPS[getDayOfYear() % DAILY_TIPS.length];
+}
+
 interface FormeCoachCardProps {
   message?: string;
   compact?: boolean;

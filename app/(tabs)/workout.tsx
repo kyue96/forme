@@ -109,6 +109,7 @@ export default function WorkoutScreen() {
   const { plan, loading, refetch, setPlan } = usePlan();
   const { theme, weightUnit } = useSettings();
   const avatarColor = useUserStore((s) => s.avatarColor);
+  const storeUserId = useUserStore((s) => s.userId);
   const focusCardColor = avatarColor || '#F59E0B';
   const { logId } = useLocalSearchParams<{ logId?: string }>();
 
@@ -209,15 +210,15 @@ export default function WorkoutScreen() {
   const loadHistoryMonth = useCallback(async (year: number, month: number) => {
     setHistoryLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const uid = storeUserId || (await supabase.auth.getUser()).data.user?.id;
+      if (!uid) return;
       const start = `${year}-${String(month + 1).padStart(2, '0')}-01`;
       const endDate = new Date(year, month + 1, 0);
       const end = `${year}-${String(month + 1).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}T23:59:59`;
       const { data } = await supabase
         .from('workout_logs')
         .select('id, day_name, exercises, duration_minutes, completed_at')
-        .eq('user_id', user.id)
+        .eq('user_id', uid)
         .gte('completed_at', start)
         .lte('completed_at', end)
         .order('completed_at', { ascending: false });
@@ -243,19 +244,19 @@ export default function WorkoutScreen() {
   const loadSavedRoutines = useCallback(async () => {
     setSavedRoutinesLoading(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const uid = storeUserId || (await supabase.auth.getUser()).data.user?.id;
+      if (!uid) return;
       const { data } = await supabase
         .from('saved_routines')
         .select('id, name, exercises, last_used_at')
-        .eq('user_id', user.id)
+        .eq('user_id', uid)
         .order('last_used_at', { ascending: false })
         .limit(50);
       if (data) setSavedRoutines(data as SavedRoutine[]);
     } catch {} finally {
       setSavedRoutinesLoading(false);
     }
-  }, []);
+  }, [storeUserId]);
 
   useEffect(() => {
     if (viewMode === 'saved') loadSavedRoutines();
@@ -305,8 +306,8 @@ export default function WorkoutScreen() {
 
   const loadAllData = useCallback(async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const uid = storeUserId || (await supabase.auth.getUser()).data.user?.id;
+      if (!uid) return;
 
       // Date ranges
       const weekDates = getWeekDates();
@@ -316,7 +317,7 @@ export default function WorkoutScreen() {
       const { data: recentLogs } = await supabase
         .from('workout_logs')
         .select('id, day_name, exercises, duration_minutes, completed_at')
-        .eq('user_id', user.id)
+        .eq('user_id', uid)
         .gte('completed_at', dateKey(w1Mon))
         .order('completed_at', { ascending: false });
 
@@ -364,21 +365,21 @@ export default function WorkoutScreen() {
     setPlan(newPlan);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const uid = storeUserId || (await supabase.auth.getUser()).data.user?.id;
+      if (!uid) return;
 
       await supabase
         .from('workout_plans')
         .update({ plan: newPlan })
         .eq('id', plan.id)
-        .eq('user_id', user.id);
+        .eq('user_id', uid);
     } catch (err) {
       console.error('Failed to reorder days:', err);
       // Revert on failure
       setPlan(plan);
       Alert.alert('Error', 'Failed to reorder days');
     }
-  }, [plan, setPlan]);
+  }, [plan, setPlan, storeUserId]);
 
 
   const swapExercise = useCallback(async (newExerciseName: string) => {
@@ -406,14 +407,14 @@ export default function WorkoutScreen() {
     };
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const uid = storeUserId || (await supabase.auth.getUser()).data.user?.id;
+      if (!uid) return;
 
       await supabase
         .from('workout_plans')
         .update({ plan: newPlan })
         .eq('id', plan.id)
-        .eq('user_id', user.id);
+        .eq('user_id', uid);
 
       refetch();
       setSwapTarget(null);
@@ -625,7 +626,7 @@ export default function WorkoutScreen() {
     );
   };
 
-  if (loading) {
+  if (loading && !plan) {
     return (
       <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, alignItems: 'center', justifyContent: 'center' }} edges={['top']}>

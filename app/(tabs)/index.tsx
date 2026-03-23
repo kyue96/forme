@@ -36,7 +36,7 @@ import { MuscleGroupPills } from '@/components/MuscleGroupPills';
 import { getExerciseCategories } from '@/lib/exercise-utils';
 import { computeVolumeByMuscle, computeTotalVolume } from '@/lib/workout-metrics';
 import NextWorkoutCard from '@/components/NextWorkoutCard';
-import FormeCoachCard from '@/components/FormeCoachCard';
+import FormeCoachCard, { getTodayTip } from '@/components/FormeCoachCard';
 import RecoveryMapCard from '@/components/RecoveryMapCard';
 import TrophyCaseCard from '@/components/TrophyCaseCard';
 import BodyStatsCard from '@/components/BodyStatsCard';
@@ -146,6 +146,7 @@ export default function HomeScreen() {
   const getElapsedMs = useWorkoutStore((s) => s.getElapsedMs);
   const clearWorkout = useWorkoutStore((s) => s.clearWorkout);
   const avatarColor = useUserStore((s) => s.avatarColor);
+  const storeUserId = useUserStore((s) => s.userId);
   const focusCardColor = avatarColor || '#F59E0B';
 
   // Create gradient colors: lighter tint → base → darker shade
@@ -194,9 +195,10 @@ export default function HomeScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-      setUserId(user.id);
+      const uid = storeUserId || (await supabase.auth.getUser()).data.user?.id;
+      if (!uid) return;
+      if (!userId) setUserId(uid);
+      const user = { id: uid }; // compat shim for existing references below
 
       const weekStart = dateKey(weekDates[0]);
       const weekEnd = dateKey(weekDates[6]);
@@ -380,8 +382,8 @@ export default function HomeScreen() {
   const saveActivity = async () => {
     setSavingActivity(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const uid = userId || storeUserId;
+      if (!uid) return;
       let calBurned: number | null = null;
       if (activityCalNotSure) {
         const est = getCalorieEstimate();
@@ -390,7 +392,7 @@ export default function HomeScreen() {
         calBurned = parseInt(activityCalories) || null;
       }
       await supabase.from('activities').insert({
-        user_id: user.id,
+        user_id: uid,
         date: activeDate,
         type: activityType,
         duration_minutes: parseInt(activityDuration) || null,
@@ -411,10 +413,10 @@ export default function HomeScreen() {
   const saveMeal = async () => {
     setSavingMeal(true);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      const uid = userId || storeUserId;
+      if (!uid) return;
       await supabase.from('meals').insert({
-        user_id: user.id,
+        user_id: uid,
         date: activeDate,
         name: mealName.trim() || null,
         calories: parseFloat(mealCal) || 0,
@@ -463,7 +465,7 @@ export default function HomeScreen() {
   const { display: animSets } = useAnimatedCounter(sessionTotalSets, 1400);
   const { display: animReps } = useAnimatedCounter(sessionTotalReps, 1400);
 
-  if (loading) {
+  if (loading && !plan) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, alignItems: 'center', justifyContent: 'center' }}>
         <ActivityIndicator color={theme.chrome} />
@@ -484,8 +486,8 @@ export default function HomeScreen() {
         showsVerticalScrollIndicator={false}
         scrollEnabled={scrollEnabled}
       >
-        {/* Calendar strip */}
-        {plan && (
+        {/* Calendar strip — hidden, infrastructure preserved for potential revert */}
+        {/* {plan && (
           <WeeklyCalendar
             completedDays={completedDays}
             onDayPress={handleDayPress}
@@ -494,31 +496,16 @@ export default function HomeScreen() {
             onInteractionStart={() => setScrollEnabled(false)}
             onInteractionEnd={() => setScrollEnabled(true)}
           />
-        )}
+        )} */}
+
+        {/* Date header */}
+        <View style={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 4 }}>
+          <Text style={{ fontSize: 15, fontWeight: '600', color: theme.textSecondary }}>
+            {now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+          </Text>
+        </View>
 
         <View style={{ paddingHorizontal: 24, gap: 12 }}>
-          {/* Quick Workout button — always visible when plan exists */}
-          {plan && (
-            <Pressable
-              onPress={() => router.push('/workout/quick')}
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 8,
-                backgroundColor: theme.surface,
-                borderRadius: 14,
-                paddingHorizontal: 16,
-                paddingVertical: 12,
-                borderWidth: 1,
-                borderColor: theme.border,
-              }}
-            >
-              <Ionicons name="flash" size={18} color={focusCardColor} />
-              <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text, flex: 1 }}>Quick Workout</Text>
-              <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
-            </Pressable>
-          )}
-
           {!plan ? (
             <View style={{ marginTop: 40, alignItems: 'center' }}>
               <Text allowFontScaling style={{ color: theme.textSecondary, fontSize: 15, textAlign: 'center', marginBottom: 32, lineHeight: 22 }}>
@@ -599,6 +586,12 @@ export default function HomeScreen() {
                       </View>
                     </View>
                   </View>
+
+                  {/* Daily Tip — inline */}
+                  <View style={{ borderTopWidth: 1, borderTopColor: theme.border, marginTop: 16, paddingTop: 10, flexDirection: 'row', alignItems: 'flex-start', gap: 6 }}>
+                    <Ionicons name="bulb-outline" size={13} color={theme.textSecondary} style={{ marginTop: 1 }} />
+                    <Text style={{ fontSize: 12, color: theme.textSecondary, flex: 1, lineHeight: 17 }} numberOfLines={2}>{getTodayTip()}</Text>
+                  </View>
                   </View>
 
                   {/* PR callout */}
@@ -631,24 +624,30 @@ export default function HomeScreen() {
                     </View>
                   )}
 
-                  {/* Recovery Map — pill style */}
-                  <View style={{ marginTop: 8, marginBottom: 24 }}>
-                    <RecoveryMapCard recentLogs={recentLogs} />
-                  </View>
-
-                  {/* Body Stats */}
-                  <View style={{ marginBottom: 24 }}>
-                    {userId && <BodyStatsCard userId={userId} />}
-                  </View>
-
                   {/* Weekly Volume Trend */}
-                  <View style={{ marginBottom: 24 }}>
+                  <View style={{ marginTop: 8, marginBottom: 24 }}>
                     {userId && <WeeklyVolumeTrend userId={userId} accentColor={focusCardColor} />}
                   </View>
 
-                  {/* Daily Tip — compact */}
+                  {/* Recovery Map */}
                   <View style={{ marginBottom: 24 }}>
-                    <FormeCoachCard compact />
+                    <RecoveryMapCard recentLogs={recentLogs} />
+                  </View>
+
+                  {/* Quick Workout + Weigh-In */}
+                  <View style={{ flexDirection: 'row', gap: 10, marginBottom: 24 }}>
+                    <Pressable onPress={() => router.push('/workout/quick')} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: theme.surface, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: theme.border }}>
+                      <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: `${focusCardColor}20`, alignItems: 'center', justifyContent: 'center' }}>
+                        <Ionicons name="flash" size={20} color={focusCardColor} />
+                      </View>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>Quick Workout</Text>
+                    </Pressable>
+                    {userId && <BodyStatsCard userId={userId} />}
+                  </View>
+
+                  {/* Trophy Case */}
+                  <View style={{ marginBottom: 24 }}>
+                    {userId && <TrophyCaseCard userId={userId} />}
                   </View>
 
                   {/* Hidden shareable card for screenshot sharing */}
@@ -689,23 +688,42 @@ export default function HomeScreen() {
           ) : !activeWorkoutDay && activeDate < todayStr ? (
             /* Past rest day */
             <View style={{ gap: 12 }}>
-              <View style={{ backgroundColor: theme.surface, borderRadius: 16, height: 56, borderWidth: 1, borderColor: theme.border }}>
-                <View style={{ paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center' }}>
+              <View style={{ backgroundColor: theme.surface, borderRadius: 16, borderWidth: 1, borderColor: theme.border }}>
+                <View style={{ paddingHorizontal: 16, paddingVertical: 14, flexDirection: 'row', alignItems: 'center' }}>
                   <Ionicons name="moon" size={28} color={theme.textSecondary} />
-                  <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, marginLeft: 12 }}>Rest Day</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, marginLeft: 12, flex: 1 }}>Rest Day</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingHorizontal: 16, paddingBottom: 14 }}>
+                  <Ionicons name="bulb-outline" size={13} color={theme.textSecondary} style={{ marginTop: 1 }} />
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, flex: 1, lineHeight: 17 }} numberOfLines={2}>{getTodayTip()}</Text>
                 </View>
               </View>
-              {userId && <BodyStatsCard userId={userId} />}
               {userId && <WeeklyVolumeTrend userId={userId} accentColor={focusCardColor} />}
+              <RecoveryMapCard recentLogs={recentLogs} />
+              {/* Quick Workout + Weigh-In */}
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Pressable onPress={() => router.push('/workout/quick')} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: theme.surface, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: theme.border }}>
+                  <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: `${focusCardColor}20`, alignItems: 'center', justifyContent: 'center' }}>
+                    <Ionicons name="flash" size={20} color={focusCardColor} />
+                  </View>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>Quick Workout</Text>
+                </Pressable>
+                {userId && <BodyStatsCard userId={userId} />}
+              </View>
+              {userId && <TrophyCaseCard userId={userId} />}
             </View>
 
           ) : !activeWorkoutDay ? (
             <View style={{ gap: 12 }}>
-              {/* Rest Day card — plain surface, no color */}
-              <View style={{ backgroundColor: theme.surface, borderRadius: 16, height: 56, borderWidth: 1, borderColor: theme.border }}>
-                <View style={{ paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center' }}>
+              {/* Rest Day card — with daily tip */}
+              <View style={{ backgroundColor: theme.surface, borderRadius: 16, borderWidth: 1, borderColor: theme.border }}>
+                <View style={{ paddingHorizontal: 16, paddingVertical: 14, flexDirection: 'row', alignItems: 'center' }}>
                   <Ionicons name="moon" size={28} color={theme.textSecondary} />
-                  <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, marginLeft: 12 }}>Rest Day</Text>
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, marginLeft: 12, flex: 1 }}>Rest Day</Text>
+                </View>
+                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, paddingHorizontal: 16, paddingBottom: 14 }}>
+                  <Ionicons name="bulb-outline" size={13} color={theme.textSecondary} style={{ marginTop: 1 }} />
+                  <Text style={{ fontSize: 12, color: theme.textSecondary, flex: 1, lineHeight: 17 }} numberOfLines={2}>{getTodayTip()}</Text>
                 </View>
               </View>
 
@@ -756,20 +774,25 @@ export default function HomeScreen() {
                 );
               })()}
 
-              {/* Recovery Map */}
-              <RecoveryMapCard recentLogs={recentLogs} />
-
-              {/* Body Stats */}
-              {userId && <BodyStatsCard userId={userId} />}
-
               {/* Weekly Volume Trend */}
               {userId && <WeeklyVolumeTrend userId={userId} accentColor={focusCardColor} />}
 
+              {/* Recovery Map */}
+              <RecoveryMapCard recentLogs={recentLogs} />
+
+              {/* Quick Workout + Weigh-In */}
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Pressable onPress={() => router.push('/workout/quick')} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: theme.surface, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: theme.border }}>
+                  <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: `${focusCardColor}20`, alignItems: 'center', justifyContent: 'center' }}>
+                    <Ionicons name="flash" size={20} color={focusCardColor} />
+                  </View>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>Quick Workout</Text>
+                </Pressable>
+                {userId && <BodyStatsCard userId={userId} />}
+              </View>
+
               {/* Trophy Case */}
               {userId && <TrophyCaseCard userId={userId} />}
-
-              {/* Daily Tip */}
-              <FormeCoachCard />
 
             </View>
 
@@ -799,7 +822,9 @@ export default function HomeScreen() {
                       <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                         <View style={{ flex: 1 }}>
                           <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
-                            {hasStarted ? "Today's Workout \u00B7 In Progress" : "Today's Workout \u00B7 Ready"}
+                            {activeWorkout.dayIndex === -1
+                              ? (hasStarted ? "Quick Workout \u00B7 In Progress" : "Quick Workout \u00B7 Ready")
+                              : (hasStarted ? "Today's Workout \u00B7 In Progress" : "Today's Workout \u00B7 Ready")}
                           </Text>
                           <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: '#FFFFFF', lineHeight: 34 }}>
                             {stripParens(activeWorkout.dayName)}
@@ -868,19 +893,35 @@ export default function HomeScreen() {
                     <View style={{ marginTop: 12 }}>
                       <MuscleGroupPills categories={getExerciseCategories(activeWorkoutDay.exercises)} size="small" />
                     </View>
+                    {/* Daily Tip — inline */}
+                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 14, borderTopWidth: 1, borderTopColor: '#FFFFFF30', paddingTop: 10 }}>
+                      <Ionicons name="bulb-outline" size={13} color="#FFFFFFAA" style={{ marginTop: 1 }} />
+                      <Text style={{ fontSize: 12, color: '#FFFFFFAA', flex: 1, lineHeight: 17 }} numberOfLines={2}>{getTodayTip()}</Text>
+                    </View>
                     </View>
                   </BreathingGradient>
                 </Pressable>
               )}
 
-              {/* Body Stats */}
-              {userId && <BodyStatsCard userId={userId} />}
-
               {/* Weekly Volume Trend */}
               {userId && <WeeklyVolumeTrend userId={userId} accentColor={focusCardColor} />}
 
-              {/* Daily Tip — compact */}
-              <FormeCoachCard compact />
+              {/* Recovery Map */}
+              <RecoveryMapCard recentLogs={recentLogs} />
+
+              {/* Quick Workout + Weigh-In */}
+              <View style={{ flexDirection: 'row', gap: 10 }}>
+                <Pressable onPress={() => router.push('/workout/quick')} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: theme.surface, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: theme.border }}>
+                  <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: `${focusCardColor}20`, alignItems: 'center', justifyContent: 'center' }}>
+                    <Ionicons name="flash" size={20} color={focusCardColor} />
+                  </View>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>Quick Workout</Text>
+                </Pressable>
+                {userId && <BodyStatsCard userId={userId} />}
+              </View>
+
+              {/* Trophy Case */}
+              {userId && <TrophyCaseCard userId={userId} />}
             </View>
           )}
 

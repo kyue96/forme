@@ -103,10 +103,13 @@ export default function TrophyCaseCard({ userId }: TrophyCaseCardProps) {
     }
   };
 
-  const convert = (kg: number) => weightUnit === 'lbs' ? Math.round(kg * 2.205) : Math.round(kg);
+  // PRs and weights are already in user's unit (stored as-entered), just round
+  const convert = (v: number) => Math.round(v);
   const unit = weightUnit === 'lbs' ? 'lbs' : 'kg';
 
   if (loading) return null;
+  if (recentPRs.length === 0 && !nearPR) return null;
+  /* Old empty state removed — card now hides when nothing to show
   if (recentPRs.length === 0 && !nearPR) {
     return (
       <View style={{
@@ -128,7 +131,7 @@ export default function TrophyCaseCard({ userId }: TrophyCaseCardProps) {
         </View>
       </View>
     );
-  }
+  } */
 
   return (
     <View style={{
