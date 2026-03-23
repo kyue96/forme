@@ -9,8 +9,9 @@ import { Session } from '@supabase/supabase-js';
 
 import { supabase } from '@/lib/supabase';
 import { QuizProvider } from '@/lib/quiz-store';
-import { PlanProvider } from '@/lib/plan-context';
+import { PlanProvider, usePlan } from '@/lib/plan-context';
 import { SettingsProvider, useSettings } from '@/lib/settings-context';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 
 // Fix Android text clipping — override render to inject includeFontPadding: false
 // This is a no-op on iOS. On Android it removes extra top/bottom padding that causes cutoff.
@@ -47,16 +48,28 @@ function RootLayoutNav({ session }: { session: Session | null }) {
   const router = useRouter();
   const segments = useSegments();
   const { theme, themeMode } = useSettings();
+  const { plan, loading: planLoading } = usePlan();
 
   useEffect(() => {
+    // Wait for plan to finish loading before routing decisions
+    if (planLoading) return;
+
     const inAuthGroup = segments[0] === '(auth)';
+    const inQuiz = segments[0] === 'quiz';
+    const inPlanResult = segments[0] === 'plan-result';
     const onOnboarding = segments[1] === 'onboarding';
+
     if (!session && !inAuthGroup) {
       router.replace('/(auth)/welcome');
     } else if (session && inAuthGroup && !onOnboarding) {
-      router.replace('/(tabs)');
+      // New user with no plan → send to quiz instead of homepage
+      if (!plan) {
+        router.replace('/quiz/1');
+      } else {
+        router.replace('/(tabs)');
+      }
     }
-  }, [session, segments]);
+  }, [session, segments, plan, planLoading]);
 
   // Detect dark theme by checking if background color is dark
   const isDark = (() => {
@@ -74,6 +87,7 @@ function RootLayoutNav({ session }: { session: Session | null }) {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="quiz" />
+        <Stack.Screen name="permissions" />
         <Stack.Screen name="plan-result" />
         <Stack.Screen name="workout/[dayIndex]" />
         <Stack.Screen name="create-post" options={{ presentation: 'modal' }} />
@@ -109,12 +123,14 @@ export default function RootLayout() {
   if (!loaded) return null;
 
   return (
-    <SettingsProvider>
-      <QuizProvider>
-        <PlanProvider>
-          <RootLayoutNav session={session} />
-        </PlanProvider>
-      </QuizProvider>
-    </SettingsProvider>
+    <ErrorBoundary>
+      <SettingsProvider>
+        <QuizProvider>
+          <PlanProvider>
+            <RootLayoutNav session={session} />
+          </PlanProvider>
+        </QuizProvider>
+      </SettingsProvider>
+    </ErrorBoundary>
   );
 }

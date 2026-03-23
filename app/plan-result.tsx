@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
@@ -25,9 +25,11 @@ const LOADING_MESSAGES = [
 
 export default function PlanResultScreen() {
   const router = useRouter();
-  const { answers, resetQuiz } = useQuiz();
+  const { mode } = useLocalSearchParams<{ mode?: string }>();
+  const { answers, resetQuiz, saveAnswers } = useQuiz();
   const { setPlan } = usePlan();
   const { theme } = useSettings();
+  const isRebuild = mode === 'rebuild';
 
   const [loading, setLoading] = useState(true);
   const [loadingMsg, setLoadingMsg] = useState(LOADING_MESSAGES[0]);
@@ -86,18 +88,20 @@ export default function PlanResultScreen() {
         }
 
         // Also save quiz data to profile for TDEE calculation
-        if (answers.height && answers.weight) {
-          await supabase.from('profiles').upsert({
-            id: user.id,
-            height: answers.height,
-            weight: answers.weight,
-            goal: answers.goal,
-            days_per_week: answers.daysPerWeek,
-            gender: answers.gender,
-          });
-        }
+        const profileData: Record<string, any> = {
+          id: user.id,
+          goal: answers.goal,
+          days_per_week: answers.daysPerWeek,
+          gender: answers.gender,
+        };
+        if (answers.height) profileData.height = answers.height;
+        if (answers.weight) profileData.weight = answers.weight;
+        if (answers.name?.trim()) profileData.display_name = answers.name.trim();
+        await supabase.from('profiles').upsert(profileData);
       }
 
+      // Save answers to AsyncStorage so rebuild mode can prefill them
+      await saveAnswers();
       resetQuiz();
     } catch (err) {
       const msg = err instanceof Error ? err.message : JSON.stringify(err);
@@ -149,11 +153,11 @@ export default function PlanResultScreen() {
 
           <View style={{ paddingHorizontal: 24, paddingBottom: 24, paddingTop: 8 }}>
             <Pressable
-              onPress={() => router.replace('/profile-setup')}
+              onPress={() => isRebuild ? router.replace('/(tabs)/workout') : router.replace('/profile-setup')}
               style={{ backgroundColor: theme.text, paddingVertical: 16, borderRadius: 16, alignItems: 'center' }}
             >
               <Text style={{ color: theme.background, fontSize: 16, fontWeight: '600' }}>
-                Let's go →
+                {isRebuild ? 'Back to workouts →' : 'Let\'s go →'}
               </Text>
             </Pressable>
           </View>

@@ -139,6 +139,7 @@ export const EXERCISE_INSTRUCTIONS: Record<string, string> = {
   'zercher squat': 'Cradle the bar in your elbow crooks like you\'re carrying a sleeping child. Squat deep and use the bar position to keep your torso upright naturally. Your core and upper back will work overtime; that\'s a feature, not a bug.',
   // Legs. Hamstrings
   'leg curl': 'Dig your hips into the pad so they don\'t lift when it gets hard; that\'s the most common cheat. Curl your heels toward your butt and squeeze your hamstrings like you\'re trying to crack a walnut behind your knee. Lower slow; if the weight stack clangs, you\'re going too fast.',
+  'lying leg curl': 'Lie face down and dig your hips into the pad so they don\'t lift when it gets hard. Curl your heels toward your butt and squeeze your hamstrings like you\'re trying to crack a walnut behind your knee. Lower slow and controlled; if the weight stack clangs, you\'re going too fast.',
   'seated leg curl': 'Sit tall and curl your heels under the seat as far as they\'ll go. Squeeze your hamstrings hard at the bottom like you\'re digging your heels into sand. Return slowly and resist the pad pulling your legs straight; that eccentric is gold.',
   'stiff leg deadlift': 'Keep your legs almost straight; a tiny bend in the knees is fine but no more. Push your hips back and lower the bar until your hamstrings scream for mercy. Your back stays flat as a table the entire time.',
   'romanian deadlift (dumbbell)': 'Push your hips back like you\'re bumping a door closed behind you. Keep the dumbbells grazing your thighs the entire way down. When you feel your hamstrings hit their limit, that\'s your bottom; drive your hips forward to stand.',
@@ -305,6 +306,26 @@ export const EQUIPMENT_TYPES = ['Barbell', 'Dumbbell', 'Kettlebell', 'Machine', 
 
 export const CABLE_ATTACHMENTS = ['Straight Bar', 'EZ-Bar', 'V-Bar', 'Rope', 'Single Handle', 'D-Handle'] as const;
 
+// Exercise-specific attachment overrides (exercises that only use a subset of attachments)
+const EXERCISE_ATTACHMENT_OVERRIDES: Record<string, readonly string[]> = {
+  'lat pulldown': ['Straight Bar', 'V-Bar', 'Rope', 'Single Handle'],
+  'close grip lat pulldown': ['V-Bar', 'Straight Bar', 'Rope'],
+  'single arm lat pulldown': ['Single Handle', 'D-Handle'],
+  'behind neck lat pulldown': ['Straight Bar'],
+};
+
+/** Returns the cable attachments appropriate for a given exercise */
+export function getAttachmentsForExercise(name: string): readonly string[] {
+  const lower = name.toLowerCase();
+  // Check exact match first
+  if (EXERCISE_ATTACHMENT_OVERRIDES[lower]) return EXERCISE_ATTACHMENT_OVERRIDES[lower];
+  // Check partial match
+  for (const [key, attachments] of Object.entries(EXERCISE_ATTACHMENT_OVERRIDES)) {
+    if (lower.includes(key) || key.includes(lower)) return attachments;
+  }
+  return CABLE_ATTACHMENTS;
+}
+
 // Exercises that use cable attachments but don't have "cable" in the name
 const IMPLICIT_CABLE_EXERCISES = ['lat pulldown', 'tricep pushdown', 'face pull'];
 
@@ -445,6 +466,7 @@ export const EXERCISE_DATABASE: ExerciseEntry[] = [
   { name: 'Zercher Squat', category: 'Legs' },
   // Hamstrings
   { name: 'Leg Curl', category: 'Legs' },
+  { name: 'Lying Leg Curl', category: 'Legs' },
   { name: 'Seated Leg Curl', category: 'Legs' },
   { name: 'Stiff Leg Deadlift', category: 'Legs' },
   { name: 'Romanian Deadlift (Dumbbell)', category: 'Legs' },

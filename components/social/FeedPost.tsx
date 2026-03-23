@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Alert, Image, Pressable, Text, TextInput, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Image, Modal, Pressable, Share, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { captureRef } from 'react-native-view-shot';
 
 import { useSettings } from '@/lib/settings-context';
 import { useUserStore } from '@/lib/user-store';
@@ -11,6 +12,25 @@ import { ReactionBar } from '@/components/social/ReactionBar';
 import { CommentSheet } from '@/components/social/CommentSheet';
 import { CARD_THEMES, formatVolume, formatDuration } from '@/lib/card-themes';
 import type { PostWithAuthor, CardData, Comment } from '@/lib/social-types';
+
+function FeedImage({ uri }: { uri: string }) {
+  const [ratio, setRatio] = useState(4 / 3); // fallback
+  useEffect(() => {
+    Image.getSize(
+      uri,
+      (w, h) => { if (w && h) setRatio(w / h); },
+      () => {},
+    );
+  }, [uri]);
+  return (
+    <Image
+      source={{ uri }}
+      style={{ width: '100%', aspectRatio: ratio, marginTop: 8, borderRadius: 12 }}
+      resizeMode="contain"
+      onError={(e) => console.warn('Image load error:', e.nativeEvent.error, uri)}
+    />
+  );
+}
 
 function timeAgo(dateStr: string): string {
   const now = Date.now();
@@ -34,15 +54,65 @@ export function FeedPost({ post }: FeedPostProps) {
   const router = useRouter();
   const { theme } = useSettings();
   const userId = useUserStore((s) => s.userId);
-  const { toggleReaction, deletePost, loadComments, addComment } = useSocialStore();
+  const { toggleReaction, deletePost, updatePost, loadComments, addComment } = useSocialStore();
 
   const [commentsVisible, setCommentsVisible] = useState(false);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [editCaption, setEditCaption] = useState('');
   const [inlineComments, setInlineComments] = useState<Comment[]>([]);
   const [commentsExpanded, setCommentsExpanded] = useState(false);
   const [commentText, setCommentText] = useState('');
   const [sendingComment, setSendingComment] = useState(false);
   const [loadedComments, setLoadedComments] = useState(false);
+  const menuTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const deleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const postRef = useRef<View>(null);
+  const [showWatermark, setShowWatermark] = useState(false);
+
+  const handleShare = async () => {
+    if (!postRef.current) return;
+    try {
+      // Show watermark, capture, then hide it
+      setShowWatermark(true);
+      // Wait a frame for the watermark to render
+      await new Promise((r) => setTimeout(r, 100));
+      const uri = await captureRef(postRef.current, { format: 'png', quality: 1 });
+      setShowWatermark(false);
+      const caption = post.caption ? post.caption.slice(0, 100) : '';
+      const cardFocus = post.card_data?.focus ?? '';
+      const message = caption
+        ? `${caption}\n\nShared via Forme`
+        : cardFocus
+          ? `Check out this ${cardFocus} workout!\n\nShared via Forme`
+          : 'Check out this post on Forme!';
+      await Share.share({
+        url: uri,
+        message,
+      });
+    } catch {
+      setShowWatermark(false);
+      // User cancelled or error — no alert needed
+    }
+  };
+
+  // Auto-dismiss "..." menu after 2 seconds
+  useEffect(() => {
+    if (menuVisible) {
+      if (menuTimerRef.current) clearTimeout(menuTimerRef.current);
+      menuTimerRef.current = setTimeout(() => {
+        setMenuVisible(false);
+        setDeleteConfirm(false);
+      }, 2000);
+    } else {
+      setDeleteConfirm(false);
+    }
+    return () => {
+      if (menuTimerRef.current) clearTimeout(menuTimerRef.current);
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+    };
+  }, [menuVisible]);
 
   // Load first 3 comments when post appears
   useEffect(() => {
@@ -71,24 +141,62 @@ export function FeedPost({ post }: FeedPostProps) {
   const author = post.profiles;
   const isOwn = post.user_id === userId;
 
-  const handleDelete = () => {
-    Alert.alert('Delete post', 'This cannot be undone.', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Delete', style: 'destructive', onPress: () => deletePost(post.id) },
-    ]);
+  // Derive a fallback display name from user_id when display_name is null
+  const authorDisplayName = author?.display_name || `Athlete`;
+  const authorAvatarName = author?.display_name
+    ? author.display_name.charAt(0).toUpperCase()
+    : 'A';
+
+  const handleDeleteTap = () => {
+    if (deleteConfirm) {
+      // Second tap: actually delete
+      deletePost(post.id);
+      setMenuVisible(false);
+      setDeleteConfirm(false);
+    } else {
+      // First tap: turn red to confirm
+      setDeleteConfirm(true);
+      // Reset after 2 seconds
+      if (deleteTimerRef.current) clearTimeout(deleteTimerRef.current);
+      deleteTimerRef.current = setTimeout(() => setDeleteConfirm(false), 2000);
+      // Reset menu auto-dismiss timer
+      if (menuTimerRef.current) clearTimeout(menuTimerRef.current);
+      menuTimerRef.current = setTimeout(() => {
+        setMenuVisible(false);
+        setDeleteConfirm(false);
+      }, 2000);
+    }
+  };
+
+  const handleEdit = () => {
+    setEditCaption(post.caption ?? '');
+    setEditModalVisible(true);
     setMenuVisible(false);
   };
 
+  const handleSaveEdit = async () => {
+    const ok = await updatePost(post.id, editCaption.trim());
+    if (ok) {
+      setEditModalVisible(false);
+    } else {
+      Alert.alert('Error', 'Could not update post.');
+    }
+  };
+
   return (
-    <View style={{
-      backgroundColor: theme.surface,
-      borderRadius: 16,
-      marginHorizontal: 16,
-      marginBottom: 12,
-      borderWidth: 1,
-      borderColor: theme.border,
-      overflow: 'hidden',
-    }}>
+    <View
+      ref={postRef}
+      collapsable={false}
+      style={{
+        backgroundColor: theme.surface,
+        borderRadius: 16,
+        marginHorizontal: 16,
+        marginBottom: 12,
+        borderWidth: 1,
+        borderColor: theme.border,
+        overflow: 'hidden',
+      }}
+    >
       {/* Author header */}
       <View style={{ flexDirection: 'row', alignItems: 'center', padding: 16, paddingBottom: 12 }}>
         <Pressable
@@ -96,14 +204,14 @@ export function FeedPost({ post }: FeedPostProps) {
           style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 10 }}
         >
           <AvatarInitial
-            name={author?.display_name ?? '?'}
+            name={authorAvatarName}
             avatarUrl={author?.avatar_url}
             size={36}
             isTraining={author?.is_currently_training}
           />
           <View style={{ flex: 1 }}>
             <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>
-              {author?.display_name ?? 'User'}
+              {authorDisplayName}
             </Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Text style={{ fontSize: 11, color: theme.textSecondary }}>
@@ -119,11 +227,16 @@ export function FeedPost({ post }: FeedPostProps) {
           </View>
         </Pressable>
 
-        {isOwn && (
-          <Pressable onPress={() => setMenuVisible(!menuVisible)} hitSlop={8}>
-            <Ionicons name="ellipsis-horizontal" size={20} color={theme.chrome} />
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+          <Pressable onPress={handleShare} hitSlop={8}>
+            <Ionicons name="share-outline" size={20} color={theme.chrome} />
           </Pressable>
-        )}
+          {isOwn && (
+            <Pressable onPress={() => setMenuVisible(!menuVisible)} hitSlop={8}>
+              <Ionicons name="ellipsis-horizontal" size={20} color={theme.chrome} />
+            </Pressable>
+          )}
+        </View>
       </View>
 
       {/* Menu dropdown */}
@@ -133,9 +246,24 @@ export function FeedPost({ post }: FeedPostProps) {
           backgroundColor: theme.background, borderRadius: 12,
           borderWidth: 1, borderColor: theme.border,
           shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 8, elevation: 8,
+          overflow: 'hidden',
         }}>
-          <Pressable onPress={handleDelete} style={{ paddingHorizontal: 16, paddingVertical: 12 }}>
-            <Text style={{ fontSize: 14, color: '#EF4444', fontWeight: '600' }}>Delete post</Text>
+          <Pressable
+            onPress={handleEdit}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 }}
+          >
+            <Ionicons name="create-outline" size={16} color={theme.text} />
+            <Text style={{ fontSize: 14, color: theme.text, fontWeight: '600' }}>Edit</Text>
+          </Pressable>
+          <View style={{ height: 1, backgroundColor: theme.border }} />
+          <Pressable
+            onPress={handleDeleteTap}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12 }}
+          >
+            <Ionicons name="trash-outline" size={16} color={deleteConfirm ? '#EF4444' : theme.text} />
+            <Text style={{ fontSize: 14, color: deleteConfirm ? '#EF4444' : theme.text, fontWeight: '600' }}>
+              {deleteConfirm ? 'Tap to confirm' : 'Delete'}
+            </Text>
           </Pressable>
         </View>
       )}
@@ -171,14 +299,10 @@ export function FeedPost({ post }: FeedPostProps) {
         </Pressable>
       )}
 
-      {/* Optional image */}
-      {post.image_url && (
-        <Image
-          source={{ uri: post.image_url }}
-          style={{ width: '100%', aspectRatio: 4 / 3 }}
-          resizeMode="cover"
-        />
-      )}
+      {/* Optional image — full size, no crop */}
+      {post.image_url ? (
+        <FeedImage uri={post.image_url} />
+      ) : null}
 
       {/* Reactions + comments */}
       <View style={{ padding: 16, gap: 12 }}>
@@ -194,13 +318,13 @@ export function FeedPost({ post }: FeedPostProps) {
             {previewComments.map((c) => (
               <View key={c.id} style={{ flexDirection: 'row', gap: 8 }}>
                 <AvatarInitial
-                  name={c.profiles?.display_name ?? '?'}
+                  name={c.profiles?.display_name ? c.profiles.display_name.charAt(0).toUpperCase() : 'A'}
                   avatarUrl={c.profiles?.avatar_url}
                   size={24}
                 />
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 13, color: theme.text }}>
-                    <Text style={{ fontWeight: '700' }}>{c.profiles?.display_name ?? 'User'}</Text>
+                    <Text style={{ fontWeight: '700' }}>{c.profiles?.display_name || 'Athlete'}</Text>
                     {'  '}{c.body}
                   </Text>
                   <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 2 }}>{timeAgo(c.created_at)}</Text>
@@ -248,12 +372,82 @@ export function FeedPost({ post }: FeedPostProps) {
         </View>
       </View>
 
+      {/* Powered by Forme watermark — shown only during capture */}
+      {showWatermark && (
+        <View style={{
+          position: 'absolute', bottom: 8, right: 12,
+          backgroundColor: 'rgba(0,0,0,0.5)',
+          paddingHorizontal: 8, paddingVertical: 3,
+          borderRadius: 6,
+        }}>
+          <Text style={{ fontSize: 10, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.5 }}>
+            Powered by Forme
+          </Text>
+        </View>
+      )}
+
       {/* Full comment sheet (fallback) */}
       <CommentSheet
         postId={post.id}
         visible={commentsVisible}
         onClose={() => setCommentsVisible(false)}
       />
+
+      {/* Edit modal */}
+      <Modal visible={editModalVisible} animationType="slide" transparent>
+        <View style={{ flex: 1, justifyContent: 'flex-end' }}>
+          <Pressable style={{ flex: 1 }} onPress={() => setEditModalVisible(false)}>
+            <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' }} />
+          </Pressable>
+          <View style={{
+            backgroundColor: theme.background,
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            padding: 20,
+            borderTopWidth: 1,
+            borderTopColor: theme.border,
+          }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>Edit Post</Text>
+              <Pressable onPress={() => setEditModalVisible(false)} hitSlop={12}>
+                <Ionicons name="close" size={22} color={theme.chrome} />
+              </Pressable>
+            </View>
+            <TextInput
+              style={{
+                fontSize: 16,
+                color: theme.text,
+                minHeight: 100,
+                textAlignVertical: 'top',
+                backgroundColor: theme.surface,
+                borderRadius: 12,
+                padding: 12,
+                borderWidth: 1,
+                borderColor: theme.border,
+              }}
+              value={editCaption}
+              onChangeText={setEditCaption}
+              multiline
+              maxLength={500}
+              placeholder="Write a caption..."
+              placeholderTextColor={theme.textSecondary}
+              autoFocus
+            />
+            <Pressable
+              onPress={handleSaveEdit}
+              style={{
+                marginTop: 16,
+                backgroundColor: theme.text,
+                paddingVertical: 14,
+                borderRadius: 14,
+                alignItems: 'center',
+              }}
+            >
+              <Text style={{ fontSize: 15, fontWeight: '700', color: theme.background }}>Save</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -287,9 +481,11 @@ function WorkoutRecapCard({ data }: { data: CardData }) {
       </View>
 
       <Text style={{ fontSize: 18, fontWeight: '800', color: ct.text, marginBottom: 2 }}>
-        {(data.focus ?? '').length > 24 ? data.focus.slice(0, 24) + '…' : data.focus}
+        {(data.focus ?? '').length > 24 ? data.focus.slice(0, 24) + '...' : data.focus}
       </Text>
-      <Text style={{ fontSize: 12, color: ct.sub, marginBottom: 12 }}>{data.dayName}</Text>
+      <Text style={{ fontSize: 12, color: ct.sub, marginBottom: 12 }}>
+        {data.dayName}
+      </Text>
 
       <View style={{ height: 1.5, backgroundColor: ct.divider, marginBottom: 12, opacity: 0.4 }} />
 

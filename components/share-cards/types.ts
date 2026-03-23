@@ -15,6 +15,7 @@ export interface ShareCardData {
   avgIntensity: number;
   topE1RM: number | null;
   volumeComparison: string;
+  accentColor?: string | null;
 }
 
 export interface CardVariant {

@@ -115,11 +115,18 @@ export default function WorkoutScreen() {
   const [logs, setLogs] = useState<WorkoutLog[]>([]);
   const [expandedDay, setExpandedDay] = useState<string | null>(null);
   const [todayLoggedDays, setTodayLoggedDays] = useState<Set<string>>(new Set());
+  const [weekLoggedDays, setWeekLoggedDays] = useState<Set<string>>(new Set());
   const [swapTarget, setSwapTarget] = useState<{ dayIdx: number; exIdx: number } | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [editOrder, setEditOrder] = useState<WorkoutDay[] | null>(null); // local reorder during edit
-  const [showHistory, setShowHistory] = useState(false);
+  const [viewMode, setViewMode] = useState<'plan' | 'history' | 'saved'>('plan');
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const createdAt = useUserStore((s) => s.createdAt);
+
+  // Saved routines state
+  interface SavedRoutine { id: string; name: string; exercises: { name: string; sets: number; reps: string }[]; last_used_at: string; }
+  const [savedRoutines, setSavedRoutines] = useState<SavedRoutine[]>([]);
+  const [savedRoutinesLoading, setSavedRoutinesLoading] = useState(false);
 
   // History calendar state
   const now = new Date();
@@ -222,16 +229,56 @@ export default function WorkoutScreen() {
 
   // Load history when month changes or history is shown
   useEffect(() => {
-    if (showHistory) {
+    if (viewMode === 'history') {
       loadHistoryMonth(historyMonth.year, historyMonth.month);
     }
-  }, [showHistory, historyMonth.year, historyMonth.month, loadHistoryMonth]);
+  }, [viewMode, historyMonth.year, historyMonth.month, loadHistoryMonth]);
 
   const selectedDayLogs = useMemo(() =>
     historyLogs.filter(l => l.completed_at?.startsWith(selectedHistoryDate)),
     [historyLogs, selectedHistoryDate]
   );
 
+  // Load saved routines when switching to saved tab
+  const loadSavedRoutines = useCallback(async () => {
+    setSavedRoutinesLoading(true);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      const { data } = await supabase
+        .from('saved_routines')
+        .select('id, name, exercises, last_used_at')
+        .eq('user_id', user.id)
+        .order('last_used_at', { ascending: false })
+        .limit(50);
+      if (data) setSavedRoutines(data as SavedRoutine[]);
+    } catch {} finally {
+      setSavedRoutinesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (viewMode === 'saved') loadSavedRoutines();
+  }, [viewMode, loadSavedRoutines]);
+
+  // Also reload saved routines on screen focus when in saved mode
+  useFocusEffect(useCallback(() => {
+    if (viewMode === 'saved') loadSavedRoutines();
+  }, [viewMode, loadSavedRoutines]));
+
+  const deleteSavedRoutine = useCallback(async (routineId: string, routineName: string) => {
+    Alert.alert('Delete Routine', `Remove "${routineName}" from saved workouts?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          await supabase.from('saved_routines').delete().eq('id', routineId);
+          setSavedRoutines(prev => prev.filter(r => r.id !== routineId));
+        },
+      },
+    ]);
+  }, []);
 
   // Open a specific log when navigated from the home screen calendar.
   const consumedLogId = useRef<string | null>(null);
@@ -280,21 +327,27 @@ export default function WorkoutScreen() {
       const todayStr = dateKey(new Date());
       const todayLogs = allLogs.filter((l) => l.completed_at?.startsWith(todayStr));
       setTodayLoggedDays(new Set(todayLogs.map((l) => l.day_name?.toLowerCase())));
+
+      // Week logged days — all workouts completed since Monday
+      const weekLogs = allLogs.filter((l) => l.completed_at?.split('T')[0] >= weekStart);
+      setWeekLoggedDays(new Set(weekLogs.map((l) => l.day_name?.toLowerCase())));
     } catch {}
   }, []);
 
   useFocusEffect(useCallback(() => { loadAllData(); }, [loadAllData]));
 
-  // Compute next workout day
+  // Compute next workout day — first unlogged workout in the plan this week
   const jsDow = new Date().getDay();
-  const jsDayName = DAY_NAMES_FULL[jsDow].toLowerCase();
-  const todayPlanIdx = plan?.weeklyPlan.findIndex(d => d.dayName.toLowerCase() === jsDayName) ?? -1;
-  const nextPlanIdx = todayPlanIdx >= 0 && !todayLoggedDays.has(plan?.weeklyPlan[todayPlanIdx]?.dayName.toLowerCase() ?? '')
-    ? todayPlanIdx
-    : (plan?.weeklyPlan.findIndex((d, i) => {
-        const dIdx = DAY_NAMES_FULL.findIndex(n => n.toLowerCase() === d.dayName.toLowerCase());
-        return dIdx > jsDow && !todayLoggedDays.has(d.dayName.toLowerCase());
-      }) ?? -1);
+  const nextPlanIdx = plan?.weeklyPlan.findIndex(d => !weekLoggedDays.has(d.dayName.toLowerCase())) ?? -1;
+
+  // Auto-expand the next workout card
+  const autoExpandedRef = useRef(false);
+  useEffect(() => {
+    if (nextPlanIdx >= 0 && plan?.weeklyPlan[nextPlanIdx] && !autoExpandedRef.current && !editMode) {
+      autoExpandedRef.current = true;
+      setExpandedDay(plan.weeklyPlan[nextPlanIdx].dayName);
+    }
+  }, [nextPlanIdx, plan, editMode]);
 
   const reorderDays = useCallback(async (reorderedDays: WorkoutDay[]) => {
     if (!plan) return;
@@ -386,6 +439,12 @@ export default function WorkoutScreen() {
     ]);
   };
 
+  const directDelete = async (logId: string) => {
+    await supabase.from('workout_logs').delete().eq('id', logId);
+    loadAllData();
+    loadHistoryMonth(historyMonth.year, historyMonth.month);
+  };
+
   const renderHistoryRightActions = (logId: string) => () => (
     <Pressable
       onPress={() => swipeDelete(logId)}
@@ -409,11 +468,35 @@ export default function WorkoutScreen() {
   // Original day names (fixed left column in edit mode)
   const originalDayNames = useMemo(() => (plan?.weeklyPlan ?? []).map(d => d.dayName), [plan]);
 
+  // Estimate workout duration from exercise sets & rest
+  const estimateDuration = (exercises: Exercise[]): number => {
+    const warmUp = 8 * 60; // ~8 min warm-up
+    let totalSeconds = warmUp;
+    for (let i = 0; i < exercises.length; i++) {
+      const ex = exercises[i];
+      const restSeconds = parseInt(ex.rest) || 60;
+      totalSeconds += ex.sets * (45 + restSeconds); // ~45s work per set + rest
+      if (i > 0) totalSeconds += 60; // ~1 min transition between exercises
+    }
+    return Math.round(totalSeconds / 60);
+  };
+
+  // Weekly progress
+  const totalPlanDays = plan?.weeklyPlan.length ?? 0;
+  const completedThisWeek = plan?.weeklyPlan.filter(d => weekLoggedDays.has(d.dayName.toLowerCase())).length ?? 0;
+
   /** Non-edit mode: combined two-box row */
   const renderPlanCard = (day: WorkoutDay, i: number, dayLogged: boolean, isNext: boolean, isMissed: boolean) => {
     const isOpen = expandedDay === day.dayName;
     const dayAbbrev = day.dayName.substring(0, 3).toUpperCase();
     const loggedBorder = dayLogged ? '#22C55E' : theme.border;
+    const estMin = estimateDuration(day.exercises);
+
+    // Determine if Start Workout button should be enabled:
+    // enabled for today's workout OR any missed (past) workout this week
+    const dayIdx = DAY_NAMES_FULL.findIndex(d => d.toLowerCase() === day.dayName.toLowerCase());
+    const isTodayWorkout = dayIdx === jsDow;
+    const canStart = isTodayWorkout || isMissed;
 
     return (
       <View key={`${day.focus}-${i}`} style={{ flexDirection: 'row', marginBottom: 10 }}>
@@ -458,11 +541,24 @@ export default function WorkoutScreen() {
             }}
           >
             <View style={{ flex: 1 }}>
-              <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: isNext ? '#FFFFFF' : theme.text }} numberOfLines={1}>
-                {stripParens(day.focus)}
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: isNext ? '#FFFFFF' : theme.text }} numberOfLines={1}>
+                  {stripParens(day.focus)}
+                </Text>
+                {isNext && (
+                  <View style={{
+                    backgroundColor: '#000000CC',
+                    paddingHorizontal: 6, paddingVertical: 2,
+                    borderRadius: 4,
+                  }}>
+                    <Text style={{ fontSize: 9, fontWeight: '800', color: '#FFFFFF', letterSpacing: 0.5 }}>
+                      UPCOMING
+                    </Text>
+                  </View>
+                )}
+              </View>
               <Text allowFontScaling style={{ fontSize: 12, color: isNext ? '#FFFFFFCC' : theme.textSecondary, marginTop: 2 }}>
-                {day.exercises.length} exercises
+                {day.exercises.length} exercises · ~{estMin} min
               </Text>
             </View>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -476,9 +572,8 @@ export default function WorkoutScreen() {
             <View style={{ paddingHorizontal: 14, paddingBottom: 14 }}>
               <View style={{ height: 1, backgroundColor: isNext ? '#FFFFFF30' : theme.border, marginBottom: 10 }} />
               {day.exercises.map((ex: Exercise, j: number) => (
-                <Pressable
+                <View
                   key={j}
-                  onPress={() => setSwapTarget({ dayIdx: i, exIdx: j })}
                   style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}
                 >
                   <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: isNext ? '#FFFFFF80' : theme.chrome, marginRight: 8 }} />
@@ -488,8 +583,7 @@ export default function WorkoutScreen() {
                       {ex.sets} sets · {ex.reps} reps
                     </Text>
                   </View>
-                  <Ionicons name="repeat-outline" size={14} color={isNext ? '#FFFFFF80' : theme.chrome} />
-                </Pressable>
+                </View>
               ))}
 
               <Pressable
@@ -508,27 +602,21 @@ export default function WorkoutScreen() {
 
               {dayLogged ? (
                 <View style={{ paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: theme.background, borderWidth: 1, borderColor: '#22C55E' }}>
-                  <Text allowFontScaling style={{ color: '#22C55E', fontWeight: '700', fontSize: 13 }}>Workout logged</Text>
+                  <Text allowFontScaling style={{ color: '#22C55E', fontWeight: '700', fontSize: 13 }}>Workout Logged ✓</Text>
                 </View>
-              ) : isMissed ? (
-                <Pressable
-                  onPress={() => {
-                    Alert.alert('Missed workout', `This workout was scheduled for ${day.dayName}. Start it anyway?`, [
-                      { text: 'Cancel', style: 'cancel' },
-                      { text: 'Start anyway', onPress: () => router.push(`/workout/${i}`) },
-                    ]);
-                  }}
-                  style={{ paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: theme.textSecondary }}
-                >
-                  <Text allowFontScaling style={{ color: theme.background, fontWeight: '700', fontSize: 13 }}>Start late</Text>
-                </Pressable>
-              ) : (
+              ) : canStart ? (
                 <Pressable
                   onPress={() => router.push(`/workout/${i}`)}
                   style={{ paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: isNext ? '#FFFFFF' : theme.text }}
                 >
-                  <Text allowFontScaling style={{ color: isNext ? focusCardColor : theme.background, fontWeight: '700', fontSize: 13 }}>Start workout</Text>
+                  <Text allowFontScaling style={{ color: isNext ? focusCardColor : theme.background, fontWeight: '700', fontSize: 13 }}>Start Workout</Text>
                 </Pressable>
+              ) : (
+                <View style={{ paddingVertical: 10, borderRadius: 12, alignItems: 'center', backgroundColor: isNext ? '#FFFFFF20' : theme.background, borderWidth: 1, borderColor: isNext ? '#FFFFFF30' : theme.border }}>
+                  <Text allowFontScaling style={{ color: isNext ? '#FFFFFF80' : theme.textSecondary, fontWeight: '600', fontSize: 13 }}>
+                    {formatDayDate(day.dayName)}
+                  </Text>
+                </View>
               )}
             </View>
           )}
@@ -552,81 +640,97 @@ export default function WorkoutScreen() {
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
       <AppHeader />
 
-      {/* Header with title, edit, history toggle */}
+      {/* Header with title + tab pills */}
       <View style={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 12 }}>
-        {showHistory ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
-            <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>
-              Recent Workouts
-            </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+          <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>
+            {viewMode === 'plan' ? 'My Workout Plan' : viewMode === 'saved' ? 'Saved Workouts' : 'Recent Workouts'}
+          </Text>
+          {viewMode === 'plan' && (
             <Pressable
-              onPress={() => setShowHistory(false)}
+              onPress={() => {
+                if (editMode) {
+                  setExpandedDay(null);
+                  if (editOrder) {
+                    reorderDays(editOrder);
+                  }
+                  animateLayout();
+                  setEditOrder(null);
+                  setEditMode(false);
+                } else {
+                  setEditOrder([...(plan?.weeklyPlan ?? [])]);
+                  setExpandedDay(null);
+                  animateLayout();
+                  setEditMode(true);
+                }
+              }}
               hitSlop={8}
             >
-              <Ionicons name="arrow-back" size={24} color={theme.text} />
+              {editMode ? (
+                <Text style={{ fontSize: 14, fontWeight: '600', color: focusCardColor }}>Done</Text>
+              ) : (
+                <Ionicons name="pencil-outline" size={18} color={theme.chrome} />
+              )}
             </Pressable>
-          </View>
-        ) : (
-          <>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-              <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>
-                My Workout Plan
-              </Text>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <Pressable
-                  onPress={() => {
-                    if (editMode) {
-                      // Done: persist reorder, animate snap back
-                      setExpandedDay(null);
-                      if (editOrder) {
-                        reorderDays(editOrder);
-                      }
-                      animateLayout();
-                      setEditOrder(null);
-                      setEditMode(false);
-                    } else {
-                      // Enter edit: copy current order locally, animate break apart
-                      setEditOrder([...(plan?.weeklyPlan ?? [])]);
-                      setExpandedDay(null);
-                      animateLayout();
-                      setEditMode(true);
-                    }
-                  }}
-                  hitSlop={8}
-                >
-                  {editMode ? (
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: focusCardColor }}>Done</Text>
-                  ) : (
-                    <Ionicons name="pencil-outline" size={18} color={theme.chrome} />
-                  )}
-                </Pressable>
-                <Pressable
-                  onPress={() => {
-                    // Jump calendar to the most recent workout date
-                    if (logs.length > 0) {
-                      const latest = new Date(logs[0].completed_at);
-                      setHistoryMonth({ year: latest.getFullYear(), month: latest.getMonth() });
-                      setSelectedHistoryDate(logs[0].completed_at.split('T')[0]);
-                    }
+          )}
+        </View>
+
+        {/* Tab pills */}
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {([
+            { key: 'plan' as const, label: 'My Plan', icon: 'barbell-outline' as const },
+            { key: 'saved' as const, label: 'Saved', icon: 'bookmark-outline' as const },
+            { key: 'history' as const, label: 'History', icon: 'time-outline' as const },
+          ]).map((tab) => {
+            const isActive = viewMode === tab.key;
+            return (
+              <Pressable
+                key={tab.key}
+                onPress={() => {
+                  if (tab.key === 'history' && logs.length > 0) {
+                    const latest = new Date(logs[0].completed_at);
+                    setHistoryMonth({ year: latest.getFullYear(), month: latest.getMonth() });
+                    setSelectedHistoryDate(logs[0].completed_at.split('T')[0]);
                     setHistoryCalExpanded(false);
-                    setShowHistory(true);
-                  }}
-                  hitSlop={8}
-                >
-                  <Ionicons name="time-outline" size={22} color={theme.text} />
-                </Pressable>
-              </View>
-            </View>
-            {plan && (
-              <Text allowFontScaling style={{ fontSize: 16, fontWeight: '500', color: theme.textSecondary }}>
-                {plan.weeklyPlan.length} days a week
-              </Text>
-            )}
-          </>
-        )}
+                  }
+                  if (editMode) {
+                    setEditOrder(null);
+                    setEditMode(false);
+                  }
+                  animateLayout();
+                  setViewMode(tab.key);
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 5,
+                  paddingHorizontal: 12,
+                  paddingVertical: 7,
+                  borderRadius: 20,
+                  backgroundColor: isActive ? focusCardColor : theme.surface,
+                  borderWidth: 1,
+                  borderColor: isActive ? focusCardColor : theme.border,
+                }}
+              >
+                <Ionicons
+                  name={tab.icon}
+                  size={14}
+                  color={isActive ? '#FFFFFF' : theme.textSecondary}
+                />
+                <Text style={{
+                  fontSize: 12,
+                  fontWeight: '600',
+                  color: isActive ? '#FFFFFF' : theme.textSecondary,
+                }}>
+                  {tab.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
 
-      {showHistory ? (
+      {viewMode === 'history' ? (
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
@@ -749,6 +853,9 @@ export default function WorkoutScreen() {
           ) : (
             selectedDayLogs.map((log) => {
               const logPlanDay = plan?.weeklyPlan.find(d => d.dayName.toLowerCase() === log.day_name.toLowerCase());
+              const logIsEditable = log.completed_at
+                ? (Date.now() - new Date(log.completed_at).getTime()) < 24 * 60 * 60 * 1000
+                : false;
               const durationStr = (() => {
                 const mins = log.duration_minutes ?? 0;
                 if (mins >= 60) {
@@ -761,8 +868,9 @@ export default function WorkoutScreen() {
               return (
                 <Swipeable
                   key={log.id}
-                  renderRightActions={renderHistoryRightActions(log.id)}
+                  renderRightActions={logIsEditable ? renderHistoryRightActions(log.id) : undefined}
                   overshootRight={false}
+                  enabled={logIsEditable}
                 >
                   <View style={{
                     backgroundColor: theme.surface,
@@ -773,10 +881,36 @@ export default function WorkoutScreen() {
                   }}>
                     {/* Header */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: theme.text }} numberOfLines={1}>
+                      <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: theme.text, flex: 1 }} numberOfLines={1}>
                         {stripParens(logPlanDay?.focus ?? log.day_name)}
                       </Text>
-                      <MuscleGroupPills categories={getExerciseCategories(log.exercises)} size="small" />
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <MuscleGroupPills categories={getExerciseCategories(log.exercises)} size="small" />
+                        {logIsEditable ? (
+                          <Pressable
+                            onPress={() => {
+                              if (deleteConfirmId === log.id) {
+                                // Second tap — delete directly
+                                setDeleteConfirmId(null);
+                                directDelete(log.id);
+                              } else {
+                                // First tap — prime for confirm (auto-reset after 3s)
+                                setDeleteConfirmId(log.id);
+                                setTimeout(() => setDeleteConfirmId((prev) => prev === log.id ? null : prev), 3000);
+                              }
+                            }}
+                            hitSlop={8}
+                          >
+                            <Ionicons
+                              name={deleteConfirmId === log.id ? 'trash' : 'trash-outline'}
+                              size={16}
+                              color={deleteConfirmId === log.id ? '#EF4444' : theme.textSecondary}
+                            />
+                          </Pressable>
+                        ) : (
+                          <Ionicons name="lock-closed" size={13} color={theme.textSecondary} style={{ opacity: 0.4 }} />
+                        )}
+                      </View>
                     </View>
                     <Text allowFontScaling style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 12 }}>
                       {log.exercises.length} exercises · {durationStr}
@@ -789,12 +923,35 @@ export default function WorkoutScreen() {
                       if (completedSets.length === 0) return null;
                       return (
                         <View key={exIdx} style={{ marginBottom: 10 }}>
-                          <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text, marginBottom: 4 }}>
-                            {ex.name}
-                          </Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text, flex: 1 }} numberOfLines={1}>
+                              {ex.name}
+                            </Text>
+                            {exIdx === 0 && (
+                              <Pressable
+                                onPress={() => {
+                                  router.push({
+                                    pathname: '/workout/post-workout',
+                                    params: {
+                                      exercises: JSON.stringify(log.exercises),
+                                      dayName: log.day_name,
+                                      focus: logPlanDay?.focus ?? log.day_name,
+                                      durationMinutes: String(log.duration_minutes ?? 0),
+                                      startedAt: log.completed_at,
+                                    },
+                                  });
+                                }}
+                                hitSlop={8}
+                                style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                              >
+                                <Ionicons name="stats-chart" size={12} color={focusCardColor} />
+                                <Text style={{ fontSize: 11, fontWeight: '700', color: focusCardColor }}>VIEW STATS</Text>
+                              </Pressable>
+                            )}
+                          </View>
                           {completedSets.map((set, setIdx) => {
                             const displayWeight = set.weight != null
-                              ? (weightUnit === 'lbs' ? Math.round(set.weight * 2.205) : Math.round(set.weight))
+                              ? Math.round(set.weight)
                               : null;
                             return (
                               <View key={setIdx} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 2, paddingLeft: 8 }}>
@@ -816,6 +973,114 @@ export default function WorkoutScreen() {
             })
           )}
         </ScrollView>
+      ) : viewMode === 'saved' ? (
+        <ScrollView
+          style={{ flex: 1 }}
+          contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
+          showsVerticalScrollIndicator={false}
+        >
+          {savedRoutinesLoading ? (
+            <ActivityIndicator color={theme.chrome} style={{ marginTop: 32 }} />
+          ) : savedRoutines.length === 0 ? (
+            <View style={{ alignItems: 'center', paddingTop: 48, paddingHorizontal: 32 }}>
+              <Ionicons name="bookmark-outline" size={48} color={theme.border} />
+              <Text style={{ color: theme.textSecondary, fontSize: 15, fontWeight: '600', marginTop: 16, textAlign: 'center' }}>
+                No saved workouts yet
+              </Text>
+              <Text style={{ color: theme.textSecondary, fontSize: 13, marginTop: 8, textAlign: 'center', lineHeight: 18 }}>
+                Complete a Quick Workout to save it here. Saved workouts let you repeat your favorite routines.
+              </Text>
+              <Pressable
+                onPress={() => router.push('/workout/quick')}
+                style={{
+                  marginTop: 24, paddingHorizontal: 24, paddingVertical: 12,
+                  backgroundColor: focusCardColor, borderRadius: 12,
+                }}
+              >
+                <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 14 }}>Start Quick Workout</Text>
+              </Pressable>
+            </View>
+          ) : (
+            savedRoutines.map((routine) => {
+              const exerciseNames = routine.exercises.map((e: any) => e.name);
+              const displayExercises = exerciseNames.length <= 3
+                ? exerciseNames.join(', ')
+                : `${exerciseNames.slice(0, 2).join(', ')} + ${exerciseNames.length - 2} more`;
+              const lastUsed = routine.last_used_at
+                ? (() => {
+                    const diff = Math.floor((Date.now() - new Date(routine.last_used_at).getTime()) / (1000 * 60 * 60 * 24));
+                    if (diff === 0) return 'Last performed today';
+                    if (diff === 1) return 'Last performed yesterday';
+                    return `Last performed ${diff} days ago`;
+                  })()
+                : '';
+
+              return (
+                <View
+                  key={routine.id}
+                  style={{
+                    backgroundColor: theme.surface,
+                    borderRadius: 16,
+                    borderWidth: 1,
+                    borderColor: theme.border,
+                    marginBottom: 10,
+                    overflow: 'hidden',
+                  }}
+                >
+                  <View style={{ padding: 16 }}>
+                    {/* Header row */}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1, gap: 8 }}>
+                        <Ionicons name="bookmark" size={16} color={focusCardColor} />
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text, flex: 1 }} numberOfLines={1}>
+                          {routine.name}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() => deleteSavedRoutine(routine.id, routine.name)}
+                        hitSlop={8}
+                      >
+                        <Ionicons name="trash-outline" size={16} color={theme.textSecondary} />
+                      </Pressable>
+                    </View>
+
+                    {/* Exercise list */}
+                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 4, marginLeft: 24 }}>
+                      {displayExercises}
+                    </Text>
+
+                    {/* Last performed */}
+                    {lastUsed ? (
+                      <Text style={{ fontSize: 11, color: theme.textSecondary, opacity: 0.7, marginLeft: 24, marginBottom: 12 }}>
+                        {lastUsed}
+                      </Text>
+                    ) : null}
+
+                    {/* Start button */}
+                    <Pressable
+                      onPress={() => router.push({
+                        pathname: '/workout/quick',
+                        params: { routineId: routine.id },
+                      })}
+                      style={{
+                        backgroundColor: focusCardColor,
+                        paddingVertical: 10,
+                        borderRadius: 12,
+                        alignItems: 'center',
+                        flexDirection: 'row',
+                        justifyContent: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <Ionicons name="play" size={14} color="#FFFFFF" />
+                      <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>Start Workout</Text>
+                    </Pressable>
+                  </View>
+                </View>
+              );
+            })
+          )}
+        </ScrollView>
       ) : (
         <ScrollView
           style={{ flex: 1, backgroundColor: theme.background }}
@@ -830,11 +1095,11 @@ export default function WorkoutScreen() {
                 style={{ flex: 1, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
-                  Create Workout
+                  Quick Workout
                 </Text>
               </Pressable>
               <Pressable
-                onPress={() => router.push('/quiz/1')}
+                onPress={() => router.push('/quiz/1?mode=rebuild')}
                 style={{ flex: 1, backgroundColor: theme.surface, borderWidth: 1, borderColor: theme.border, paddingVertical: 14, borderRadius: 16, alignItems: 'center' }}
               >
                 <Text allowFontScaling style={{ color: theme.text, fontWeight: '600', fontSize: 14 }}>
@@ -949,10 +1214,10 @@ export default function WorkoutScreen() {
           ) : (
             /* ───── NORMAL MODE: combined two-box rows ───── */
             (plan?.weeklyPlan ?? []).map((item, idx) => {
-              const dayLogged = todayLoggedDays.has(item.dayName.toLowerCase());
+              const dayLogged = weekLoggedDays.has(item.dayName.toLowerCase());
               const isNext = idx === nextPlanIdx && !dayLogged;
               const dIdx = DAY_NAMES_FULL.findIndex(d => d.toLowerCase() === item.dayName.toLowerCase());
-              const isMissed = jsDow >= 1 && jsDow <= 5 && dIdx >= 0 && dIdx < jsDow && !dayLogged;
+              const isMissed = !dayLogged && dIdx >= 0 && dIdx < jsDow;
               return renderPlanCard(item, idx, dayLogged, isNext, isMissed);
             })
           )}

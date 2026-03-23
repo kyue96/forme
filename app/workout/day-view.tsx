@@ -84,7 +84,7 @@ export default function DayViewScreen() {
   const volumeRaw = exercises.reduce(
     (s, ex) => s + ex.sets.filter((se) => se.completed && se.weight != null).reduce((v, set) => v + (set.weight ?? 0) * set.reps, 0), 0
   );
-  const volume = weightUnit === 'lbs' ? Math.round(volumeRaw * 2.205) : Math.round(volumeRaw);
+  const volume = Math.round(volumeRaw);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>

@@ -1,15 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
+  LayoutAnimation,
   PanResponder,
+  Platform,
   Pressable,
   ScrollView,
   Text,
+  UIManager,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 import { useSettings } from '@/lib/settings-context';
 import { LoggedExercise } from '@/lib/types';
 import { formatNumber, stripParens } from '@/lib/utils';
@@ -29,11 +36,12 @@ interface VolumeChartProps {
   theme: any;
   avatarColor: string | null;
   currentIndex: number;
+  unitLabel?: string;
   onInteractionStart?: () => void;
   onInteractionEnd?: () => void;
 }
 
-function VolumeChart({ data, theme, avatarColor, currentIndex, onInteractionStart, onInteractionEnd }: VolumeChartProps) {
+function VolumeChart({ data, theme, avatarColor, currentIndex, unitLabel, onInteractionStart, onInteractionEnd }: VolumeChartProps) {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const highlightColor = avatarColor || '#F59E0B';
   const chartHeight = 160;
@@ -92,12 +100,19 @@ function VolumeChart({ data, theme, avatarColor, currentIndex, onInteractionStar
 
       <View style={{ flexDirection: 'row' }}>
         {/* Y-axis */}
-        <View style={{ width: yAxisWidth, height: chartHeight, justifyContent: 'space-between' }}>
-          {ticks.map((tick, i) => (
-            <Text key={i} style={{ fontSize: 9, color: theme.textSecondary, textAlign: 'left' }}>
-              {formatNumber(tick)}
+        <View style={{ width: yAxisWidth }}>
+          {unitLabel && (
+            <Text style={{ fontSize: 8, color: theme.textSecondary, fontWeight: '600', marginBottom: 2 }}>
+              {unitLabel}
             </Text>
-          ))}
+          )}
+          <View style={{ height: chartHeight, justifyContent: 'space-between' }}>
+            {ticks.map((tick, i) => (
+              <Text key={i} style={{ fontSize: 9, color: theme.textSecondary, textAlign: 'left' }}>
+                {formatNumber(tick)}
+              </Text>
+            ))}
+          </View>
         </View>
 
         {/* Chart area with drag-to-scrub */}
@@ -193,6 +208,74 @@ function VolumeChart({ data, theme, avatarColor, currentIndex, onInteractionStar
   );
 }
 
+
+function ExerciseRow({ exercise, completedSets, isLast, theme, weightUnit }: {
+  exercise: LoggedExercise;
+  completedSets: LoggedExercise['sets'];
+  isLast: boolean;
+  theme: any;
+  weightUnit: string;
+}) {
+  const [expanded, setExpanded] = useState(false);
+
+  const toggle = () => {
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpanded((prev) => !prev);
+  };
+
+  return (
+    <View>
+      <Pressable
+        onPress={toggle}
+        style={{
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingVertical: 10,
+        }}
+      >
+        <View style={{ flex: 1 }}>
+          <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }} numberOfLines={1}>
+            {exercise.name}
+          </Text>
+        </View>
+        <Text style={{ fontSize: 13, color: theme.textSecondary, marginRight: 8 }}>
+          {completedSets.length} {completedSets.length === 1 ? 'set' : 'sets'}
+        </Text>
+        <Ionicons
+          name={expanded ? 'chevron-up' : 'chevron-down'}
+          size={16}
+          color={theme.textSecondary}
+        />
+      </Pressable>
+      {expanded && (
+        <View style={{ paddingBottom: 10, paddingLeft: 4 }}>
+          {completedSets.map((set, si) => {
+            const displayWeight = set.weight != null
+              ? weightUnit === 'lbs' ? Math.round(set.weight * 2.205) : Math.round(set.weight)
+              : null;
+            return (
+              <View key={si} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 4 }}>
+                <Text style={{ fontSize: 12, color: theme.textSecondary, width: 24 }}>
+                  {si + 1}.
+                </Text>
+                <Text style={{ fontSize: 13, color: theme.text }}>
+                  {displayWeight != null
+                    ? `${displayWeight} ${weightUnit === 'lbs' ? 'lbs' : 'kg'} × ${set.reps} reps`
+                    : `${set.reps} reps (bodyweight)`
+                  }
+                </Text>
+                {set.isDropSet && (
+                  <Text style={{ fontSize: 10, color: theme.textSecondary, marginLeft: 6, fontStyle: 'italic' }}>drop</Text>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      )}
+      {!isLast && <View style={{ height: 1, backgroundColor: theme.border, opacity: 0.5 }} />}
+    </View>
+  );
+}
 
 export default function PostWorkoutScreen() {
   const router = useRouter();
@@ -383,7 +466,7 @@ export default function PostWorkoutScreen() {
           {historicalVolumes.length > 1 && (
             <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginTop: 12 }}>
               <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 12 }}>Volume Trend</Text>
-              <VolumeChart data={historicalVolumes} theme={theme} avatarColor={avatarColor} currentIndex={historicalVolumes.length - 1} onInteractionStart={() => setScrollEnabled(false)} onInteractionEnd={() => setScrollEnabled(true)} />
+              <VolumeChart data={historicalVolumes} theme={theme} avatarColor={avatarColor} currentIndex={historicalVolumes.length - 1} unitLabel={unitLabel} onInteractionStart={() => setScrollEnabled(false)} onInteractionEnd={() => setScrollEnabled(true)} />
             </View>
           )}
 
@@ -415,6 +498,27 @@ export default function PostWorkoutScreen() {
                   </View>
                 </View>
               ))}
+            </View>
+          )}
+
+          {/* Exercise breakdown */}
+          {exercises.length > 0 && (
+            <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginTop: 12 }}>
+              <Text style={{ fontSize: 13, color: theme.textSecondary, marginBottom: 10 }}>Exercises</Text>
+              {exercises.map((ex, i) => {
+                const completedSets = ex.sets.filter((s) => s.completed);
+                if (completedSets.length === 0) return null;
+                return (
+                  <ExerciseRow
+                    key={`${ex.name}-${i}`}
+                    exercise={ex}
+                    completedSets={completedSets}
+                    isLast={i === exercises.length - 1}
+                    theme={theme}
+                    weightUnit={weightUnit}
+                  />
+                );
+              })}
             </View>
           )}
         </View>
@@ -463,6 +567,7 @@ export default function PostWorkoutScreen() {
               unitLabel,
               durationMinutes,
               muscles: exerciseCategories,
+              themeIdx: 0,
             });
             router.push({ pathname: '/create-post', params: { cardData: cardDataJson } });
           }}

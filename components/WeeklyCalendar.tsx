@@ -108,6 +108,7 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
   const [expanded, setExpanded] = useState(false);
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const slideAnim = useRef(new Animated.Value(0)).current;
+  const chevronRotation = useRef(new Animated.Value(0)).current;
   const swiping = useRef(false);
 
   const weekDates = getWeekDates(weekOffset);
@@ -137,8 +138,13 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
       const mid = weekDates[3];
       setViewMonth({ year: mid.getFullYear(), month: mid.getMonth() });
     }
+    Animated.timing(chevronRotation, {
+      toValue: expanded ? 0 : 1,
+      duration: 200,
+      useNativeDriver: true,
+    }).start();
     setExpanded((prev) => !prev);
-  }, [expanded, weekDates]);
+  }, [expanded, weekDates, chevronRotation]);
 
   const changeMonth = useCallback((direction: 1 | -1) => {
     setViewMonth((prev) => {
@@ -201,6 +207,7 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
     today.setHours(0, 0, 0, 0);
     if (expanded) {
       animateExpand();
+      Animated.timing(chevronRotation, { toValue: 0, duration: 200, useNativeDriver: true }).start();
       setExpanded(false);
     }
     if (weekOffset !== 0) {
@@ -212,7 +219,7 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
       });
     }
     onDayPress(today, today.getDay());
-  }, [fadeAnim, slideAnim, weekOffset, onDayPress, expanded]);
+  }, [fadeAnim, slideAnim, chevronRotation, weekOffset, onDayPress, expanded]);
 
   // Swipe to change week
   const containerRef = useRef<View>(null);
@@ -308,9 +315,11 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
               >
                 <Ionicons name="chevron-back" size={18} color={theme.textSecondary} />
               </Pressable>
-              <Text allowFontScaling style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>
-                {monthLabel}
-              </Text>
+              <Pressable onPress={toggleExpanded} hitSlop={4}>
+                <Text allowFontScaling style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>
+                  {monthLabel}
+                </Text>
+              </Pressable>
               <Pressable onPress={() => changeMonth(1)} hitSlop={12}>
                 <Ionicons name="chevron-forward" size={18} color={theme.textSecondary} />
               </Pressable>
@@ -333,7 +342,7 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
                 </Pressable>
               )}
               <Pressable onPress={toggleExpanded} hitSlop={8}>
-                <Ionicons name="chevron-up" size={18} color={dotColor} />
+                <Ionicons name="chevron-down" size={18} color={dotColor} />
               </Pressable>
             </View>
           </View>
@@ -363,17 +372,15 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
         <View
           ref={containerRef}
           {...panResponder.panHandlers}
-          style={{ flexDirection: 'row', alignItems: 'flex-start', height: 60 }}
         >
-          <View style={{ marginRight: 12, alignItems: 'flex-start', paddingTop: 1 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          {/* Header row: month label + chevron on left, TODAY pill on right */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, height: 20 }}>
+            <Pressable onPress={toggleExpanded} hitSlop={8} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
               <Text allowFontScaling style={{ fontSize: 13, fontWeight: '700', color: theme.text }} numberOfLines={1}>
                 {monthLabel}
               </Text>
-              <Pressable onPress={toggleExpanded} hitSlop={8}>
-                <Ionicons name="calendar-outline" size={14} color={theme.textSecondary} />
-              </Pressable>
-            </View>
+              <Ionicons name="chevron-down" size={14} color={theme.textSecondary} />
+            </Pressable>
             {showTodayPill && (
               <Pressable
                 onPress={goToToday}
@@ -385,15 +392,14 @@ export function WeeklyCalendar({ completedDays, onDayPress, planDayNames, select
                   backgroundColor: theme.surface,
                   borderWidth: 1,
                   borderColor: theme.border,
-                  marginTop: 8,
                 }}
               >
                 <Text allowFontScaling style={{ fontSize: 9, fontWeight: '600', color: theme.text }}>TODAY</Text>
               </Pressable>
             )}
           </View>
+          {/* Day circles row */}
           <Animated.View style={{
-            flex: 1,
             flexDirection: 'row',
             justifyContent: 'space-between',
             opacity: fadeAnim,

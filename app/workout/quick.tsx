@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import {
   ActivityIndicator,
   Alert,
@@ -24,6 +24,7 @@ import * as ImagePicker from 'expo-image-picker';
 
 import { supabase } from '@/lib/supabase';
 import { useSettings } from '@/lib/settings-context';
+import { playRestTimerChime } from '@/lib/rest-timer-sound';
 import { useWorkoutStore } from '@/lib/workout-store';
 import { useCustomExerciseStore, CustomExercise } from '@/lib/custom-exercise-store';
 import { SetRow, SetRowKeyboardAccessory } from '@/components/SetRow';
@@ -38,6 +39,7 @@ import {
   isCableExercise,
   isBodyweightExercise,
   getInstructions,
+  getAttachmentsForExercise,
 } from '@/lib/exercise-data';
 import { formatTimeMs, formatTime, animateLayout, animateLayoutSlow, stripParens } from '@/lib/utils';
 import { MuscleGroupPills } from '@/components/MuscleGroupPills';
@@ -45,6 +47,8 @@ import { getExerciseCategories } from '@/lib/exercise-utils';
 import { getWarmupRoutine } from '@/lib/warmup-data';
 import { useUserStore } from '@/lib/user-store';
 import { getExerciseImageUrls } from '@/lib/exercise-images';
+import { detectAndSavePRs } from '@/lib/pr-detection';
+import { preloadIncrements, getExerciseIncrementSync, updateIncrementsAfterWorkout } from '@/lib/exercise-increments';
 import { Image as ExpoImage } from 'expo-image';
 import { ExerciseThumbnail } from '@/components/ExerciseThumbnail';
 import * as Notifications from 'expo-notifications';
@@ -54,7 +58,8 @@ type Phase = 'pick' | 'workout';
 
 export default function QuickWorkoutScreen() {
   const router = useRouter();
-  const { weightUnit, warmupEnabled, restTimerEnabled, restTimerDuration, theme } = useSettings();
+  const { routineId } = useLocalSearchParams<{ routineId?: string }>();
+  const { weightUnit, warmupEnabled, restTimerEnabled, restTimerSound, restTimerDuration, theme } = useSettings();
 
   const {
     activeWorkout,
@@ -153,6 +158,18 @@ export default function QuickWorkoutScreen() {
   const listRef = useRef<any>(null);
   const warmupAutoDismissRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const restNotificationIdRef = useRef<string | null>(null);
+
+  // Adaptive increment tracking
+  const sessionDeltasRef = useRef<Record<string, number[]>>({});
+  const [incrementsReady, setIncrementsReady] = useState(false);
+  useEffect(() => { preloadIncrements().then(() => setIncrementsReady(true)); }, []);
+
+  const recordWeightDelta = useCallback((exerciseName: string, delta: number) => {
+    const key = exerciseName;
+    if (!sessionDeltasRef.current[key]) sessionDeltasRef.current[key] = [];
+    sessionDeltasRef.current[key].push(delta);
+  }, []);
+
   const isPaused = activeWorkout?.isPaused ?? false;
   const isResting = restRemaining > 0;
   const warmupDone = activeWorkout?.warmupDone ?? false;
@@ -221,6 +238,22 @@ export default function QuickWorkoutScreen() {
       }
     })();
   }, []);
+
+  // Pre-fill exercises when navigating from a saved routine
+  const routineConsumed = useRef(false);
+  useEffect(() => {
+    if (routineId && !routineConsumed.current && savedRoutinesLoaded && phase === 'pick') {
+      routineConsumed.current = true;
+      const match = savedRoutines.find(r => r.id === routineId);
+      if (match) {
+        const names = match.exercises.map((e: any) => e.name);
+        setSelectedNames(names);
+        setWorkoutName(match.name);
+        activeRoutineRef.current = match;
+        setShowNamePrompt(true);
+      }
+    }
+  }, [routineId, savedRoutinesLoaded, savedRoutines, phase]);
 
   useEffect(() => {
     if (phase === 'workout' && loggedExercises.length > 0) {
@@ -306,13 +339,23 @@ export default function QuickWorkoutScreen() {
     }
   };
 
+  const restMotivationMessages = [
+    { title: "Let's go!", body: "Rest's over \u2014 crush this next set!" },
+    { title: 'Time to work!', body: 'Your muscles are ready. Show them what you\'ve got.' },
+    { title: 'You got this!', body: 'That rest was earned. Now get back after it!' },
+    { title: 'Back at it!', body: 'Recovery complete \u2014 time to make it count.' },
+    { title: 'Go time!', body: 'You\'re warmed up and locked in. Send it!' },
+    { title: 'No stopping you!', body: 'One set closer to your goals. Let\'s move!' },
+  ];
+
   const scheduleRestNotification = async (seconds: number) => {
     try {
       await requestNotificationPermissions();
+      const msg = restMotivationMessages[Math.floor(Math.random() * restMotivationMessages.length)];
       const id = await Notifications.scheduleNotificationAsync({
         content: {
-          title: 'Rest Timer',
-          body: 'Rest is over.',
+          title: msg.title,
+          body: msg.body,
           sound: true,
         },
         trigger: { type: Notifications.SchedulableTriggerInputTypes.TIME_INTERVAL, seconds, repeats: false },
@@ -330,6 +373,10 @@ export default function QuickWorkoutScreen() {
     }
   };
 
+  const [previousNotes, setPreviousNotes] = useState<Record<string, string>>({});
+  const [noteModalIdx, setNoteModalIdx] = useState<number | null>(null);
+  const [noteText, setNoteText] = useState('');
+
   const loadPreviousSets = async () => {
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -342,6 +389,7 @@ export default function QuickWorkoutScreen() {
         .limit(5);
       if (!logs) return;
       const prevMap: Record<string, LoggedSet[]> = {};
+      const notesMap: Record<string, string> = {};
       for (const log of logs) {
         const exs = log.exercises as LoggedExercise[];
         for (const ex of exs) {
@@ -350,9 +398,12 @@ export default function QuickWorkoutScreen() {
             const key = `${ex.name}|${ex.attachment}`;
             if (!prevMap[key]) prevMap[key] = ex.sets;
           }
+          // Store previous notes by exercise name
+          if (ex.notes && !notesMap[ex.name]) notesMap[ex.name] = ex.notes;
         }
       }
       setPreviousSets(prevMap);
+      setPreviousNotes(notesMap);
     } catch {}
   };
 
@@ -432,8 +483,17 @@ export default function QuickWorkoutScreen() {
   // Start rest timer (epoch-based — survives app backgrounding)
   const startRestTimer = (manual = false) => {
     if (!manual && !restTimerEnabled) return;
+    // Don't restart the timer if it's already running (unless manually triggered)
+    if (!manual && restIntervalRef.current) return;
+    // Cancel any existing timer interval to prevent duplicates
     if (restIntervalRef.current) clearInterval(restIntervalRef.current);
-    cancelRestNotification();
+    restIntervalRef.current = null;
+    // Cancel existing notification synchronously (grab ID before clearing)
+    const oldNotifId = restNotificationIdRef.current;
+    restNotificationIdRef.current = null;
+    if (oldNotifId) {
+      Notifications.cancelScheduledNotificationAsync(oldNotifId).catch(() => {});
+    }
 
     const epoch = Date.now();
     setRestStartEpoch(epoch);
@@ -448,6 +508,7 @@ export default function QuickWorkoutScreen() {
         restIntervalRef.current = null;
         setRestStartEpoch(null);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        if (restTimerSound) playRestTimerChime();
         restNotificationIdRef.current = null;
       }
     }, 200);
@@ -627,6 +688,18 @@ export default function QuickWorkoutScreen() {
       // Skip rest timer, advance to superset partner immediately
       animateLayout();
       setActiveExercise(exIdx + 1);
+    } else if (currentGroupId && !allDone) {
+      // In a superset but alternating logic couldn't find a target — find the partner
+      // and advance to them without starting rest timer (rest only after both exercises' sets)
+      const partnerIdx = loggedExercises.findIndex((ex, i) =>
+        i !== exIdx && ex.supersetGroupId === currentGroupId
+      );
+      if (partnerIdx !== -1 && loggedExercises[partnerIdx].sets.some(s => !s.completed)) {
+        animateLayout();
+        setActiveExercise(partnerIdx);
+      } else {
+        startRestTimer();
+      }
     } else {
       startRestTimer();
       // No auto-advance — user clicks NEXT to move to the next exercise
@@ -764,61 +837,69 @@ export default function QuickWorkoutScreen() {
     setSaving(true);
     const durationMinutes = Math.round(getElapsedMs() / 60000);
     const workoutStartedAt = activeWorkout?.createdAt ? new Date(activeWorkout.createdAt).toISOString() : new Date().toISOString();
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const trimmedName = workoutName.trim() || 'My Workout';
-        await supabase.from('workout_logs').insert({
-          user_id: user.id,
-          plan_id: null,
-          day_name: trimmedName,
-          exercises: loggedExercises,
-          duration_minutes: durationMinutes,
-          completed_at: new Date().toISOString(),
-        });
+    const exercisesSnapshot = JSON.parse(JSON.stringify(loggedExercises));
+    const trimmedName = workoutName.trim() || 'My Workout';
+    const deltasSnapshot = { ...sessionDeltasRef.current };
 
-        // Save/update routine template so user can reuse it
-        const routineExercises = loggedExercises.map(ex => ({
-          name: ex.name,
-          sets: ex.sets.length,
-          reps: String(Math.max(...ex.sets.map(s => s.reps || 0)) || 10),
-        }));
-        // Check if a routine with the same name exists
-        const { data: existing } = await supabase
-          .from('saved_routines')
-          .select('id')
-          .eq('user_id', user.id)
-          .eq('name', trimmedName)
-          .limit(1)
-          .maybeSingle();
-        if (existing) {
-          await supabase.from('saved_routines').update({
-            exercises: routineExercises,
-            last_used_at: new Date().toISOString(),
-          }).eq('id', existing.id);
-        } else {
-          await supabase.from('saved_routines').insert({
+    // Navigate immediately — don't wait for DB write
+    clearWorkout();
+    router.replace({
+      pathname: '/workout/post-workout',
+      params: {
+        exercises: JSON.stringify(exercisesSnapshot),
+        dayName: trimmedName,
+        focus: 'Custom',
+        durationMinutes: String(durationMinutes),
+        startedAt: workoutStartedAt,
+      },
+    });
+
+    // Save to Supabase in the background (fire and forget)
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await supabase.from('workout_logs').insert({
             user_id: user.id,
-            name: trimmedName,
-            exercises: routineExercises,
-            last_used_at: new Date().toISOString(),
+            plan_id: null,
+            day_name: trimmedName,
+            exercises: exercisesSnapshot,
+            duration_minutes: durationMinutes,
+            completed_at: new Date().toISOString(),
           });
+
+          detectAndSavePRs(user.id, exercisesSnapshot);
+          updateIncrementsAfterWorkout(deltasSnapshot);
+
+          // Save/update routine template so user can reuse it
+          const routineExercises = exercisesSnapshot.map((ex: any) => ({
+            name: ex.name,
+            sets: ex.sets.length,
+            reps: String(Math.max(...ex.sets.map((s: any) => s.reps || 0)) || 10),
+          }));
+          const { data: existing } = await supabase
+            .from('saved_routines')
+            .select('id')
+            .eq('user_id', user.id)
+            .eq('name', trimmedName)
+            .limit(1)
+            .maybeSingle();
+          if (existing) {
+            await supabase.from('saved_routines').update({
+              exercises: routineExercises,
+              last_used_at: new Date().toISOString(),
+            }).eq('id', existing.id);
+          } else {
+            await supabase.from('saved_routines').insert({
+              user_id: user.id,
+              name: trimmedName,
+              exercises: routineExercises,
+              last_used_at: new Date().toISOString(),
+            });
+          }
         }
-      }
-    } catch {} finally {
-      setSaving(false);
-      clearWorkout();
-      router.replace({
-        pathname: '/workout/post-workout',
-        params: {
-          exercises: JSON.stringify(loggedExercises),
-          dayName: workoutName.trim() || 'My Workout',
-          focus: 'Custom',
-          durationMinutes: String(durationMinutes),
-          startedAt: workoutStartedAt,
-        },
-      });
-    }
+      } catch {}
+    })();
   };
 
   const handleRestart = () => {
@@ -934,6 +1015,7 @@ export default function QuickWorkoutScreen() {
               placeholderTextColor={theme.textSecondary}
               value={search}
               onChangeText={setSearch}
+              keyboardType="default"
               autoCapitalize="none"
               autoCorrect={false}
             />
@@ -1797,7 +1879,9 @@ export default function QuickWorkoutScreen() {
                         {exIdx + 1}
                       </Text>
                       <View style={{ flex: 1 }}>
-                        <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>{logged.name}</Text>
+                        <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text, flexShrink: 1 }} numberOfLines={1}>
+                          {logged.name}
+                        </Text>
                         <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
                           {logged.sets.length} set{logged.sets.length !== 1 ? 's' : ''}
                         </Text>
@@ -1807,12 +1891,30 @@ export default function QuickWorkoutScreen() {
                           </Text>
                         )}
                       </View>
+                      {/* Notes icon — only when expanded */}
+                      {isExpanded && (
+                        <Pressable
+                          onPress={() => {
+                            setNoteText(logged.notes ?? '');
+                            setNoteModalIdx(exIdx);
+                          }}
+                          hitSlop={8}
+                          style={{ padding: 4, marginLeft: 4 }}
+                        >
+                          <Ionicons
+                            name="document-text-outline"
+                            size={16}
+                            color={logged.notes ? '#F59E0B' : theme.chrome}
+                          />
+                        </Pressable>
+                      )}
                       {/* Info icon - hide for custom exercises (no data) */}
                       {!customExercises.some((ce) => ce.name.toLowerCase() === logged.name.toLowerCase()) && (
                         <ExerciseThumbnail exerciseName={logged.name} theme={theme} />
                       )}
+                      {/* Delete icon */}
                       {isExpanded && loggedExercises.length > 1 && (
-                        <Pressable onPress={() => removeExercise(exIdx)} hitSlop={8} style={{ padding: 4, marginLeft: 8 }}>
+                        <Pressable onPress={() => removeExercise(exIdx)} hitSlop={8} style={{ padding: 4, marginLeft: 4 }}>
                           <Ionicons name="trash-outline" size={16} color={SemanticColors.danger} />
                         </Pressable>
                       )}
@@ -1841,7 +1943,7 @@ export default function QuickWorkoutScreen() {
                         {isCableExercise(logged.name, customExercises.find((ce) => ce.name.toLowerCase() === logged.name.toLowerCase())?.equipment) && (
                           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 8 }}>
                             <View style={{ flexDirection: 'row', gap: 6 }}>
-                              {CABLE_ATTACHMENTS.map((att) => (
+                              {getAttachmentsForExercise(logged.name).map((att) => (
                                 <Pressable
                                   key={att}
                                   onPress={() => updateAttachment(exIdx, logged.attachment === att ? null : att)}
@@ -1876,6 +1978,8 @@ export default function QuickWorkoutScreen() {
                               isSuperset={!!logged.supersetGroupId}
                               isDropSet={set.isDropSet}
                               showLabels={setIdx === 0}
+                              adaptiveIncrement={incrementsReady ? getExerciseIncrementSync(logged.name, weightUnit) : undefined}
+                              onWeightDelta={(delta) => recordWeightDelta(logged.name, delta)}
                               weightInputRef={(el) => { inputRefs.current[`${exIdx}-${setIdx}-w`] = el; }}
                               repsInputRef={(el) => { inputRefs.current[`${exIdx}-${setIdx}-r`] = el; }}
                               onWeightSubmit={() => inputRefs.current[`${exIdx}-${setIdx}-r`]?.focus()}
@@ -1914,6 +2018,12 @@ export default function QuickWorkoutScreen() {
                                 animateLayout();
                                 setActiveExercise(exIdx + 1);
                                 scrollToExercise(exIdx + 1);
+                                // Skip rest timer if advancing to superset partner
+                                const currentGroupId = loggedExercises[exIdx]?.supersetGroupId;
+                                const nextGroupId = loggedExercises[exIdx + 1]?.supersetGroupId;
+                                if (!(currentGroupId && nextGroupId && currentGroupId === nextGroupId)) {
+                                  startRestTimer();
+                                }
                               }}
                               style={{ width: 44, height: 44, backgroundColor: '#22C55E', borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
                             >
@@ -1933,6 +2043,7 @@ export default function QuickWorkoutScreen() {
                                 });
                                 animateLayout();
                                 setActiveExercise(null); // collapse all — overview mode
+                                startRestTimer();
                               }}
                               style={{ paddingHorizontal: 16, height: 44, backgroundColor: '#22C55E', borderRadius: 12, alignItems: 'center', justifyContent: 'center' }}
                             >
@@ -1953,7 +2064,7 @@ export default function QuickWorkoutScreen() {
 
         {/* Bottom bar: Play | Timer (abs center) | Rest + Finish */}
         <View style={{ backgroundColor: avatarColor, paddingHorizontal: 24, paddingTop: 10, paddingBottom: 28 }}>
-          <View style={{ position: 'relative', height: 36 }}>
+          <View style={{ position: 'relative', height: isResting ? 54 : 36 }}>
             {/* Timer - absolutely centered, never moves */}
             <Pressable
               onPress={() => {
@@ -1974,20 +2085,27 @@ export default function QuickWorkoutScreen() {
                 }
               }}
               disabled={workoutStarted || countdown !== null}
-              style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, alignItems: 'center', justifyContent: 'center' }}
+              style={{ position: 'absolute', top: 0, left: 40, right: 40, alignItems: 'center', justifyContent: 'center', height: 36 }}
             >
               <Text style={{
                 fontSize: 22, fontWeight: '700',
                 color: countdown !== null ? '#FFFFFF99' : isPaused ? '#FFFFFF99' : '#FFFFFF',
                 fontVariant: ['tabular-nums'], letterSpacing: 1,
-                opacity: isResting ? 0.4 : 1,
               }}>
                 {countdown !== null ? String(countdown) : (!workoutStarted ? (isResuming.current ? 'RESUME' : 'START') : formatTimeMs(displayMs))}
               </Text>
+              {/* Rest countdown subtitle */}
+              {isResting && (
+                <Pressable onPress={() => skipRestTimer()} hitSlop={8}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#EAB308', fontVariant: ['tabular-nums'], marginTop: 2 }}>
+                    Rest: {formatTime(restRemaining)}
+                  </Text>
+                </Pressable>
+              )}
             </Pressable>
 
             {/* Left/right controls on top of timer */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 36 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', height: 36, zIndex: 2 }}>
               {/* Play / Pause */}
               <Pressable
                 onPress={() => {
@@ -2021,58 +2139,43 @@ export default function QuickWorkoutScreen() {
                 />
               </Pressable>
 
-              {/* Finish (two-tap) */}
-              <Pressable
-                onPress={() => {
-                  if (confirmFinish) {
-                    if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
-                    setConfirmFinish(false);
-                    handleFinish();
-                  } else {
-                    setConfirmFinish(true);
-                    confirmTimerRef.current = setTimeout(() => setConfirmFinish(false), 3000);
-                  }
-                }}
-                hitSlop={12}
-                style={{ padding: 8, width: 40, alignItems: 'center' }}
-                disabled={saving}
-              >
-                <Ionicons
-                  name="checkmark"
-                  size={22}
-                  color={confirmFinish ? SemanticColors.success : '#FFFFFF'}
-                />
-              </Pressable>
+              {/* Rest timer toggle + Finish (right edge) */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                {workoutStarted && (
+                  <Pressable
+                    onPress={() => {
+                      if (isResting) skipRestTimer();
+                      else startRestTimer(true);
+                    }}
+                    hitSlop={12}
+                    style={{ padding: 8, width: 36, alignItems: 'center' }}
+                  >
+                    <Ionicons name="time" size={20} color={isResting ? '#EAB308' : '#FFFFFF'} />
+                  </Pressable>
+                )}
+                <Pressable
+                  onPress={() => {
+                    if (confirmFinish) {
+                      if (confirmTimerRef.current) clearTimeout(confirmTimerRef.current);
+                      setConfirmFinish(false);
+                      handleFinish();
+                    } else {
+                      setConfirmFinish(true);
+                      confirmTimerRef.current = setTimeout(() => setConfirmFinish(false), 3000);
+                    }
+                  }}
+                  hitSlop={12}
+                  style={{ padding: 8, width: 40, alignItems: 'center' }}
+                  disabled={saving}
+                >
+                  <Ionicons
+                    name="checkmark"
+                    size={22}
+                    color={confirmFinish ? SemanticColors.success : '#FFFFFF'}
+                  />
+                </Pressable>
+              </View>
             </View>
-
-            {/* Rest timer - centered between play and clock */}
-            {workoutStarted && <Pressable
-              onPress={() => {
-                if (isResting) {
-                  skipRestTimer();
-                } else {
-                  startRestTimer(true);
-                }
-              }}
-              hitSlop={12}
-              style={{
-                position: 'absolute',
-                left: 40,
-                right: '50%',
-                top: 0,
-                bottom: 0,
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              {isResting ? (
-                <Text style={{ fontSize: 22, fontWeight: '700', color: '#EAB308', fontVariant: ['tabular-nums'], letterSpacing: 1 }}>
-                  {formatTime(restRemaining)}
-                </Text>
-              ) : (
-                <Ionicons name="time" size={22} color="#FFFFFF" />
-              )}
-            </Pressable>}
           </View>
         </View>
 
@@ -2113,6 +2216,9 @@ export default function QuickWorkoutScreen() {
                   placeholderTextColor={theme.textSecondary}
                   value={exerciseSearch}
                   onChangeText={setExerciseSearch}
+                  keyboardType="default"
+                  autoCapitalize="none"
+                  autoCorrect={false}
                   autoFocus
                 />
                 {exerciseSearch.length > 0 && (
@@ -2269,6 +2375,90 @@ export default function QuickWorkoutScreen() {
               )}
             </ScrollView>
           </SafeAreaView>
+        </Modal>
+
+        {/* Exercise Notes Modal */}
+        <Modal visible={noteModalIdx !== null} transparent animationType="fade" onRequestClose={() => setNoteModalIdx(null)}>
+          <Pressable
+            style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 24 }}
+            onPress={() => setNoteModalIdx(null)}
+          >
+            <Pressable
+              onPress={() => {}}
+              style={{
+                backgroundColor: theme.surface,
+                borderRadius: 16,
+                padding: 20,
+                width: '100%',
+                maxWidth: 360,
+                borderWidth: 1,
+                borderColor: theme.border,
+              }}
+            >
+              <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text, marginBottom: 4 }}>
+                {noteModalIdx !== null ? loggedExercises[noteModalIdx]?.name : ''}
+              </Text>
+              <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 12 }}>
+                Add a note for this exercise
+              </Text>
+              <TextInput
+                style={{
+                  backgroundColor: theme.background,
+                  borderRadius: 10,
+                  borderWidth: 1,
+                  borderColor: theme.border,
+                  paddingHorizontal: 12,
+                  paddingVertical: 10,
+                  fontSize: 14,
+                  color: theme.text,
+                  minHeight: 60,
+                  textAlignVertical: 'top',
+                }}
+                multiline
+                placeholder={noteModalIdx !== null ? (previousNotes[loggedExercises[noteModalIdx]?.name] ?? 'e.g. Use rope attachment, go slow on eccentric...') : ''}
+                placeholderTextColor={theme.textSecondary}
+                value={noteText}
+                onChangeText={setNoteText}
+                autoFocus
+              />
+              <View style={{ flexDirection: 'row', gap: 10, marginTop: 14 }}>
+                {noteText.length > 0 && (
+                  <Pressable
+                    onPress={() => {
+                      if (noteModalIdx !== null) {
+                        setLoggedExercises((prev) => {
+                          const copy = [...prev];
+                          copy[noteModalIdx] = { ...copy[noteModalIdx], notes: undefined };
+                          return copy;
+                        });
+                      }
+                      setNoteText('');
+                      setNoteModalIdx(null);
+                    }}
+                    style={{ paddingVertical: 10, paddingHorizontal: 16, borderRadius: 10, borderWidth: 1, borderColor: theme.border }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: theme.textSecondary }}>Clear</Text>
+                  </Pressable>
+                )}
+                <Pressable
+                  onPress={() => {
+                    if (noteModalIdx !== null) {
+                      const trimmed = noteText.trim();
+                      setLoggedExercises((prev) => {
+                        const copy = [...prev];
+                        copy[noteModalIdx] = { ...copy[noteModalIdx], notes: trimmed || undefined };
+                        return copy;
+                      });
+                    }
+                    setNoteModalIdx(null);
+                  }}
+                  style={{ flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center', backgroundColor: '#F59E0B' }}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#000' }}>Save</Text>
+                </Pressable>
+              </View>
+            </Pressable>
+          </Pressable>
         </Modal>
       </SafeAreaView>
     </GestureHandlerRootView>

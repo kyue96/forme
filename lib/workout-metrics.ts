@@ -6,15 +6,39 @@ import { LoggedExercise, LoggedSet } from './types';
 import { getExerciseCategory } from './exercise-utils';
 import { formatNumber } from './utils';
 
+// ── Unilateral Exercise Detection ──
+
+/** Keywords that indicate a single-arm/leg/alternating exercise (volume should be doubled). */
+const UNILATERAL_KEYWORDS = [
+  'single arm', 'single-arm',
+  'single leg', 'single-leg',
+  'one arm', 'one-arm',
+  'one leg', 'one-leg',
+  'alternating',
+  'unilateral',
+];
+
+/** Returns true if the exercise name indicates a unilateral/alternating movement. */
+export function isUnilateralExercise(name: string): boolean {
+  const lower = name.toLowerCase();
+  return UNILATERAL_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+/** Returns 2 for unilateral exercises (both sides), 1 otherwise. */
+function getVolumeMultiplier(exerciseName: string): number {
+  return isUnilateralExercise(exerciseName) ? 2 : 1;
+}
+
 // ── Metric 1: Total Volume ──
 
-/** Sum of (weight x reps) for all completed sets. */
+/** Sum of (weight x reps) for all completed sets. Unilateral exercises are doubled. */
 export function computeTotalVolume(exercises: LoggedExercise[]): number {
   let total = 0;
   for (const ex of exercises) {
+    const multiplier = getVolumeMultiplier(ex.name);
     for (const s of ex.sets) {
       if (s.completed && s.weight && s.reps > 0) {
-        total += s.weight * s.reps;
+        total += s.weight * s.reps * multiplier;
       }
     }
   }
@@ -70,16 +94,17 @@ export interface MuscleVolume {
   percentage: number; // 0-100
 }
 
-/** Sum volume grouped by muscle category. Sorted by volume descending. */
+/** Sum volume grouped by muscle category. Sorted by volume descending. Unilateral exercises are doubled. */
 export function computeVolumeByMuscle(exercises: LoggedExercise[]): MuscleVolume[] {
   const volumeMap: Record<string, number> = {};
 
   for (const ex of exercises) {
     const category = getExerciseCategory(ex.name) ?? 'Other';
+    const multiplier = getVolumeMultiplier(ex.name);
     let exVolume = 0;
     for (const s of ex.sets) {
       if (s.completed && s.weight && s.reps > 0) {
-        exVolume += s.weight * s.reps;
+        exVolume += s.weight * s.reps * multiplier;
       }
     }
     volumeMap[category] = (volumeMap[category] ?? 0) + exVolume;
@@ -145,15 +170,16 @@ export interface BestSetResult {
   reps: number;
 }
 
-/** Returns the single set with highest volume (weight × reps). */
+/** Returns the single set with highest volume (weight × reps). Unilateral exercises are doubled. */
 export function computeBestSet(exercises: LoggedExercise[]): BestSetResult | null {
   let best: BestSetResult | null = null;
   let bestVolume = 0;
 
   for (const ex of exercises) {
+    const multiplier = getVolumeMultiplier(ex.name);
     for (const s of ex.sets) {
       if (!s.completed || !s.weight || s.reps <= 0) continue;
-      const vol = s.weight * s.reps;
+      const vol = s.weight * s.reps * multiplier;
       if (vol > bestVolume) {
         bestVolume = vol;
         best = { exerciseName: ex.name, weight: s.weight, reps: s.reps };

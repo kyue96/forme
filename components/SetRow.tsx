@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { InputAccessoryView, Keyboard, Platform, Pressable, Text, TextInput, View } from 'react-native';
 import { Swipeable } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,6 +6,7 @@ import { useSettings } from '@/lib/settings-context';
 import { LoggedSet } from '@/lib/types';
 import { isBarbell } from '@/lib/plate-calculator';
 import { PlateCalculatorSheet } from '@/components/PlateCalculatorSheet';
+import { detectRapidTapIncrement } from '@/lib/exercise-increments';
 
 // Module-level ref so the shared InputAccessoryView always calls the active row's handler
 const activeNextHandler: { current: (() => void) | null } = { current: null };
@@ -47,6 +48,10 @@ interface SetRowProps {
   isDropSet?: boolean;
   showLabels?: boolean;
   equipment?: string | null;
+  /** Adaptive weight increment for this exercise (in display units). */
+  adaptiveIncrement?: number;
+  /** Called when user taps +/- with the absolute delta applied (in display units). */
+  onWeightDelta?: (delta: number) => void;
 }
 
 export function SetRow({
@@ -67,12 +72,46 @@ export function SetRow({
   isDropSet,
   showLabels = true,
   equipment,
+  adaptiveIncrement,
+  onWeightDelta,
 }: SetRowProps) {
   const { theme, weightUnit } = useSettings();
   const prevCompleted = useRef(data.completed);
   // Track whether weight/reps changed via user input (not from set add/remove re-render)
   const userEdited = useRef(false);
-  const weightStep = weightUnit === 'lbs' ? 5 : 2.5;
+  const defaultStep = weightUnit === 'lbs' ? 5 : 2.5;
+  const baseIncrement = adaptiveIncrement ?? defaultStep;
+  const [weightStep, setWeightStep] = useState(baseIncrement);
+  const tapTimestampsRef = useRef<number[]>([]);
+
+  // Sync weightStep when adaptiveIncrement changes
+  useEffect(() => {
+    setWeightStep(adaptiveIncrement ?? defaultStep);
+  }, [adaptiveIncrement, defaultStep]);
+
+  // Rapid-tap detection: check timestamps after each tap
+  const handleIncrementTap = useCallback((direction: 1 | -1) => {
+    userEdited.current = true;
+    const currentStep = adaptiveIncrement ?? defaultStep;
+    const now = Date.now();
+    tapTimestampsRef.current.push(now);
+    // Keep only recent taps (last 2 seconds)
+    tapTimestampsRef.current = tapTimestampsRef.current.filter(t => now - t < 2000);
+
+    // Check for rapid tapping pattern
+    const rapidIncrement = detectRapidTapIncrement(tapTimestampsRef.current, currentStep);
+    if (rapidIncrement != null && rapidIncrement !== weightStep) {
+      setWeightStep(rapidIncrement);
+      // Reset timestamps so we don't re-detect immediately
+      tapTimestampsRef.current = [];
+    }
+
+    const step = rapidIncrement ?? weightStep;
+    const delta = step * direction;
+    const newWeight = Math.max(0, (data.weight ?? 0) + delta);
+    onChange({ ...data, weight: newWeight > 0 ? newWeight : null, suggestedWeight: undefined });
+    onWeightDelta?.(Math.abs(step));
+  }, [data, onChange, onWeightDelta, weightStep, adaptiveIncrement, defaultStep]);
   const focusedField = useRef<'weight' | 'reps' | null>(null);
   const isBarbellExercise = !isBodyweight && exerciseName !== '' && (
     equipment ? equipment === 'Barbell' : isBarbell(exerciseName)
@@ -235,11 +274,7 @@ export function SetRow({
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 {showIncrement && (
                   <Pressable
-                    onPress={() => {
-                      userEdited.current = true;
-                      const w = Math.max(0, (data.weight ?? 0) - weightStep);
-                      onChange({ ...data, weight: w > 0 ? w : null, suggestedWeight: undefined });
-                    }}
+                    onPress={() => handleIncrementTap(-1)}
                     hitSlop={8}
                     style={{ alignItems: 'center', justifyContent: 'center', marginRight: 4, padding: 4 }}
                   >
@@ -263,7 +298,7 @@ export function SetRow({
                 />
                 {showIncrement && (
                   <Pressable
-                    onPress={() => { userEdited.current = true; onChange({ ...data, weight: (data.weight ?? 0) + weightStep, suggestedWeight: undefined }); }}
+                    onPress={() => handleIncrementTap(1)}
                     hitSlop={8}
                     style={{ alignItems: 'center', justifyContent: 'center', marginLeft: 4, padding: 4 }}
                   >

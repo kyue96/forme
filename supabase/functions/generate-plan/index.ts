@@ -68,17 +68,31 @@ Return ONLY valid JSON with no markdown, no explanation. Just the JSON object:
         equipmentRule = `Only include exercises that use the following equipment: ${equipmentStr}. Do not include any exercises requiring other equipment.`;
       }
 
+      const durationMin = answers.workoutDuration
+        ? parseInt(answers.workoutDuration)
+        : 45;
+
       prompt = `You are a certified personal trainer. Generate a personalized weekly workout plan based on the following details:
 
 Goal: ${answers.goal}
 Experience level: ${answers.experience}
 Equipment available: ${equipmentStr}
-Days per week: ${answers.daysPerWeek}${splitInfo}
+Days per week: ${answers.daysPerWeek}
+Target workout duration: ${durationMin} minutes per session${splitInfo}
 Areas to avoid: ${answers.injuries}
 Height: ${answers.height}
 Weight: ${answers.weight}
 
 EQUIPMENT RULES: ${equipmentRule}
+
+TIME BUDGET: Each workout must fit within ${durationMin} minutes total. Use these assumptions to calculate exercise count:
+- Warm-up: 5-10 minutes (NOT included in the exercises list, but counted in the time budget)
+- Each working set takes ~45 seconds of effort
+- Rest between sets: minimum 60 seconds (use 60-120 sec based on exercise intensity — heavier compounds get more rest)
+- Transition time between exercises: ~1 minute to set up new equipment
+- Example: an exercise with 4 sets × (45s work + 75s rest) + 1 min transition = ~9 minutes
+- After subtracting warm-up time, fit as many exercises as possible within the remaining ${durationMin - 8} minutes
+- Choose the number of exercises and sets so the total time stays within the budget. Do NOT exceed it.
 
 Create a structured weekly program with exactly ${daysCount} workout days. ${
         answers.preferredSplit

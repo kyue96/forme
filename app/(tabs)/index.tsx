@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   Animated,
+  Modal,
   Pressable,
   ScrollView,
   Share,
@@ -35,11 +36,14 @@ import { MuscleGroupPills } from '@/components/MuscleGroupPills';
 import { getExerciseCategories } from '@/lib/exercise-utils';
 import { computeVolumeByMuscle, computeTotalVolume } from '@/lib/workout-metrics';
 import NextWorkoutCard from '@/components/NextWorkoutCard';
-import TrainingReadinessRing from '@/components/TrainingReadinessRing';
 import FormeCoachCard from '@/components/FormeCoachCard';
-import ThisWeekCard from '@/components/ThisWeekCard';
-// StreakCard removed from homescreen
+import RecoveryMapCard from '@/components/RecoveryMapCard';
+import TrophyCaseCard from '@/components/TrophyCaseCard';
+import BodyStatsCard from '@/components/BodyStatsCard';
+import { useAnimatedCounter } from '@/lib/useAnimatedCounter';
+import SparkleOverlay from '@/components/SparkleOverlay';
 import { BreathingGradient } from '@/components/BreathingGradient';
+import WeeklyVolumeTrend from '@/components/WeeklyVolumeTrend';
 
 const MOTIVATIONAL = [
   'Your muscles grow during rest, not during the workout.',
@@ -63,6 +67,7 @@ interface Activity {
   type: string;
   duration_minutes: number | null;
   notes: string | null;
+  calories_burned: number | null;
 }
 
 interface TodaySession {
@@ -76,7 +81,7 @@ export default function HomeScreen() {
   const router = useRouter();
   const { scannedMeal } = useLocalSearchParams<{ scannedMeal?: string }>();
   const { plan, loading } = usePlan();
-  const { theme, weightUnit } = useSettings();
+  const { theme, weightUnit, trackCalories } = useSettings();
   const { steps } = useHealthKit();
 
   const [completedDays, setCompletedDays] = useState<Set<string>>(new Set());
@@ -90,6 +95,9 @@ export default function HomeScreen() {
   const [activityType, setActivityType] = useState('Walk');
   const [activityDuration, setActivityDuration] = useState('');
   const [activityNotes, setActivityNotes] = useState('');
+  const [activityCalories, setActivityCalories] = useState('');
+  const [activityCalNotSure, setActivityCalNotSure] = useState(false);
+  const [userWeightKg, setUserWeightKg] = useState<number | null>(null);
   const [savingActivity, setSavingActivity] = useState(false);
   const [todayActivities, setTodayActivities] = useState<Activity[]>([]);
 
@@ -98,6 +106,9 @@ export default function HomeScreen() {
   const sessionCardRef = useRef<View>(null);
   const weekLogsRef = useRef<any[]>([]);
   const [recentLogs, setRecentLogs] = useState<{ exercises: LoggedExercise[]; completed_at: string }[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [upNextExpanded, setUpNextExpanded] = useState(false);
+  const [sessionPRs, setSessionPRs] = useState<{ exercise_name: string; e1rm: number; weight: number; reps: number; previous_e1rm: number | null }[]>([]);
   // streak removed from homescreen display
 
   // Handle barcode scan result
@@ -185,6 +196,7 @@ export default function HomeScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      setUserId(user.id);
 
       const weekStart = dateKey(weekDates[0]);
       const weekEnd = dateKey(weekDates[6]);
@@ -211,8 +223,20 @@ export default function HomeScreen() {
             exercises: todayLog.exercises as LoggedExercise[],
             duration_minutes: todayLog.duration_minutes,
           });
+          // Fetch PRs achieved in this session's timeframe
+          const logDate = todayLog.completed_at?.split('T')[0];
+          if (logDate) {
+            const { data: prs } = await supabase
+              .from('personal_records')
+              .select('exercise_name, e1rm, weight, reps, previous_e1rm')
+              .eq('user_id', user.id)
+              .gte('achieved_at', logDate)
+              .lte('achieved_at', logDate + 'T23:59:59');
+            setSessionPRs(prs ?? []);
+          }
         } else {
           setTodaySession(null);
+          setSessionPRs([]);
         }
       }
 
@@ -238,11 +262,22 @@ export default function HomeScreen() {
       // Load selected day's activities
       const { data: activities } = await supabase
         .from('activities')
-        .select('id, type, duration_minutes, notes')
+        .select('id, type, duration_minutes, notes, calories_burned')
         .eq('user_id', user.id)
         .eq('date', activeDate)
         .order('created_at', { ascending: true });
       setTodayActivities((activities as Activity[]) ?? []);
+
+      // Load user weight for calorie estimation
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('weight')
+        .eq('id', user.id)
+        .single();
+      if (profile?.weight) {
+        const w = parseFloat(profile.weight);
+        if (!isNaN(w) && w > 0) setUserWeightKg(w);
+      }
 
       // Nudges: check inactivity
       checkAndScheduleNudges(user.id);
@@ -328,20 +363,44 @@ export default function HomeScreen() {
     setSelectedDate(key === todayStr ? null : key);
   };
 
+  // MET values for calorie estimation
+  const MET_VALUES: Record<string, number> = { Walk: 3.5, Run: 8.0, Cycle: 6.0, Stretch: 2.5, Other: 4.0 };
+
+  const getCalorieEstimate = () => {
+    if (!userWeightKg || !activityDuration) return null;
+    const dur = parseInt(activityDuration);
+    if (!dur || dur <= 0) return null;
+    const met = MET_VALUES[activityType] ?? 4.0;
+    const cal = userWeightKg * met * (dur / 60);
+    const low = Math.round(cal * 0.85);
+    const high = Math.round(cal * 1.15);
+    return { low, high, mid: Math.round(cal) };
+  };
+
   const saveActivity = async () => {
     setSavingActivity(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      let calBurned: number | null = null;
+      if (activityCalNotSure) {
+        const est = getCalorieEstimate();
+        calBurned = est?.mid ?? null;
+      } else if (activityCalories.trim()) {
+        calBurned = parseInt(activityCalories) || null;
+      }
       await supabase.from('activities').insert({
         user_id: user.id,
         date: activeDate,
         type: activityType,
         duration_minutes: parseInt(activityDuration) || null,
         notes: activityNotes.trim() || null,
+        calories_burned: calBurned,
       });
       setActivityDuration('');
       setActivityNotes('');
+      setActivityCalories('');
+      setActivityCalNotSure(false);
       setShowActivitySheet(false);
       loadData();
     } catch {} finally {
@@ -391,6 +450,19 @@ export default function HomeScreen() {
     } catch {}
   };
 
+  // Today's session stats — must compute before hooks below
+  const sessionTotalSets = todaySession?.exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).length, 0) ?? 0;
+  const sessionVolumeRaw = todaySession?.exercises.reduce(
+    (sum, ex) => sum + ex.sets.filter(s => s.completed && s.weight != null).reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0), 0
+  ) ?? 0;
+  const sessionVolume = Math.round(sessionVolumeRaw);
+  const sessionTotalReps = todaySession?.exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).reduce((r, set) => r + set.reps, 0), 0) ?? 0;
+
+  // Animated counters — hooks must run before any early return
+  const { display: animVolume, done: volumeDone } = useAnimatedCounter(sessionVolume);
+  const { display: animSets } = useAnimatedCounter(sessionTotalSets, 1400);
+  const { display: animReps } = useAnimatedCounter(sessionTotalReps, 1400);
+
   if (loading) {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: theme.background, alignItems: 'center', justifyContent: 'center' }}>
@@ -401,13 +473,6 @@ export default function HomeScreen() {
 
   const quote = MOTIVATIONAL[now.getDate() % MOTIVATIONAL.length];
   const tip = RECOVERY_TIPS[now.getDate() % RECOVERY_TIPS.length];
-
-  // Today's session stats
-  const sessionTotalSets = todaySession?.exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).length, 0) ?? 0;
-  const sessionVolumeRaw = todaySession?.exercises.reduce(
-    (sum, ex) => sum + ex.sets.filter(s => s.completed && s.weight != null).reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0), 0
-  ) ?? 0;
-  const sessionVolume = Math.round(sessionVolumeRaw);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: theme.background }} edges={['top']}>
@@ -432,6 +497,28 @@ export default function HomeScreen() {
         )}
 
         <View style={{ paddingHorizontal: 24, gap: 12 }}>
+          {/* Quick Workout button — always visible when plan exists */}
+          {plan && (
+            <Pressable
+              onPress={() => router.push('/workout/quick')}
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 8,
+                backgroundColor: theme.surface,
+                borderRadius: 14,
+                paddingHorizontal: 16,
+                paddingVertical: 12,
+                borderWidth: 1,
+                borderColor: theme.border,
+              }}
+            >
+              <Ionicons name="flash" size={18} color={focusCardColor} />
+              <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text, flex: 1 }}>Quick Workout</Text>
+              <Ionicons name="chevron-forward" size={16} color={theme.textSecondary} />
+            </Pressable>
+          )}
+
           {!plan ? (
             <View style={{ marginTop: 40, alignItems: 'center' }}>
               <Text allowFontScaling style={{ color: theme.textSecondary, fontSize: 15, textAlign: 'center', marginBottom: 32, lineHeight: 22 }}>
@@ -446,8 +533,8 @@ export default function HomeScreen() {
             </View>
 
           ) : (todayCompleted || todaySession) ? (
-            <View style={{ gap: 12 }}>
-              {/* Workout complete card */}
+            <View>
+              {/* Workout Complete banner */}
               <Pressable
                 onPress={() => router.push({
                   pathname: '/workout/session-view',
@@ -460,7 +547,7 @@ export default function HomeScreen() {
                     logId: todaySession?.id ?? '',
                   },
                 })}
-                style={{ borderRadius: 16, overflow: 'hidden' }}
+                style={{ borderRadius: 16, overflow: 'hidden', marginBottom: 20 }}
               >
                 <BreathingGradient color={focusCardColor} style={{ borderRadius: 16, height: 56 }}>
                   <View style={{ paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center' }}>
@@ -468,50 +555,125 @@ export default function HomeScreen() {
                     <Text allowFontScaling style={{ fontSize: 16, fontWeight: '800', color: '#FFFFFF', marginLeft: 12, flex: 1 }}>
                       Workout Complete
                     </Text>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFFAA', letterSpacing: 1 }}>DETAILS</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#FFFFFFAA', letterSpacing: 1 }}>VIEW</Text>
                   </View>
                 </BreathingGradient>
               </Pressable>
-              {/* Shareable session card */}
+
               {todaySession && (
-                <Pressable
-                  onPress={() => router.push({
-                    pathname: '/workout/post-workout',
-                    params: {
-                      exercises: JSON.stringify(todaySession.exercises),
-                      dayName: todaySession.day_name,
-                      focus: activeWorkoutDay?.focus ?? todaySession.day_name,
-                      durationMinutes: String(todaySession.duration_minutes ?? 0),
-                    },
-                  })}
-                >
+                <>
+                  <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border }}>
+                  {/* Workout name + muscle pills */}
+                  <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
+                    <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>{stripParens(activeWorkoutDay?.focus ?? todaySession.day_name)}</Text>
+                    <MuscleGroupPills categories={getExerciseCategories(todaySession.exercises)} size="small" />
+                  </View>
+
+                  {/* Hero volume + stats with sparkle */}
+                  <View style={{ position: 'relative' }}>
+                    <SparkleOverlay trigger={volumeDone && sessionVolume > 0} color="#C0C0C0" count={16} />
+
+                    {/* Hero volume — animated counter */}
+                    <View style={{ alignItems: 'center', marginBottom: 24 }}>
+                      <Text style={{ fontSize: 48, fontWeight: '900', color: theme.text, lineHeight: 52 }}>
+                        {sessionVolume > 0 ? formatNumber(animVolume) : '\u2014'}
+                      </Text>
+                      <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 4 }}>{weightUnit === 'lbs' ? 'pounds' : 'kg'} moved</Text>
+                    </View>
+
+                    {/* Stats row — animated counters */}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-around' }}>
+                      <View style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 22, fontWeight: '800', color: theme.text }}>{animSets}</Text>
+                        <Text style={{ fontSize: 11, fontWeight: '500', color: theme.textSecondary, marginTop: 2 }}>sets</Text>
+                      </View>
+                      <View style={{ width: 1, backgroundColor: theme.border, alignSelf: 'stretch', marginVertical: 4 }} />
+                      <View style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 22, fontWeight: '800', color: theme.text }}>{animReps}</Text>
+                        <Text style={{ fontSize: 11, fontWeight: '500', color: theme.textSecondary, marginTop: 2 }}>reps</Text>
+                      </View>
+                      <View style={{ width: 1, backgroundColor: theme.border, alignSelf: 'stretch', marginVertical: 4 }} />
+                      <View style={{ alignItems: 'center' }}>
+                        <Text style={{ fontSize: 22, fontWeight: '800', color: theme.text }}>{todaySession.duration_minutes}m</Text>
+                        <Text style={{ fontSize: 11, fontWeight: '500', color: theme.textSecondary, marginTop: 2 }}>time</Text>
+                      </View>
+                    </View>
+                  </View>
+                  </View>
+
+                  {/* PR callout */}
+                  {sessionPRs.length > 0 && (
+                    <View style={{ marginBottom: 24 }}>
+                      {sessionPRs.map((pr) => {
+                        const displayWeight = weightUnit === 'lbs' ? Math.round(pr.weight * 2.205) : Math.round(pr.weight);
+                        const prevDisplay = pr.previous_e1rm != null ? (weightUnit === 'lbs' ? Math.round(pr.previous_e1rm * 2.205) : Math.round(pr.previous_e1rm)) : null;
+                        const improvement = prevDisplay != null ? displayWeight - prevDisplay : null;
+                        return (
+                          <View
+                            key={pr.exercise_name}
+                            style={{
+                              flexDirection: 'row', alignItems: 'center', gap: 10,
+                              backgroundColor: '#F59E0B18', borderRadius: 12,
+                              paddingHorizontal: 14, paddingVertical: 10, marginBottom: 8,
+                              borderWidth: 1, borderColor: '#F59E0B40',
+                            }}
+                          >
+                            <Text style={{ fontSize: 20 }}>🏆</Text>
+                            <View style={{ flex: 1 }}>
+                              <Text style={{ fontSize: 13, fontWeight: '700', color: '#F59E0B' }}>New PR</Text>
+                              <Text style={{ fontSize: 12, color: theme.text, marginTop: 1 }}>
+                                {pr.exercise_name}: {displayWeight} {weightUnit}{improvement != null ? ` (+${improvement})` : ''}
+                              </Text>
+                            </View>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  )}
+
+                  {/* Recovery Map — pill style */}
+                  <View style={{ marginTop: 8, marginBottom: 24 }}>
+                    <RecoveryMapCard recentLogs={recentLogs} />
+                  </View>
+
+                  {/* Body Stats */}
+                  <View style={{ marginBottom: 24 }}>
+                    {userId && <BodyStatsCard userId={userId} />}
+                  </View>
+
+                  {/* Weekly Volume Trend */}
+                  <View style={{ marginBottom: 24 }}>
+                    {userId && <WeeklyVolumeTrend userId={userId} accentColor={focusCardColor} />}
+                  </View>
+
+                  {/* Daily Tip — compact */}
+                  <View style={{ marginBottom: 24 }}>
+                    <FormeCoachCard compact />
+                  </View>
+
+                  {/* Hidden shareable card for screenshot sharing */}
                   <View
                     ref={sessionCardRef}
                     collapsable={false}
-                    style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border }}
+                    style={{ position: 'absolute', left: -9999, top: -9999, backgroundColor: theme.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: theme.border, width: 340 }}
                   >
-                    {/* Header row: workout name + muscle tags */}
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                       <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>{stripParens(activeWorkoutDay?.focus ?? todaySession.day_name)}</Text>
                       <MuscleGroupPills categories={getExerciseCategories(todaySession.exercises)} size="small" />
                     </View>
-                    {/* Hero volume */}
                     <View style={{ alignItems: 'center', marginBottom: 12 }}>
                       <Text style={{ fontSize: 32, fontWeight: '800', color: theme.text, lineHeight: 36 }}>
                         {sessionVolume > 0 ? formatNumber(sessionVolume) : '\u2014'}
                       </Text>
                       <Text style={{ fontSize: 11, color: theme.textSecondary, marginTop: 2 }}>{weightUnit === 'lbs' ? 'pounds' : 'kg'} moved</Text>
                     </View>
-                    {/* Stats row */}
                     <View style={{ flexDirection: 'row', justifyContent: 'space-around', borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 10 }}>
                       <View style={{ alignItems: 'center' }}>
                         <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{sessionTotalSets}</Text>
                         <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>sets</Text>
                       </View>
                       <View style={{ alignItems: 'center' }}>
-                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>
-                          {todaySession.exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).reduce((r, set) => r + set.reps, 0), 0)}
-                        </Text>
+                        <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text }}>{sessionTotalReps}</Text>
                         <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>reps</Text>
                       </View>
                       <View style={{ alignItems: 'center' }}>
@@ -519,31 +681,8 @@ export default function HomeScreen() {
                         <Text style={{ fontSize: 10, fontWeight: '500', color: theme.text, opacity: 0.5 }}>time</Text>
                       </View>
                     </View>
-                    {/* Muscle volume breakdown */}
-                    {(() => {
-                      const muscleVol = computeVolumeByMuscle(todaySession.exercises);
-                      if (muscleVol.length === 0) return null;
-                      return (
-                        <View style={{ marginTop: 12, gap: 8 }}>
-                          {muscleVol.map((item) => {
-                            const displayVol = item.volume;
-                            return (
-                              <View key={item.muscle} style={{ gap: 4 }}>
-                                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                                  <Text style={{ fontSize: 11, fontWeight: '600', color: theme.text }}>{item.muscle}</Text>
-                                  <Text style={{ fontSize: 11, color: theme.textSecondary }}>{formatNumber(displayVol)} {weightUnit === 'lbs' ? 'lbs' : 'kg'} ({item.percentage}%)</Text>
-                                </View>
-                                <View style={{ height: 6, backgroundColor: theme.border, borderRadius: 3, overflow: 'hidden' }}>
-                                  <View style={{ height: 6, backgroundColor: focusCardColor, borderRadius: 3, width: `${item.percentage}%` }} />
-                                </View>
-                              </View>
-                            );
-                          })}
-                        </View>
-                      );
-                    })()}
                   </View>
-                </Pressable>
+                </>
               )}
             </View>
 
@@ -556,6 +695,8 @@ export default function HomeScreen() {
                   <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, marginLeft: 12 }}>Rest Day</Text>
                 </View>
               </View>
+              {userId && <BodyStatsCard userId={userId} />}
+              {userId && <WeeklyVolumeTrend userId={userId} accentColor={focusCardColor} />}
             </View>
 
           ) : !activeWorkoutDay ? (
@@ -568,89 +709,77 @@ export default function HomeScreen() {
                 </View>
               </View>
 
-              {/* Next Workout Preview — matches Today's Workout card style */}
+              {/* Next Workout Preview — compact by default, expandable */}
               {nextWorkout && activeDate >= todayStr && (() => {
                 const nextDayIdx = DAY_NAMES_FULL.findIndex((n) => n.toLowerCase() === nextWorkout.dayName.toLowerCase());
                 const daysUntil = nextDayIdx > activeIdx ? nextDayIdx - activeIdx : nextDayIdx + 7 - activeIdx;
                 const nextDateLabel = daysUntil === 1 ? 'Tomorrow' : DAY_NAMES_FULL[nextDayIdx];
                 return (
-                  <BreathingGradient color={focusCardColor} style={{ borderRadius: 24 }}>
-                    <View style={{ paddingHorizontal: 20, paddingVertical: 24 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-                        <View style={{ flex: 1 }}>
-                          <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
-                            Up Next — {nextDateLabel}
-                          </Text>
-                          <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: '#FFFFFF', lineHeight: 34 }}>
-                            {stripParens(nextWorkout.focus)}
-                          </Text>
-                        </View>
-                        <Ionicons name="arrow-forward" size={24} color="#FFFFFF" />
-                      </View>
-                      {/* Exercise list preview */}
-                      <View style={{ marginTop: 16, gap: 6 }}>
-                        {nextWorkout.exercises.map((ex: any, i: number) => (
-                          <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                            <Text style={{ fontSize: 14, color: '#FFFFFFCC', fontWeight: '400' }}>
-                              {i + 1}. {ex.name}
+                  <Pressable onPress={() => { animateLayout(); setUpNextExpanded((p) => !p); }}>
+                    <BreathingGradient color={focusCardColor} style={{ borderRadius: 24 }}>
+                      <View style={{ paddingHorizontal: 20, paddingVertical: upNextExpanded ? 24 : 18 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                          <View style={{ flex: 1 }}>
+                            <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+                              Up Next — {nextDateLabel}
+                            </Text>
+                            <Text allowFontScaling style={{ fontSize: upNextExpanded ? 28 : 22, fontWeight: '800', color: '#FFFFFF', lineHeight: upNextExpanded ? 34 : 28 }}>
+                              {stripParens(nextWorkout.focus)}
                             </Text>
                           </View>
-                        ))}
+                          <Ionicons name={upNextExpanded ? 'chevron-up' : 'chevron-down'} size={20} color="#FFFFFFCC" />
+                        </View>
+                        {!upNextExpanded && (
+                          <View style={{ marginTop: 8 }}>
+                            <MuscleGroupPills categories={getExerciseCategories(nextWorkout.exercises)} size="small" />
+                          </View>
+                        )}
+                        {upNextExpanded && (
+                          <>
+                            <View style={{ marginTop: 16, gap: 6 }}>
+                              {nextWorkout.exercises.map((ex: any, i: number) => (
+                                <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                                  <Text style={{ fontSize: 14, color: '#FFFFFFCC', fontWeight: '400' }}>
+                                    {i + 1}. {ex.name}
+                                  </Text>
+                                </View>
+                              ))}
+                            </View>
+                            <View style={{ marginTop: 12 }}>
+                              <MuscleGroupPills categories={getExerciseCategories(nextWorkout.exercises)} size="small" />
+                            </View>
+                          </>
+                        )}
                       </View>
-                      <View style={{ marginTop: 12 }}>
-                        <MuscleGroupPills categories={getExerciseCategories(nextWorkout.exercises)} size="small" />
-                      </View>
-                    </View>
-                  </BreathingGradient>
+                    </BreathingGradient>
+                  </Pressable>
                 );
               })()}
 
-              {/* Training Readiness Ring */}
-              <TrainingReadinessRing recentLogs={recentLogs} />
+              {/* Recovery Map */}
+              <RecoveryMapCard recentLogs={recentLogs} />
 
-              {/* Forme Coach Card */}
+              {/* Body Stats */}
+              {userId && <BodyStatsCard userId={userId} />}
+
+              {/* Weekly Volume Trend */}
+              {userId && <WeeklyVolumeTrend userId={userId} accentColor={focusCardColor} />}
+
+              {/* Trophy Case */}
+              {userId && <TrophyCaseCard userId={userId} />}
+
+              {/* Daily Tip */}
               <FormeCoachCard />
-
-              {/* This Week Card */}
-              {(() => {
-                const dayInitials = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
-                const weekData = weekDates.map((date, i) => {
-                  const dk = dateKey(date);
-                  const dayLog = weekLogsRef.current.find((l: any) => l.completed_at?.startsWith(dk));
-                  const rawVolume = dayLog ? computeTotalVolume(dayLog.exercises as LoggedExercise[]) : 0;
-                  const volume = Math.round(rawVolume);
-                  const isFuture = dk > todayStr;
-                  const dayName = DAY_NAMES_FULL[date.getDay()].toLowerCase();
-                  const isPlannedWorkout = planDayNames.has(dayName);
-                  const isRestDay = !isPlannedWorkout && !dayLog;
-                  return {
-                    day: dayInitials[i],
-                    volume,
-                    isWorkout: !!dayLog,
-                    isFuture,
-                    isRestDay,
-                  };
-                });
-                const totalVol = weekData.reduce((s, d) => s + d.volume, 0);
-                const sessionsCount = weekData.filter(d => d.isWorkout).length;
-                return (
-                  <ThisWeekCard
-                    weekData={weekData}
-                    totalVolume={totalVol}
-                    sessionsCount={sessionsCount}
-                    prCount={0}
-                  />
-                );
-              })()}
 
             </View>
 
           ) : (
             <View style={{ gap: 12 }}>
               {/* Focus card - shows resume state when workout is active */}
-              {activeWorkout && !todayCompleted && !selectedDate && getElapsedMs() > 0 ? (() => {
+              {activeWorkout && !todayCompleted && !selectedDate ? (() => {
                 const completedSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.filter((s) => s.completed).length, 0);
                 const totalSets = activeWorkout.loggedExercises.reduce((acc, ex) => acc + ex.sets.length, 0);
+                const hasStarted = getElapsedMs() > 1000;
                 return (
                   <Pressable
                     onPress={() => {
@@ -670,7 +799,7 @@ export default function HomeScreen() {
                       <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
                         <View style={{ flex: 1 }}>
                           <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
-                            Today's Workout · In Progress
+                            {hasStarted ? "Today's Workout \u00B7 In Progress" : "Today's Workout \u00B7 Ready"}
                           </Text>
                           <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: '#FFFFFF', lineHeight: 34 }}>
                             {stripParens(activeWorkout.dayName)}
@@ -743,6 +872,15 @@ export default function HomeScreen() {
                   </BreathingGradient>
                 </Pressable>
               )}
+
+              {/* Body Stats */}
+              {userId && <BodyStatsCard userId={userId} />}
+
+              {/* Weekly Volume Trend */}
+              {userId && <WeeklyVolumeTrend userId={userId} accentColor={focusCardColor} />}
+
+              {/* Daily Tip — compact */}
+              <FormeCoachCard compact />
             </View>
           )}
 
@@ -754,6 +892,7 @@ export default function HomeScreen() {
                   <Ionicons name="checkmark-circle" size={16} color="#22C55E" />
                   <Text style={{ fontSize: 13, color: theme.text, flex: 1 }}>
                     {act.type}{act.duration_minutes ? ` · ${act.duration_minutes} min` : ''}
+                    {act.calories_burned ? ` · ${act.calories_burned} cal` : ''}
                     {act.notes ? ` · ${act.notes}` : ''}
                   </Text>
                 </View>
@@ -763,15 +902,17 @@ export default function HomeScreen() {
 
           {/* Total Cal + Steps — per selected date */}
           <View style={{ flexDirection: 'row', gap: 8 }}>
-            <Pressable
-              onPress={() => router.push('/(tabs)/meals')}
-              style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border }}
-            >
-              <Text allowFontScaling style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary, marginBottom: 2 }}>Total Cal</Text>
-              <Text allowFontScaling numberOfLines={1} adjustsFontSizeToFit style={{ fontSize: 18, fontWeight: '800', color: theme.text }}>
-                {todayCalories != null ? `${todayCalories}` : '-'}
-              </Text>
-            </Pressable>
+            {trackCalories && (
+              <Pressable
+                onPress={() => router.push('/(tabs)/meals')}
+                style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border }}
+              >
+                <Text allowFontScaling style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary, marginBottom: 2 }}>Total Cal</Text>
+                <Text allowFontScaling numberOfLines={1} adjustsFontSizeToFit style={{ fontSize: 18, fontWeight: '800', color: theme.text }}>
+                  {todayCalories != null ? `${todayCalories}` : '-'}
+                </Text>
+              </Pressable>
+            )}
             <View style={{ flex: 1, backgroundColor: theme.surface, borderRadius: 14, padding: 12, borderWidth: 1, borderColor: theme.border }}>
               <Text allowFontScaling style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary, marginBottom: 2 }}>Steps</Text>
               <Text allowFontScaling numberOfLines={1} adjustsFontSizeToFit style={{ fontSize: 18, fontWeight: '800', color: theme.text }}>
@@ -785,42 +926,42 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      {/* FAB backdrop */}
-      {fabOpen && (
+      {/* FAB backdrop + menu — Modal covers entire screen including tab bar */}
+      <Modal visible={fabOpen} transparent animationType="none" statusBarTranslucent>
         <Pressable
           onPress={toggleFab}
-          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', zIndex: 10 }}
+          style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)' }}
         />
-      )}
-
-      {/* FAB menu items — positioned above FAB */}
-      <View pointerEvents={fabOpen ? 'auto' : 'none'} style={{ position: 'absolute', bottom: 80, right: 20, alignItems: 'flex-end', zIndex: 12, gap: 12 }}>
-        {[
-          { label: 'Add Workout', onPress: () => { toggleFab(); router.push('/workout/quick'); } },
-          { label: 'Add Meal', onPress: () => { toggleFab(); setShowMealSheet(true); } },
-          { label: 'Add Activity', onPress: () => { toggleFab(); setShowActivitySheet(true); } },
-        ].map((item, i) => (
-          <Animated.View
-            key={item.label}
-            style={{
-              opacity: fabAnim,
-              transform: [{
-                translateY: fabAnim.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [20 + i * 10, 0],
-                }),
-              }],
-            }}
-          >
-            <Pressable
-              onPress={item.onPress}
-              style={{ backgroundColor: theme.surface, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, borderWidth: 1.5, borderColor: theme.chrome + '60' }}
+        {/* FAB menu items — inside Modal so they appear above the overlay */}
+        <View style={{ position: 'absolute', bottom: 92, right: 20, alignItems: 'flex-end', gap: 12 }}>
+          {[
+            { label: 'Add Walk', onPress: () => { toggleFab(); setActivityType('Walk'); setShowActivitySheet(true); } },
+            { label: 'Add Run', onPress: () => { toggleFab(); setActivityType('Run'); setShowActivitySheet(true); } },
+            { label: 'Add Activity', onPress: () => { toggleFab(); setShowActivitySheet(true); } },
+            { label: 'Add Meal', onPress: () => { toggleFab(); setShowMealSheet(true); } },
+          ].map((item, i) => (
+            <Animated.View
+              key={item.label}
+              style={{
+                opacity: fabAnim,
+                transform: [{
+                  translateY: fabAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [20 + i * 10, 0],
+                  }),
+                }],
+              }}
             >
-              <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>{item.label}</Text>
-            </Pressable>
-          </Animated.View>
-        ))}
-      </View>
+              <Pressable
+                onPress={item.onPress}
+                style={{ backgroundColor: theme.surface, paddingHorizontal: 20, paddingVertical: 12, borderRadius: 24, borderWidth: 1.5, borderColor: theme.chrome + '60' }}
+              >
+                <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>{item.label}</Text>
+              </Pressable>
+            </Animated.View>
+          ))}
+        </View>
+      </Modal>
 
       {/* FAB button */}
       <Pressable
@@ -871,8 +1012,46 @@ export default function HomeScreen() {
           onChangeText={setActivityDuration}
         />
 
+        {/* Calories Burned */}
+        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Calories Burned (optional)</Text>
+        <TextInput
+          style={{ backgroundColor: theme.background, borderWidth: 1, borderColor: theme.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: theme.text, marginBottom: 8, opacity: activityCalNotSure ? 0.4 : 1 }}
+          keyboardType="number-pad"
+          placeholder=""
+          placeholderTextColor={theme.textSecondary}
+          value={activityCalories}
+          onChangeText={setActivityCalories}
+          editable={!activityCalNotSure}
+        />
+        <Pressable
+          onPress={() => setActivityCalNotSure((p) => !p)}
+          style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}
+        >
+          <View style={{
+            width: 20, height: 20, borderRadius: 4, borderWidth: 1.5,
+            borderColor: activityCalNotSure ? theme.text : theme.chrome,
+            backgroundColor: activityCalNotSure ? theme.text : 'transparent',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            {activityCalNotSure && <Ionicons name="checkmark" size={14} color={theme.background} />}
+          </View>
+          <Text style={{ fontSize: 13, color: theme.textSecondary }}>Not sure — estimate for me</Text>
+        </Pressable>
+        {activityCalNotSure && (() => {
+          const est = getCalorieEstimate();
+          return est ? (
+            <Text style={{ fontSize: 13, color: focusCardColor, fontWeight: '600', marginBottom: 8, marginLeft: 28 }}>
+              Estimated: {est.low}–{est.high} cal
+            </Text>
+          ) : (
+            <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 8, marginLeft: 28 }}>
+              {!userWeightKg ? 'Set your weight in profile for estimates' : 'Enter duration above for estimate'}
+            </Text>
+          );
+        })()}
+
         {/* Notes */}
-        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6 }}>Notes (optional)</Text>
+        <Text style={{ fontSize: 12, color: theme.textSecondary, marginBottom: 6, marginTop: 4 }}>Notes (optional)</Text>
         <TextInput
           style={{ backgroundColor: theme.background, borderWidth: 1, borderColor: theme.border, borderRadius: 12, paddingHorizontal: 16, paddingVertical: 12, fontSize: 16, color: theme.text, marginBottom: 16 }}
           placeholder=""

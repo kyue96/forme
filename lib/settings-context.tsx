@@ -6,21 +6,25 @@ import { Colors, ThemeColors } from '../constants/theme';
 
 export type WeightUnit = 'lbs' | 'kg';
 export type ThemeMode = 'light' | 'dark' | 'system';
-export type RestTimerDuration = 30 | 45 | 60 | 90 | 120;
+export type RestTimerDuration = 60 | 75 | 90 | 105 | 120;
 
 const STORAGE_KEYS = {
   theme: '@forme/theme',
   unit: '@forme/unit',
   restTimer: '@forme/restTimer',
   restTimerEnabled: '@forme/restTimerEnabled',
+  restTimerSound: '@forme/restTimerSound',
   warmupEnabled: '@forme/warmupEnabled',
+  trackCalories: '@forme/trackCalories',
 };
 
 interface Settings {
   weightUnit: WeightUnit;
   warmupEnabled: boolean;
   restTimerEnabled: boolean;
+  restTimerSound: boolean;
   restTimerDuration: RestTimerDuration;
+  trackCalories: boolean;
   themeMode: ThemeMode;
   theme: ThemeColors;
 }
@@ -29,7 +33,9 @@ interface SettingsContextType extends Settings {
   setWeightUnit: (unit: WeightUnit) => void;
   setWarmupEnabled: (enabled: boolean) => void;
   setRestTimerEnabled: (enabled: boolean) => void;
+  setRestTimerSound: (enabled: boolean) => void;
   setRestTimerDuration: (secs: RestTimerDuration) => void;
+  setTrackCalories: (enabled: boolean) => void;
   setThemeMode: (mode: ThemeMode) => void;
   loading: boolean;
 }
@@ -40,7 +46,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const [weightUnit, setWeightUnitState] = useState<WeightUnit>('lbs');
   const [warmupEnabled, setWarmupEnabledState] = useState(true);
   const [restTimerEnabled, setRestTimerEnabledState] = useState(true);
+  const [restTimerSound, setRestTimerSoundState] = useState(true);
   const [restTimerDuration, setRestTimerDurationState] = useState<RestTimerDuration>(60);
+  const [trackCalories, setTrackCaloriesState] = useState(true);
   const [themeMode, setThemeModeState] = useState<ThemeMode>('system');
   const systemColorScheme = useColorScheme();
   const [loading, setLoading] = useState(true);
@@ -50,12 +58,14 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   const loadSettings = async () => {
     try {
       // AsyncStorage first (fast, works offline)
-      const [storedTheme, storedUnit, storedTimer, storedTimerEnabled, storedWarmup] = await Promise.all([
+      const [storedTheme, storedUnit, storedTimer, storedTimerEnabled, storedTimerSound, storedWarmup, storedTrackCal] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEYS.theme),
         AsyncStorage.getItem(STORAGE_KEYS.unit),
         AsyncStorage.getItem(STORAGE_KEYS.restTimer),
         AsyncStorage.getItem(STORAGE_KEYS.restTimerEnabled),
+        AsyncStorage.getItem(STORAGE_KEYS.restTimerSound),
         AsyncStorage.getItem(STORAGE_KEYS.warmupEnabled),
+        AsyncStorage.getItem(STORAGE_KEYS.trackCalories),
       ]);
 
       if (storedTheme === 'light' || storedTheme === 'dark' || storedTheme === 'system') setThemeModeState(storedTheme);
@@ -65,7 +75,9 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
         if ([30, 45, 60, 90, 120].includes(d)) setRestTimerDurationState(d);
       }
       if (storedTimerEnabled !== null) setRestTimerEnabledState(storedTimerEnabled !== 'false');
+      if (storedTimerSound !== null) setRestTimerSoundState(storedTimerSound !== 'false');
       if (storedWarmup !== null) setWarmupEnabledState(storedWarmup !== 'false');
+      if (storedTrackCal !== null) setTrackCaloriesState(storedTrackCal !== 'false');
 
       // Then sync from Supabase profile (may override)
       const { data: { user } } = await supabase.auth.getUser();
@@ -113,9 +125,19 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
     saveToProfile({ rest_timer_enabled: enabled });
   };
 
+  const setRestTimerSound = (enabled: boolean) => {
+    setRestTimerSoundState(enabled);
+    AsyncStorage.setItem(STORAGE_KEYS.restTimerSound, String(enabled));
+  };
+
   const setRestTimerDuration = (secs: RestTimerDuration) => {
     setRestTimerDurationState(secs);
     AsyncStorage.setItem(STORAGE_KEYS.restTimer, String(secs));
+  };
+
+  const setTrackCalories = (enabled: boolean) => {
+    setTrackCaloriesState(enabled);
+    AsyncStorage.setItem(STORAGE_KEYS.trackCalories, String(enabled));
   };
 
   const setThemeMode = (mode: ThemeMode) => {
@@ -130,8 +152,8 @@ export function SettingsProvider({ children }: { children: React.ReactNode }) {
   return (
     <SettingsContext.Provider
       value={{
-        weightUnit, warmupEnabled, restTimerEnabled, restTimerDuration, themeMode, theme, loading,
-        setWeightUnit, setWarmupEnabled, setRestTimerEnabled, setRestTimerDuration, setThemeMode,
+        weightUnit, warmupEnabled, restTimerEnabled, restTimerSound, restTimerDuration, trackCalories, themeMode, theme, loading,
+        setWeightUnit, setWarmupEnabled, setRestTimerEnabled, setRestTimerSound, setRestTimerDuration, setTrackCalories, setThemeMode,
       }}
     >
       {children}

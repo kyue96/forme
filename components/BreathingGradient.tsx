@@ -17,7 +17,7 @@ function lighten(hex: string, amount: number): string {
   return '#' + ((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1);
 }
 
-export function BreathingGradient({ color, style, children, duration = 2500 }: BreathingGradientProps) {
+export function BreathingGradient({ color, style, children, duration = 1500 }: BreathingGradientProps) {
   const breathAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {

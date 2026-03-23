@@ -121,25 +121,15 @@ export function StreakRing({ streak, maxStreak = 0, size = 'large', color }: Str
       {/* Text content */}
       <View style={{ flex: 1 }}>
         <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>
-          {streak}-day streak
+          {streak === 0 ? 'Start your streak' : `${streak}-day streak`}
         </Text>
         <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
-          {remaining > 0 ? `${remaining} more day${remaining === 1 ? '' : 's'} to hit ${goal}` : `${goal}-day goal reached!`}
+          {streak === 0
+            ? 'Your next workout kicks it off!'
+            : remaining > 0
+              ? `Best: ${maxStreak > 0 ? maxStreak : streak} days`
+              : `${goal}-day goal reached!`}
         </Text>
-        {(isNearBest || isNewBest) && (
-          <View style={{
-            marginTop: 8,
-            backgroundColor: accentColor + '20',
-            paddingHorizontal: 10,
-            paddingVertical: 4,
-            borderRadius: 8,
-            alignSelf: 'flex-start',
-          }}>
-            <Text style={{ fontSize: 11, fontWeight: '600', color: accentColor }}>
-              {isNewBest ? 'New personal best!' : 'Personal best incoming'}
-            </Text>
-          </View>
-        )}
       </View>
     </View>
   );

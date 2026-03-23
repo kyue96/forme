@@ -18,6 +18,7 @@ interface Props {
 }
 
 export const MagazineCard = React.forwardRef<View, Props>(({ data }, ref) => {
+  const accent = data.accentColor || null;
   const unitWord = data.unitLabel === 'lbs' ? 'POUNDS' : 'KILOGRAMS';
   const bestSetStr = data.bestSet ? `${formatNumber(data.bestSet.weight)} \u00D7 ${data.bestSet.reps}` : null;
   const densityStr = data.density > 0 ? `${formatNumber(data.density)}` : null;
@@ -48,12 +49,12 @@ export const MagazineCard = React.forwardRef<View, Props>(({ data }, ref) => {
       {/* Header */}
       <View>
         <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-          <Text style={{ ...FONT.brand, color: '#000000' }}>FORME</Text>
+          <Text style={{ ...FONT.brand, color: accent || '#000000' }}>FORME</Text>
           <Text style={{ fontSize: 12, fontWeight: '500', color: '#999999', letterSpacing: 1 }}>
             {data.date.toUpperCase()}
           </Text>
         </View>
-        <View style={{ height: 2, backgroundColor: '#000000', marginTop: 14 }} />
+        <View style={{ height: 2, backgroundColor: accent || '#000000', marginTop: 14 }} />
       </View>
 
       {/* Hero volume */}
@@ -68,7 +69,7 @@ export const MagazineCard = React.forwardRef<View, Props>(({ data }, ref) => {
         >
           {formatNumber(Math.round(data.totalVolume))}
         </Text>
-        <Text style={{ ...FONT.unit, color: '#000000', marginTop: 2 }}>
+        <Text style={{ ...FONT.unit, color: accent || '#000000', marginTop: 2 }}>
           {unitWord}
         </Text>
       </View>

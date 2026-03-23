@@ -133,14 +133,14 @@ export function CommentSheet({ postId, visible, onClose }: CommentSheetProps) {
                 renderItem={({ item }) => (
                   <View style={{ flexDirection: 'row', gap: 12, marginBottom: 16 }}>
                     <AvatarInitial
-                      name={item.profiles?.display_name ?? '?'}
+                      name={item.profiles?.display_name ? item.profiles.display_name.charAt(0).toUpperCase() : 'A'}
                       avatarUrl={item.profiles?.avatar_url}
                       size={32}
                     />
                     <View style={{ flex: 1 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8 }}>
                         <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>
-                          {item.profiles?.display_name ?? 'User'}
+                          {item.profiles?.display_name || 'Athlete'}
                         </Text>
                         <Text style={{ fontSize: 11, color: theme.textSecondary }}>
                           {timeAgo(item.created_at)}

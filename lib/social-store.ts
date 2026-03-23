@@ -29,6 +29,7 @@ interface SocialState {
   addComment: (postId: string, body: string) => Promise<Comment | null>;
   deleteComment: (commentId: string, postId: string) => Promise<void>;
   getGymBuddyCount: (placeId: string) => Promise<number>;
+  updatePost: (postId: string, caption: string) => Promise<boolean>;
   saveWorkoutFromPost: (cardData: CardData) => Promise<boolean>;
 }
 
@@ -313,6 +314,24 @@ export const useSocialStore = create<SocialState>((set, get) => ({
       return buddyCount ?? 0;
     } catch {
       return 0;
+    }
+  },
+
+  updatePost: async (postId, caption) => {
+    try {
+      const { error } = await supabase
+        .from('posts')
+        .update({ caption })
+        .eq('id', postId);
+      if (error) throw error;
+      set({
+        feedPosts: get().feedPosts.map((p) =>
+          p.id === postId ? { ...p, caption } : p
+        ),
+      });
+      return true;
+    } catch {
+      return false;
     }
   },
 

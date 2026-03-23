@@ -90,6 +90,11 @@ export default function SessionViewScreen() {
 
   const [activeExercise, setActiveExercise] = useState<number | 'all' | null>(0);
 
+  // 24-hour edit window: only allow editing within 24 hours of completion
+  const isEditable = params.completedAt
+    ? (Date.now() - new Date(params.completedAt).getTime()) < 24 * 60 * 60 * 1000
+    : false;
+
   // Editable exercises (Step 13)
   const [editableExercises, setEditableExercises] = useState<LoggedExercise[]>(exercises);
   const [editingExIdx, setEditingExIdx] = useState<number | null>(null);
@@ -182,6 +187,7 @@ export default function SessionViewScreen() {
             <Ionicons name="chevron-back" size={24} color={theme.text} />
           </Pressable>
           <View style={{ flex: 1 }}>
+            <Text style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1, marginBottom: 2 }}>Workout Analysis</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
               {editingName ? (
                 <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8, height: 24 }}>
@@ -211,14 +217,17 @@ export default function SessionViewScreen() {
                 </View>
               ) : (
                 <Pressable
-                  onPress={() => params.logId ? setEditingName(true) : undefined}
+                  onPress={() => (params.logId && isEditable) ? setEditingName(true) : undefined}
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}
                 >
                   <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }} numberOfLines={1}>
                     {workoutName}
                   </Text>
-                  {params.logId && (
+                  {params.logId && isEditable && (
                     <Ionicons name="pencil" size={14} color={theme.chrome} />
+                  )}
+                  {params.logId && !isEditable && (
+                    <Ionicons name="lock-closed" size={12} color={theme.textSecondary} style={{ opacity: 0.5 }} />
                   )}
                 </Pressable>
               )}
@@ -239,6 +248,35 @@ export default function SessionViewScreen() {
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
       >
+        {/* Workout Analysis button — at top */}
+        <Pressable
+          onPress={() => router.push({
+            pathname: '/workout/post-workout',
+            params: {
+              exercises: params.exercises ?? '[]',
+              dayName: params.dayName ?? '',
+              focus: params.focus ?? '',
+              durationMinutes: params.durationMinutes ?? '0',
+              startedAt: params.completedAt ?? new Date().toISOString(),
+            },
+          })}
+          style={{
+            backgroundColor: avatarColor ?? '#F59E0B',
+            borderRadius: 12,
+            paddingVertical: 14,
+            alignItems: 'center',
+            flexDirection: 'row',
+            justifyContent: 'center',
+            gap: 8,
+            marginBottom: 16,
+          }}
+        >
+          <Ionicons name="stats-chart" size={18} color="#FFFFFF" />
+          <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.5 }}>
+            WORKOUT ANALYSIS
+          </Text>
+        </Pressable>
+
         {/* Exercises */}
         {editableExercises.map((logged, exIdx) => {
           const isExpanded = activeExercise === 'all' || activeExercise === exIdx;
@@ -287,6 +325,14 @@ export default function SessionViewScreen() {
                   <Text style={{ fontSize: 16, fontWeight: '700', color: theme.text }}>
                     {logged.name}
                   </Text>
+                  {logged.notes ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                      <Ionicons name="document-text-outline" size={12} color="#F59E0B" />
+                      <Text style={{ fontSize: 12, color: theme.textSecondary, flex: 1 }} numberOfLines={1}>
+                        {logged.notes}
+                      </Text>
+                    </View>
+                  ) : null}
                   <Text style={{ fontSize: 13, color: theme.textSecondary, marginTop: 2 }}>
                     {logged.sets.length} sets
                   </Text>
@@ -361,7 +407,7 @@ export default function SessionViewScreen() {
                                 </View>
                               ) : (
                                 <Pressable
-                                  onPress={() => params.logId ? startEditing(exIdx) : undefined}
+                                  onPress={() => (params.logId && isEditable) ? startEditing(exIdx) : undefined}
                                   style={{
                                     backgroundColor: theme.surface,
                                     borderRadius: 8,
@@ -409,7 +455,7 @@ export default function SessionViewScreen() {
                             />
                           ) : (
                             <Pressable
-                              onPress={() => params.logId ? startEditing(exIdx) : undefined}
+                              onPress={() => (params.logId && isEditable) ? startEditing(exIdx) : undefined}
                               style={{
                                 backgroundColor: theme.surface,
                                 borderRadius: 8,

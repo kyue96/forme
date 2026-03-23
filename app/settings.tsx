@@ -19,7 +19,9 @@ export default function SettingsScreen() {
     weightUnit, setWeightUnit,
     warmupEnabled, setWarmupEnabled,
     restTimerEnabled, setRestTimerEnabled,
+    restTimerSound, setRestTimerSound,
     restTimerDuration, setRestTimerDuration,
+    trackCalories, setTrackCalories,
   } = useSettings();
 
   const { gymName, updateGym } = useUserStore();
@@ -31,7 +33,7 @@ export default function SettingsScreen() {
   const [gymResults, setGymResults] = useState<GymResult[]>([]);
   const [gymSearching, setGymSearching] = useState(false);
 
-  const REST_OPTIONS: RestTimerDuration[] = [30, 45, 60, 90, 120];
+  const REST_OPTIONS: RestTimerDuration[] = [60, 75, 90, 105, 120];
 
   useEffect(() => {
     loadEmail();
@@ -133,6 +135,22 @@ export default function SettingsScreen() {
             }
           />
           <RowItem
+            label="Track calories"
+            right={
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                {([true, false] as const).map(v => (
+                  <Pressable
+                    key={String(v)}
+                    onPress={() => setTrackCalories(v)}
+                    style={{ paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: trackCalories === v ? theme.text : theme.chromeLight }}
+                  >
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: trackCalories === v ? theme.background : theme.textSecondary }}>{v ? 'On' : 'Off'}</Text>
+                  </Pressable>
+                ))}
+              </View>
+            }
+          />
+          <RowItem
             label="Rest timer"
             right={
               <View style={{ flexDirection: 'row', gap: 8 }}>
@@ -163,6 +181,24 @@ export default function SettingsScreen() {
                 ))}
               </View>
             </View>
+          )}
+          {restTimerEnabled && (
+            <RowItem
+              label="Timer sound"
+              right={
+                <View style={{ flexDirection: 'row', gap: 8 }}>
+                  {([true, false] as const).map(v => (
+                    <Pressable
+                      key={String(v)}
+                      onPress={() => setRestTimerSound(v)}
+                      style={{ paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: restTimerSound === v ? theme.text : theme.chromeLight }}
+                    >
+                      <Text style={{ fontSize: 13, fontWeight: '600', color: restTimerSound === v ? theme.background : theme.textSecondary }}>{v ? 'On' : 'Off'}</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              }
+            />
           )}
           <RowItem
             label="Appearance"

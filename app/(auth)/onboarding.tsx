@@ -54,12 +54,12 @@ export default function OnboardingScreen() {
     if (currentIndex < SCREENS.length - 1) {
       flatListRef.current?.scrollToIndex({ index: currentIndex + 1, animated: true });
     } else {
-      router.replace('/quiz/1');
+      router.replace('/permissions');
     }
   };
 
   const handleSkip = () => {
-    router.replace('/quiz/1');
+    router.replace('/permissions');
   };
 
   return (

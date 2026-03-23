@@ -4,6 +4,7 @@ import Svg, { Circle } from 'react-native-svg';
 import { useSettings } from '@/lib/settings-context';
 import { getExerciseCategory } from '@/lib/exercise-utils';
 import type { LoggedExercise } from '@/lib/types';
+import { isUnilateralExercise } from '@/lib/workout-metrics';
 
 interface RecentLog {
   exercises: LoggedExercise[];
@@ -14,8 +15,8 @@ interface TrainingReadinessRingProps {
   recentLogs: RecentLog[];
 }
 
-const RING_SIZE = 100;
-const STROKE_WIDTH = 8;
+const RING_SIZE = 52;
+const STROKE_WIDTH = 5;
 const RADIUS = (RING_SIZE - STROKE_WIDTH) / 2;
 const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
 const SCALE_FACTOR = 5000;
@@ -43,9 +44,10 @@ export default function TrainingReadinessRing({ recentLogs }: TrainingReadinessR
         if (!category) continue;
 
         let volume = 0;
+        const mul = isUnilateralExercise(exercise.name) ? 2 : 1;
         for (const set of exercise.sets) {
           if (set.completed && set.weight != null) {
-            volume += set.weight * set.reps;
+            volume += set.weight * set.reps * mul;
           }
         }
 
@@ -90,16 +92,16 @@ export default function TrainingReadinessRing({ recentLogs }: TrainingReadinessR
 
   const subtitle = useMemo(() => {
     if (recovering.length === 0 && ready.length === 0) return 'No recent sessions logged';
-    if (recovering.length === 0) return `${ready.join(', ')} ready to train`;
+    if (recovering.length === 0) return `${ready.join(', ')} ready`;
     if (ready.length === 0) return `${recovering.join(', ')} recovering`;
-    return `${recovering.join(', ')} recovering \u2022 ${ready.join(', ')} ready`;
+    return `${recovering.join(', ')} recovering`;
   }, [recovering, ready]);
 
   return (
     <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-      <View style={styles.row}>
+      {/* Ring */}
+      <View style={styles.ringContainer}>
         <Svg width={RING_SIZE} height={RING_SIZE}>
-          {/* Track */}
           <Circle
             cx={RING_SIZE / 2}
             cy={RING_SIZE / 2}
@@ -108,7 +110,6 @@ export default function TrainingReadinessRing({ recentLogs }: TrainingReadinessR
             strokeWidth={STROKE_WIDTH}
             fill="none"
           />
-          {/* Filled arc */}
           <Circle
             cx={RING_SIZE / 2}
             cy={RING_SIZE / 2}
@@ -123,29 +124,17 @@ export default function TrainingReadinessRing({ recentLogs }: TrainingReadinessR
             origin={`${RING_SIZE / 2}, ${RING_SIZE / 2}`}
           />
         </Svg>
-
-        {/* Score label centered over ring */}
         <View style={styles.scoreOverlay} pointerEvents="none">
           <Text style={[styles.scoreNumber, { color: theme.text }]}>{score}</Text>
-          <Text style={[styles.scorePercent, { color: theme.textSecondary }]}>%</Text>
         </View>
       </View>
 
-      <Text style={[styles.title, { color: theme.text }]}>Training readiness</Text>
-      <Text style={[styles.subtitle, { color: theme.textSecondary }]} numberOfLines={1}>
-        {subtitle}
-      </Text>
-
-      {/* Legend */}
-      <View style={styles.legend}>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDotFilled, { backgroundColor: theme.text }]} />
-          <Text style={[styles.legendLabel, { color: theme.textSecondary }]}>Recovering</Text>
-        </View>
-        <View style={styles.legendItem}>
-          <View style={[styles.legendDotOutline, { borderColor: theme.text }]} />
-          <Text style={[styles.legendLabel, { color: theme.textSecondary }]}>Ready</Text>
-        </View>
+      {/* Text */}
+      <View style={styles.textContainer}>
+        <Text style={[styles.title, { color: theme.text }]} numberOfLines={1}>Training Readiness</Text>
+        <Text style={[styles.subtitle, { color: theme.textSecondary }]} numberOfLines={1}>
+          {subtitle}
+        </Text>
       </View>
     </View>
   );
@@ -154,68 +143,40 @@ export default function TrainingReadinessRing({ recentLogs }: TrainingReadinessR
 const styles = StyleSheet.create({
   card: {
     borderRadius: 16,
-    padding: 16,
+    padding: 14,
     borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
   },
-  row: {
+  ringContainer: {
+    width: RING_SIZE,
+    height: RING_SIZE,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
   },
   scoreOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
-    height: RING_SIZE,
+    bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
-    flexDirection: 'row',
   },
   scoreNumber: {
-    fontSize: 28,
+    fontSize: 16,
     fontWeight: '700',
   },
-  scorePercent: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginTop: 4,
-    marginLeft: 1,
+  textContainer: {
+    flex: 1,
   },
   title: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   subtitle: {
-    fontSize: 13,
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  legend: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 16,
-  },
-  legendItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  legendDotFilled: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  legendDotOutline: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    borderWidth: 1.5,
-  },
-  legendLabel: {
     fontSize: 12,
-    fontWeight: '500',
   },
 });

@@ -108,8 +108,23 @@ export default function CreatePostScreen() {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
-      allowsEditing: true,
-      quality: 0.8,
+      allowsEditing: false,
+      quality: 0.4,
+    });
+    if (!result.canceled) {
+      setImageUri(result.assets[0].uri);
+    }
+  };
+
+  const takePhoto = async () => {
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow camera access to take a photo.');
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      allowsEditing: false,
+      quality: 0.4,
     });
     if (!result.canceled) {
       setImageUri(result.assets[0].uri);
@@ -131,13 +146,21 @@ export default function CreatePostScreen() {
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
           const ext = (imageUri.split('.').pop() ?? 'jpg').toLowerCase();
-          const path = `${user.id}/${Date.now()}.${ext}`;
+          const mimeType = ext === 'png' ? 'image/png' : ext === 'webp' ? 'image/webp' : 'image/jpeg';
+          const fileName = `${Date.now()}.${ext}`;
+          const path = `${user.id}/${fileName}`;
+
+          // React Native: fetch local URI and convert to ArrayBuffer
           const response = await fetch(imageUri);
-          const blob = await response.blob();
+          const arrayBuffer = await response.arrayBuffer();
+
           const { error: uploadErr } = await supabase.storage
             .from('post-images')
-            .upload(path, blob, { contentType: `image/${ext}` });
-          if (!uploadErr) {
+            .upload(path, arrayBuffer, { contentType: mimeType, upsert: true });
+          if (uploadErr) {
+            console.warn('Image upload failed:', uploadErr.message);
+            Alert.alert('Image upload failed', uploadErr.message);
+          } else {
             const { data: { publicUrl } } = supabase.storage.from('post-images').getPublicUrl(path);
             imageUrl = publicUrl;
           }
@@ -220,27 +243,30 @@ export default function CreatePostScreen() {
       </View>
 
       {/* Selected card preview */}
-      {cardData && (
-        <View style={{
-          marginHorizontal: 16, marginBottom: 12,
-          backgroundColor: CARD_THEMES[cardData.themeIdx % CARD_THEMES.length].bg,
-          borderRadius: 12, padding: 16,
-        }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <View>
-              <Text style={{ fontSize: 14, fontWeight: '700', color: CARD_THEMES[cardData.themeIdx % CARD_THEMES.length].text }}>
-                {cardData.focus}
-              </Text>
-              <Text style={{ fontSize: 11, color: CARD_THEMES[cardData.themeIdx % CARD_THEMES.length].sub }}>
-                {cardData.sets} sets · {cardData.reps} reps · {formatDuration(cardData.durationMinutes)}
-              </Text>
+      {cardData && (() => {
+        const cardTheme = CARD_THEMES[(cardData.themeIdx ?? 0) % CARD_THEMES.length] ?? CARD_THEMES[0];
+        return (
+          <View style={{
+            marginHorizontal: 16, marginBottom: 12,
+            backgroundColor: cardTheme.bg,
+            borderRadius: 12, padding: 16,
+          }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: cardTheme.text }}>
+                  {cardData.focus}
+                </Text>
+                <Text style={{ fontSize: 11, color: cardTheme.sub }}>
+                  {cardData.sets} sets · {cardData.reps} reps · {formatDuration(cardData.durationMinutes)}
+                </Text>
+              </View>
+              <Pressable onPress={() => { setCardData(null); setSelectedLog(null); setWorkoutLogId(null); }}>
+                <Ionicons name="close-circle" size={20} color={cardTheme.sub} />
+              </Pressable>
             </View>
-            <Pressable onPress={() => { setCardData(null); setSelectedLog(null); setWorkoutLogId(null); }}>
-              <Ionicons name="close-circle" size={20} color={CARD_THEMES[cardData.themeIdx % CARD_THEMES.length].sub} />
-            </Pressable>
           </View>
-        </View>
-      )}
+        );
+      })()}
 
       {/* Selected image preview */}
       {imageUri && (
@@ -271,7 +297,19 @@ export default function CreatePostScreen() {
           }}
         >
           <Ionicons name="image-outline" size={18} color={theme.chrome} />
-          <Text style={{ fontSize: 13, color: theme.textSecondary }}>Photo</Text>
+          <Text style={{ fontSize: 13, color: theme.textSecondary }}>Gallery</Text>
+        </Pressable>
+        <Pressable
+          onPress={takePhoto}
+          style={{
+            flexDirection: 'row', alignItems: 'center', gap: 6,
+            paddingHorizontal: 12, paddingVertical: 8,
+            backgroundColor: theme.surface, borderRadius: 12,
+            borderWidth: 1, borderColor: theme.border,
+          }}
+        >
+          <Ionicons name="camera-outline" size={18} color={theme.chrome} />
+          <Text style={{ fontSize: 13, color: theme.textSecondary }}>Camera</Text>
         </Pressable>
       </View>
 
@@ -297,28 +335,53 @@ export default function CreatePostScreen() {
               keyExtractor={(item) => item.id}
               style={{ flex: 1 }}
               contentContainerStyle={{ paddingHorizontal: 16 }}
-              renderItem={({ item }) => (
-                <Pressable
-                  onPress={() => selectLog(item)}
-                  style={{
-                    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-                    backgroundColor: theme.surface, borderRadius: 12,
-                    padding: 14, marginBottom: 8,
-                    borderWidth: 1, borderColor: theme.border,
-                  }}
-                >
-                  <View>
-                    <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>
-                      {item.day_name}
-                    </Text>
-                    <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
-                      {new Date(item.completed_at).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-                      {item.duration_minutes ? ` · ${item.duration_minutes}m` : ''}
-                    </Text>
-                  </View>
-                  <Ionicons name="add-circle-outline" size={22} color={theme.chrome} />
-                </Pressable>
-              )}
+              renderItem={({ item, index }) => {
+                const isFirst = index === 0;
+                const logDate = new Date(item.completed_at);
+                const now = new Date();
+                const isToday = logDate.getFullYear() === now.getFullYear()
+                  && logDate.getMonth() === now.getMonth()
+                  && logDate.getDate() === now.getDate();
+
+                return (
+                  <Pressable
+                    onPress={() => selectLog(item)}
+                    style={{
+                      flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+                      backgroundColor: theme.surface, borderRadius: 12,
+                      padding: 14, marginBottom: 8,
+                      borderWidth: isFirst ? 1.5 : 1,
+                      borderColor: isFirst ? '#F59E0B' : theme.border,
+                      opacity: isFirst ? 1 : 0.5,
+                    }}
+                  >
+                    <View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>
+                          {item.day_name}
+                        </Text>
+                        {isFirst && isToday && (
+                          <View style={{
+                            backgroundColor: '#F59E0B',
+                            paddingHorizontal: 8,
+                            paddingVertical: 2,
+                            borderRadius: 8,
+                          }}>
+                            <Text style={{ fontSize: 9, fontWeight: '800', color: '#000', letterSpacing: 0.5 }}>
+                              TODAY'S WORKOUT
+                            </Text>
+                          </View>
+                        )}
+                      </View>
+                      <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 2 }}>
+                        {logDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+                        {item.duration_minutes ? ` · ${item.duration_minutes}m` : ''}
+                      </Text>
+                    </View>
+                    <Ionicons name="add-circle-outline" size={22} color={isFirst ? '#F59E0B' : theme.chrome} />
+                  </Pressable>
+                );
+              }}
             />
           )}
         </View>

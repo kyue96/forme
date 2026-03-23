@@ -25,6 +25,7 @@ import { supabase } from '@/lib/supabase';
 import { usePlan } from '@/lib/plan-context';
 import { useSettings } from '@/lib/settings-context';
 import { useUserStore } from '@/lib/user-store';
+import { isUnilateralExercise } from '@/lib/workout-metrics';
 import { AvatarInitial } from '@/components/AvatarInitial';
 import ColorWheel from '@/components/ColorWheel';
 
@@ -35,7 +36,7 @@ const ANIMATION_DURATION = 350;
 export function ProfileDrawer() {
   const router = useRouter();
   const { setPlan } = usePlan();
-  const { theme, weightUnit } = useSettings();
+  const { theme, weightUnit, themeMode, setThemeMode } = useSettings();
   const {
     displayName, email, avatarUrl, avatarColor, followerCount, followingCount,
     drawerVisible, closeDrawer, updateDisplayName, updateAvatar, updateAvatarColor,
@@ -126,9 +127,10 @@ export function ProfileDrawer() {
         for (const log of logs) {
           if (!log.exercises) continue;
           for (const ex of log.exercises) {
+            const mul = isUnilateralExercise(ex.name) ? 2 : 1;
             for (const set of ex.sets ?? []) {
               if (set.completed && set.weight != null) {
-                vol += set.weight * (set.reps ?? 0);
+                vol += set.weight * (set.reps ?? 0) * mul;
               }
             }
           }
@@ -213,10 +215,17 @@ export function ProfileDrawer() {
   };
 
   const handleResetPlan = () => {
-    Alert.alert('Reset plan', 'This will rebuild your workout plan from scratch.', [
+    Alert.alert('Rebuild Plan', 'Update your workout preferences and generate a new plan.', [
       { text: 'Cancel', style: 'cancel' },
       {
-        text: 'Reset',
+        text: 'Rebuild',
+        onPress: () => {
+          closeDrawer();
+          router.push('/quiz/1?mode=rebuild');
+        },
+      },
+      {
+        text: 'Start fresh',
         style: 'destructive',
         onPress: () => {
           closeDrawer();
@@ -430,9 +439,26 @@ export function ProfileDrawer() {
 
           {/* General section */}
           <View style={{ paddingHorizontal: 24, paddingTop: 20 }}>
-            <Text style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 12 }}>
-              General
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+              <Text style={{ fontSize: 11, fontWeight: '600', color: theme.textSecondary, textTransform: 'uppercase', letterSpacing: 1.5 }}>
+                General
+              </Text>
+              <Pressable
+                onPress={() => {
+                  // Detect current resolved theme from bg color
+                  const isCurrentlyLight = theme.background === '#FFFFFF';
+                  setThemeMode(isCurrentlyLight ? 'dark' : 'light');
+                }}
+                hitSlop={12}
+                style={{ padding: 4 }}
+              >
+                <Ionicons
+                  name={theme.background === '#FFFFFF' ? 'sunny-outline' : 'moon-outline'}
+                  size={18}
+                  color={theme.chrome}
+                />
+              </Pressable>
+            </View>
             <DrawerRow icon="settings-outline" label="Settings" theme={theme} onPress={() => { closeDrawer(); router.push('/settings'); }} />
             <DrawerRow icon="refresh-outline" label="Rebuild my plan" theme={theme} onPress={handleResetPlan} />
           </View>
