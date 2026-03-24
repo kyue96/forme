@@ -248,34 +248,64 @@ export default function SessionViewScreen() {
         contentContainerStyle={{ paddingHorizontal: 20, paddingTop: 16, paddingBottom: 40 }}
         showsVerticalScrollIndicator={false}
       >
-        {/* Workout Analysis button — at top */}
-        <Pressable
-          onPress={() => router.push({
-            pathname: '/workout/post-workout',
-            params: {
-              exercises: params.exercises ?? '[]',
-              dayName: params.dayName ?? '',
-              focus: params.focus ?? '',
-              durationMinutes: params.durationMinutes ?? '0',
-              startedAt: params.completedAt ?? new Date().toISOString(),
-            },
-          })}
-          style={{
-            backgroundColor: avatarColor ?? '#F59E0B',
-            borderRadius: 12,
-            paddingVertical: 14,
-            alignItems: 'center',
-            flexDirection: 'row',
-            justifyContent: 'center',
-            gap: 8,
-            marginBottom: 16,
-          }}
-        >
-          <Ionicons name="stats-chart" size={18} color="#FFFFFF" />
-          <Text style={{ fontSize: 14, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.5 }}>
-            WORKOUT ANALYSIS
-          </Text>
-        </Pressable>
+        {/* Action buttons row */}
+        <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+          <Pressable
+            onPress={() => router.push({
+              pathname: '/workout/post-workout',
+              params: {
+                exercises: params.exercises ?? '[]',
+                dayName: params.dayName ?? '',
+                focus: params.focus ?? '',
+                durationMinutes: params.durationMinutes ?? '0',
+                startedAt: params.completedAt ?? new Date().toISOString(),
+              },
+            })}
+            style={{
+              flex: 1,
+              backgroundColor: avatarColor ?? '#F59E0B',
+              borderRadius: 12,
+              paddingVertical: 14,
+              alignItems: 'center',
+              flexDirection: 'row',
+              justifyContent: 'center',
+              gap: 6,
+            }}
+          >
+            <Ionicons name="stats-chart" size={16} color="#FFFFFF" />
+            <Text style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF', letterSpacing: 0.5 }}>
+              ANALYSIS
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={() => router.push({
+              pathname: '/workout/card-picker',
+              params: {
+                exercises: params.exercises ?? '[]',
+                dayName: params.dayName ?? '',
+                focus: params.focus ?? '',
+                durationMinutes: params.durationMinutes ?? '0',
+              },
+            })}
+            style={{
+              flex: 1,
+              backgroundColor: theme.surface,
+              borderRadius: 12,
+              paddingVertical: 14,
+              alignItems: 'center',
+              flexDirection: 'row',
+              justifyContent: 'center',
+              gap: 6,
+              borderWidth: 1,
+              borderColor: theme.border,
+            }}
+          >
+            <Ionicons name="image-outline" size={16} color={theme.text} />
+            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text, letterSpacing: 0.5 }}>
+              FORME CARD
+            </Text>
+          </Pressable>
+        </View>
 
         {/* Exercises */}
         {editableExercises.map((logged, exIdx) => {

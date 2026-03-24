@@ -26,6 +26,7 @@ import { animateLayout, formatNumber } from '@/lib/utils';
 import { PersonalRecordsSection } from '@/components/PersonalRecordsSection';
 import { dateKey, getWeekDates } from '@/components/WeeklyCalendar';
 import { getExerciseCategory, getExerciseCategories } from '@/lib/exercise-utils';
+import { StrengthRadar, groupForRadar } from '@/components/StrengthRadar';
 
 interface WorkoutLog {
   id: string;
@@ -441,6 +442,7 @@ export default function StatsScreen() {
 
   const [activeTab, setActiveTab] = useState<'stats' | 'badges'>('stats');
   const [chartScrollLock, setChartScrollLock] = useState(false);
+  const [strengthExpanded, setStrengthExpanded] = useState(false);
   const storeUserId = useUserStore((s) => s.userId);
   const userCreatedAt = useUserStore((s) => s.createdAt);
   const [userId, setUserId] = useState<string | null>(storeUserId);
@@ -869,20 +871,23 @@ export default function StatsScreen() {
               {/* ─── 3-Week Daily Volume ─── */}
               {volumeChartData.length > 0 && (
                 <StatCard title="Volume Trend" theme={theme}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, marginTop: -4 }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, marginTop: -4 }}>
                     <Text style={{ fontSize: 10, color: theme.textSecondary }}>
-                      total {unitLabel} lifted · 3 weeks
+                      daily volume · 3 weeks
                     </Text>
                     <View style={{ alignItems: 'flex-end' }}>
                       <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text, fontVariant: ['tabular-nums'] }}>
-                        {formatNumber(weekVolume)}
+                        {formatNumber(weekVolume)} <Text style={{ fontSize: 11, fontWeight: '500', color: theme.textSecondary }}>{unitLabel}</Text>
+                      </Text>
+                      <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 1 }}>
+                        total volume this week
                       </Text>
                       {volDelta != null && (
                         <Text style={{
                           fontSize: 11,
                           fontWeight: '600',
                           color: volDelta >= 0 ? '#22C55E' : '#EF4444',
-                          marginTop: 1,
+                          marginTop: 2,
                         }}>
                           {volDelta >= 0 ? '+' : ''}{Math.round(volDelta)}% vs last week
                         </Text>
@@ -901,36 +906,73 @@ export default function StatsScreen() {
                 </StatCard>
               )}
 
-              {/* ─── Muscle Group Distribution ─── */}
-              {muscleDistribution.length > 0 && (
-                <StatCard title="Muscle Group Distribution" theme={theme}>
-                  <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 14, marginTop: -4 }}>
-                    % of total volume · last 60 days
-                  </Text>
-                  {/* Stacked proportion bar */}
-                  <View style={{ height: 20, borderRadius: 10, overflow: 'hidden', flexDirection: 'row', marginBottom: 14 }}>
-                    {muscleDistribution.slice(0, 8).map((m, i) => (
-                      <View
-                        key={m.category}
-                        style={{
-                          flex: m.pct,
-                          backgroundColor: muscleColors[i % muscleColors.length],
-                        }}
+              {/* ─── Strength Profile (Radar) ─── */}
+              {muscleDistribution.length > 0 && (() => {
+                const radarData = groupForRadar(muscleDistribution);
+                const totalVol = muscleDistribution.reduce((s, m) => s + m.volume, 0);
+                const maxPct = Math.max(...muscleDistribution.map(m => totalVol > 0 ? (m.volume / totalVol) * 100 : 0), 1);
+                return radarData.length >= 3 ? (
+                  <StatCard title="Strength Profile" theme={theme}>
+                    <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4, marginTop: -4 }}>
+                      volume balance · last 60 days
+                    </Text>
+                    <StrengthRadar
+                      data={radarData}
+                      size={280}
+                      accentColor={focusCardColor}
+                      theme={theme}
+                    />
+                    {/* Expander toggle */}
+                    <Pressable
+                      onPress={() => { animateLayout(); setStrengthExpanded(prev => !prev); }}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: 6,
+                        paddingVertical: 8,
+                        marginTop: 4,
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '600', color: theme.textSecondary }}>
+                        {strengthExpanded ? 'Hide Breakdown' : 'View Breakdown'}
+                      </Text>
+                      <Ionicons
+                        name={strengthExpanded ? 'chevron-up' : 'chevron-down'}
+                        size={14}
+                        color={theme.textSecondary}
                       />
-                    ))}
-                  </View>
-                  {/* Legend grid — 2 columns */}
-                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
-                    {muscleDistribution.slice(0, 8).map((m, i) => (
-                      <View key={m.category} style={{ flexDirection: 'row', alignItems: 'center', width: '47%', paddingVertical: 3 }}>
-                        <View style={{ width: 10, height: 10, borderRadius: 3, backgroundColor: muscleColors[i % muscleColors.length], marginRight: 6 }} />
-                        <Text style={{ fontSize: 11, color: theme.text, fontWeight: '600', flex: 1 }} numberOfLines={1}>{m.category}</Text>
-                        <Text style={{ fontSize: 11, color: theme.textSecondary, fontWeight: '500', fontVariant: ['tabular-nums'] }}>{m.pct}%</Text>
+                    </Pressable>
+                    {/* Expanded horizontal bar breakdown */}
+                    {strengthExpanded && (
+                      <View style={{ marginTop: 8 }}>
+                        {muscleDistribution.filter(m => m.volume > 0).map((m, i) => {
+                          const pct = totalVol > 0 ? Math.round((m.volume / totalVol) * 100) : 0;
+                          const barWidth = maxPct > 0 ? Math.max((pct / maxPct) * 100, 3) : 3;
+                          return (
+                            <View key={m.category} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
+                              <Text style={{ fontSize: 12, fontWeight: '600', color: theme.text, width: 80 }} numberOfLines={1}>
+                                {m.category}
+                              </Text>
+                              <View style={{ flex: 1, height: 8, borderRadius: 4, backgroundColor: theme.border, overflow: 'hidden', marginHorizontal: 10 }}>
+                                <View style={{
+                                  height: 8,
+                                  width: `${barWidth}%`,
+                                  borderRadius: 4,
+                                  backgroundColor: muscleColors[i % muscleColors.length],
+                                }} />
+                              </View>
+                              <Text style={{ fontSize: 11, fontWeight: '500', color: theme.textSecondary, width: 32, textAlign: 'right', fontVariant: ['tabular-nums'] }}>
+                                {pct}%
+                              </Text>
+                            </View>
+                          );
+                        })}
                       </View>
-                    ))}
-                  </View>
-                </StatCard>
-              )}
+                    )}
+                  </StatCard>
+                ) : null;
+              })()}
 
               {/* ─── Muscle Progress (e1RM % change) ─── */}
               {muscleProgress.length > 0 && (

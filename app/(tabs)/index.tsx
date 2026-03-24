@@ -76,6 +76,7 @@ interface TodaySession {
   day_name: string;
   exercises: LoggedExercise[];
   duration_minutes: number;
+  completed_at: string;
 }
 
 export default function HomeScreen() {
@@ -242,6 +243,7 @@ export default function HomeScreen() {
             day_name: todayLog.day_name,
             exercises: todayLog.exercises as LoggedExercise[],
             duration_minutes: todayLog.duration_minutes,
+            completed_at: todayLog.completed_at,
           });
           // Fetch PRs achieved in this session's timeframe
           const logDate = todayLog.completed_at?.split('T')[0];
@@ -377,6 +379,7 @@ export default function HomeScreen() {
         day_name: cachedLog.day_name,
         exercises: cachedLog.exercises as LoggedExercise[],
         duration_minutes: cachedLog.duration_minutes,
+        completed_at: cachedLog.completed_at,
       });
     } else {
       setTodaySession(null);
@@ -475,10 +478,7 @@ export default function HomeScreen() {
 
   // Today's session stats — must compute before hooks below
   const sessionTotalSets = todaySession?.exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).length, 0) ?? 0;
-  const sessionVolumeRaw = todaySession?.exercises.reduce(
-    (sum, ex) => sum + ex.sets.filter(s => s.completed && s.weight != null).reduce((s, set) => s + (set.weight ?? 0) * set.reps, 0), 0
-  ) ?? 0;
-  const sessionVolume = Math.round(sessionVolumeRaw);
+  const sessionVolume = todaySession ? computeTotalVolume(todaySession.exercises) : 0;
   const sessionTotalReps = todaySession?.exercises.reduce((s, ex) => s + ex.sets.filter(se => se.completed).reduce((r, set) => r + set.reps, 0), 0) ?? 0;
 
   // Animated counters — hooks must run before any early return
@@ -541,7 +541,7 @@ export default function HomeScreen() {
             </View>
 
           ) : (todayCompleted || todaySession) ? (
-            <View>
+            <View style={{ gap: 12 }}>
               {/* Workout Complete banner */}
               <Pressable
                 onPress={() => router.push({
@@ -551,11 +551,11 @@ export default function HomeScreen() {
                     dayName: todaySession?.day_name ?? '',
                     focus: todaySession?.day_name ?? activeWorkoutDay?.focus ?? '',
                     durationMinutes: String(todaySession?.duration_minutes ?? 0),
-                    completedAt: new Date().toISOString(),
+                    completedAt: todaySession?.completed_at ?? new Date().toISOString(),
                     logId: todaySession?.id ?? '',
                   },
                 })}
-                style={{ borderRadius: 16, overflow: 'hidden', marginBottom: 12 }}
+                style={{ borderRadius: 16, overflow: 'hidden' }}
               >
                 <BreathingGradient color={focusCardColor} style={{ borderRadius: 16, height: 56 }}>
                   <View style={{ paddingHorizontal: 16, height: 56, flexDirection: 'row', alignItems: 'center' }}>
@@ -609,18 +609,18 @@ export default function HomeScreen() {
                   </View>
 
                   {/* Daily Tip — inline */}
-                  <View style={{ borderTopWidth: 1, borderTopColor: theme.border, marginTop: 16, paddingTop: 10, flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
+                  <View style={{ borderTopWidth: 1, borderTopColor: theme.border, marginTop: 16, paddingTop: 14, flexDirection: 'row', alignItems: 'flex-start', gap: 8 }}>
                     <Ionicons name="bulb" size={16} color="#F59E0B" style={{ marginTop: 2 }} />
                     <View style={{ flex: 1 }}>
                       <Text style={{ fontSize: 11, fontWeight: '700', color: '#F59E0B', letterSpacing: 1, marginBottom: 3 }}>FORME TIP</Text>
-                      <Text style={{ fontSize: 13, color: theme.text, flex: 1, lineHeight: 18 }} numberOfLines={2}>{getTodayTip()}</Text>
+                      <Text style={{ fontSize: 13, color: theme.text, flex: 1, lineHeight: 18 }}>{getTodayTip()}</Text>
                     </View>
                   </View>
                   </View>
 
                   {/* PR callout */}
                   {sessionPRs.length > 0 && (
-                    <View style={{ marginBottom: 24 }}>
+                    <View>
                       {sessionPRs.map((pr) => {
                         // PRs are already in user's display unit — no conversion needed
                         const displayWeight = Math.round(pr.weight);
@@ -650,17 +650,15 @@ export default function HomeScreen() {
                   )}
 
                   {/* Weekly Volume Trend */}
-                  <View style={{ marginTop: 8, marginBottom: 24 }}>
+                  <View>
                     {userId && <WeeklyVolumeTrend userId={userId} accentColor={focusCardColor} onInteractionStart={() => setScrollEnabled(false)} onInteractionEnd={() => setScrollEnabled(true)} />}
                   </View>
 
                   {/* Recovery Map */}
-                  <View style={{ marginBottom: 24 }}>
-                    <RecoveryMapCard recentLogs={recentLogs} />
-                  </View>
+                  <RecoveryMapCard recentLogs={recentLogs} />
 
                   {/* Quick Workout + Weigh-In */}
-                  <View style={{ flexDirection: 'row', gap: 10, marginBottom: 24 }}>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
                     <Pressable onPress={() => router.push('/workout/quick')} style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: theme.surface, borderRadius: 16, paddingHorizontal: 14, paddingVertical: 14, borderWidth: 1, borderColor: theme.border }}>
                       <View style={{ width: 40, height: 40, borderRadius: 20, backgroundColor: `${focusCardColor}20`, alignItems: 'center', justifyContent: 'center' }}>
                         <Ionicons name="flash" size={20} color={focusCardColor} />
@@ -671,9 +669,7 @@ export default function HomeScreen() {
                   </View>
 
                   {/* Trophy Case */}
-                  <View style={{ marginBottom: 24 }}>
-                    {userId && <TrophyCaseCard userId={userId} />}
-                  </View>
+                  {userId && <TrophyCaseCard userId={userId} />}
 
                   {/* Hidden shareable card for screenshot sharing */}
                   <View
@@ -722,7 +718,7 @@ export default function HomeScreen() {
                   <Ionicons name="bulb" size={16} color="#F59E0B" style={{ marginTop: 2 }} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 11, fontWeight: '700', color: '#F59E0B', letterSpacing: 1, marginBottom: 3 }}>FORME TIP</Text>
-                    <Text style={{ fontSize: 13, color: theme.text, flex: 1, lineHeight: 18 }} numberOfLines={2}>{getTodayTip()}</Text>
+                    <Text style={{ fontSize: 13, color: theme.text, flex: 1, lineHeight: 18 }}>{getTodayTip()}</Text>
                   </View>
                 </View>
               </View>
@@ -753,7 +749,7 @@ export default function HomeScreen() {
                   <Ionicons name="bulb" size={16} color="#F59E0B" style={{ marginTop: 2 }} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 11, fontWeight: '700', color: '#F59E0B', letterSpacing: 1, marginBottom: 3 }}>FORME TIP</Text>
-                    <Text style={{ fontSize: 13, color: theme.text, flex: 1, lineHeight: 18 }} numberOfLines={2}>{getTodayTip()}</Text>
+                    <Text style={{ fontSize: 13, color: theme.text, flex: 1, lineHeight: 18 }}>{getTodayTip()}</Text>
                   </View>
                 </View>
                 {/* Rest day check-in for streak */}
@@ -977,7 +973,7 @@ export default function HomeScreen() {
                 <Ionicons name="bulb" size={16} color="#F59E0B" style={{ marginTop: 2 }} />
                 <View style={{ flex: 1 }}>
                   <Text style={{ fontSize: 11, fontWeight: '700', color: '#F59E0B', letterSpacing: 1, marginBottom: 3 }}>FORME TIP</Text>
-                  <Text style={{ fontSize: 13, color: theme.text, flex: 1, lineHeight: 18 }} numberOfLines={2}>{getTodayTip()}</Text>
+                  <Text style={{ fontSize: 13, color: theme.text, flex: 1, lineHeight: 18 }}>{getTodayTip()}</Text>
                 </View>
               </View>
 

@@ -167,21 +167,33 @@ export default function WeeklyVolumeTrend({ userId, accentColor, onInteractionSt
 
   if (thisWeekConverted.length === 0 && lastWeekConverted.length === 0) return null;
 
-  // Flat bar list: last week's workouts + this week's workouts
-  // Each bar is one workout session, labeled by focus name
-  const showDays: { label: string; date: string; volume: number; prevVolume: number; isLastWeek: boolean }[] = [];
+  // Build paired bars: match this week's workouts to last week's by focus label
+  // Each pair has a last-week bar and this-week bar side by side
+  interface BarPair { label: string; lastVol: number; thisVol: number; pct: number | null }
+  const pairMap = new Map<string, { lastVol: number; thisVol: number }>();
 
   for (const d of lastWeekConverted) {
-    showDays.push({ label: d.focusLabel, date: d.date, volume: d.volume, prevVolume: 0, isLastWeek: true });
+    const existing = pairMap.get(d.focusLabel);
+    if (existing) existing.lastVol += d.volume;
+    else pairMap.set(d.focusLabel, { lastVol: d.volume, thisVol: 0 });
   }
   for (const d of thisWeekConverted) {
-    showDays.push({ label: d.focusLabel, date: d.date, volume: d.volume, prevVolume: 0, isLastWeek: false });
+    const existing = pairMap.get(d.focusLabel);
+    if (existing) existing.thisVol += d.volume;
+    else pairMap.set(d.focusLabel, { lastVol: 0, thisVol: d.volume });
   }
 
-  const allVolumes = showDays.map(d => d.volume);
+  const pairs: BarPair[] = [...pairMap.entries()].map(([label, { lastVol, thisVol }]) => ({
+    label,
+    lastVol,
+    thisVol,
+    pct: lastVol > 0 && thisVol > 0 ? Math.round(((thisVol - lastVol) / lastVol) * 100) : null,
+  }));
+
+  const allVolumes = pairs.flatMap(p => [p.lastVol, p.thisVol]);
   const maxVolume = Math.max(...allVolumes, 1);
 
-  // % change: compare total volumes between weeks
+  // Overall % change
   const lastWeekTotal = lastWeekConverted.reduce((s, d) => s + d.volume, 0);
   const thisWeekTotal = thisWeekConverted.reduce((s, d) => s + d.volume, 0);
   let pctChange: number | null = null;
@@ -189,6 +201,8 @@ export default function WeeklyVolumeTrend({ userId, accentColor, onInteractionSt
     pctChange = Math.round(((thisWeekTotal - lastWeekTotal) / lastWeekTotal) * 100);
   }
 
+  // For pan responder: flatten pairs into selectable slots
+  const showDays = pairs.map(p => ({ label: p.label, date: '', volume: p.thisVol || p.lastVol, prevVolume: p.lastVol }));
   showDaysRef.current = showDays;
 
   const yAxisTicks = computeYTicks(maxVolume);
@@ -222,11 +236,11 @@ export default function WeeklyVolumeTrend({ userId, accentColor, onInteractionSt
         {activeDay ? (
           <Text style={{ fontSize: 12, fontWeight: '700', color: barColor }}>
             {activeDay.label}: {formatNumber(activeDay.volume)} {unitLabel}
-            {activeDay.isLastWeek ? ' (last week)' : ''}
+            {activeDay.prevVolume > 0 ? ` (prev: ${formatNumber(activeDay.prevVolume)})` : ''}
           </Text>
         ) : (
           <Text style={{ fontSize: 10, color: theme.textSecondary }}>
-            {unitLabel} lifted · {lastWeekConverted.length > 0 ? 'last week → this week' : 'this week'}
+            {unitLabel} lifted · {lastWeekConverted.length > 0 ? 'last week vs this week' : 'this week'}
           </Text>
         )}
       </View>
@@ -265,47 +279,51 @@ export default function WeeklyVolumeTrend({ userId, accentColor, onInteractionSt
             );
           })}
 
-          {/* Individual bars — each bar = one workout session */}
+          {/* Paired bars — last week + this week side by side per focus */}
           <View style={{ flexDirection: 'row', justifyContent: 'space-evenly', alignItems: 'flex-end', height: BAR_MAX_HEIGHT, zIndex: 1 }}>
-            {showDays.map((day, i) => {
-              const barHeight = scaleMax > 0 ? (day.volume / scaleMax) * BAR_MAX_HEIGHT : 0;
-              const singleBarW = Math.max(10, Math.min(22, 160 / showDays.length));
+            {pairs.map((pair, i) => {
+              const lastH = scaleMax > 0 ? (pair.lastVol / scaleMax) * BAR_MAX_HEIGHT : 0;
+              const thisH = scaleMax > 0 ? (pair.thisVol / scaleMax) * BAR_MAX_HEIGHT : 0;
+              const singleBarW = Math.max(8, Math.min(18, 120 / pairs.length));
               const isSelected = i === selectedIdx;
-              // Last week bars are dimmer, this week bars are bright
-              const isLW = day.isLastWeek;
-
-              // Visual separator between last week and this week
-              const isFirstThisWeek = !isLW && (i === 0 || showDays[i - 1]?.isLastWeek);
+              const pairPct = pair.pct;
 
               return (
-                <View key={day.date + i} style={{ alignItems: 'center', flex: 1, flexDirection: 'row', justifyContent: 'center' }}>
-                  {isFirstThisWeek && lastWeekConverted.length > 0 && (
-                    <View style={{ width: 1, height: BAR_MAX_HEIGHT * 0.6, backgroundColor: theme.border, opacity: 0.5, marginRight: 2 }} />
-                  )}
-                  <View style={{ alignItems: 'center' }}>
-                    <View style={{ height: BAR_MAX_HEIGHT, justifyContent: 'flex-end' }}>
-                      <LinearGradient
-                        colors={isSelected
-                          ? [barColor, barColor + '90']
-                          : isLW
-                            ? [barColor + '70', barColor + '40']
-                            : [barColor + 'DD', barColor + '80']}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 0, y: 1 }}
-                        style={{
-                          width: singleBarW,
-                          height: Math.max(barHeight, 2),
-                          borderRadius: 4,
-                          ...(isSelected && {
-                            shadowColor: barColor,
-                            shadowOffset: { width: 0, height: 2 },
-                            shadowOpacity: 0.4,
-                            shadowRadius: 4,
-                            elevation: 3,
-                          }),
-                        }}
-                      />
-                    </View>
+                <View key={pair.label + i} style={{ alignItems: 'center', flex: 1 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 2, height: BAR_MAX_HEIGHT }}>
+                    {/* Last week bar (dimmer) */}
+                    <LinearGradient
+                      colors={isSelected
+                        ? [barColor + '90', barColor + '60']
+                        : [barColor + '60', barColor + '30']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 0, y: 1 }}
+                      style={{
+                        width: singleBarW,
+                        height: Math.max(lastH, pair.lastVol > 0 ? 2 : 0),
+                        borderRadius: 3,
+                      }}
+                    />
+                    {/* This week bar (bright) */}
+                    <LinearGradient
+                      colors={isSelected
+                        ? [barColor, barColor + '90']
+                        : [barColor + 'DD', barColor + '80']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 0, y: 1 }}
+                      style={{
+                        width: singleBarW,
+                        height: Math.max(thisH, pair.thisVol > 0 ? 2 : 0),
+                        borderRadius: 3,
+                        ...(isSelected && {
+                          shadowColor: barColor,
+                          shadowOffset: { width: 0, height: 2 },
+                          shadowOpacity: 0.4,
+                          shadowRadius: 4,
+                          elevation: 3,
+                        }),
+                      }}
+                    />
                   </View>
                 </View>
               );
@@ -314,16 +332,25 @@ export default function WeeklyVolumeTrend({ userId, accentColor, onInteractionSt
         </View>
       </View>
 
-      {/* X-axis labels */}
+      {/* X-axis labels + % change */}
       <View style={{ flexDirection: 'row', marginTop: 6, marginLeft: 42 }}>
-        {showDays.map((day, i) => (
-          <View key={day.date + i} style={{ flex: 1, alignItems: 'center' }}>
+        {pairs.map((pair, i) => (
+          <View key={pair.label + i} style={{ flex: 1, alignItems: 'center' }}>
+            {pair.pct !== null && (
+              <Text style={{
+                fontSize: 8, fontWeight: '700',
+                color: pair.pct >= 0 ? '#22C55E' : '#EF4444',
+                marginBottom: 1,
+              }}>
+                {pair.pct >= 0 ? '+' : ''}{pair.pct}%
+              </Text>
+            )}
             <Text style={{
               fontSize: 9,
               fontWeight: i === selectedIdx ? '700' : '500',
               color: i === selectedIdx ? barColor : theme.textSecondary,
             }} numberOfLines={1}>
-              {day.label}
+              {pair.label}
             </Text>
           </View>
         ))}
@@ -333,12 +360,12 @@ export default function WeeklyVolumeTrend({ userId, accentColor, onInteractionSt
       {lastWeekConverted.length > 0 && thisWeekConverted.length > 0 && (
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginTop: 10, gap: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-            <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: barColor + 'DD' }} />
-            <Text style={{ fontSize: 10, color: theme.textSecondary }}>This week</Text>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
             <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: barColor + '50' }} />
             <Text style={{ fontSize: 10, color: theme.textSecondary }}>Last week</Text>
+          </View>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+            <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: barColor + 'DD' }} />
+            <Text style={{ fontSize: 10, color: theme.textSecondary }}>This week</Text>
           </View>
         </View>
       )}

@@ -137,6 +137,7 @@ export default function WorkoutScreen() {
   const customExercisesLoaded = useCustomExerciseStore(s => s.loaded);
   const loadCustomExercises = useCustomExerciseStore(s => s.load);
   const removeCustomExercise = useCustomExerciseStore(s => s.remove);
+  const updateCustomExercise = useCustomExerciseStore(s => s.update);
 
   // History calendar state
   const now = new Date();
@@ -1165,17 +1166,35 @@ export default function WorkoutScreen() {
                           {ce.muscleGroup}{ce.equipment ? ` · ${ce.equipment}` : ''}
                         </Text>
                       </View>
-                      <Pressable
-                        onPress={() => {
-                          Alert.alert('Delete Exercise', `Remove "${ce.name}"?`, [
-                            { text: 'Cancel', style: 'cancel' },
-                            { text: 'Delete', style: 'destructive', onPress: () => removeCustomExercise(ce.id) },
-                          ]);
-                        }}
-                        hitSlop={8}
-                      >
-                        <Ionicons name="trash-outline" size={16} color={theme.textSecondary} />
-                      </Pressable>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                        <Pressable
+                          onPress={() => {
+                            Alert.prompt(
+                              'Rename Exercise',
+                              'Enter a new name:',
+                              (newName) => {
+                                if (newName?.trim()) updateCustomExercise(ce.id, { name: newName });
+                              },
+                              'plain-text',
+                              ce.name,
+                            );
+                          }}
+                          hitSlop={8}
+                        >
+                          <Ionicons name="pencil-outline" size={15} color={theme.textSecondary} />
+                        </Pressable>
+                        <Pressable
+                          onPress={() => {
+                            Alert.alert('Delete Exercise', `Remove "${ce.name}"?`, [
+                              { text: 'Cancel', style: 'cancel' },
+                              { text: 'Delete', style: 'destructive', onPress: () => removeCustomExercise(ce.id) },
+                            ]);
+                          }}
+                          hitSlop={8}
+                        >
+                          <Ionicons name="trash-outline" size={16} color={theme.textSecondary} />
+                        </Pressable>
+                      </View>
                     </View>
                   ))}
                 </View>

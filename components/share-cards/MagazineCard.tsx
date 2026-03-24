@@ -20,8 +20,11 @@ interface Props {
 export const MagazineCard = React.forwardRef<View, Props>(({ data }, ref) => {
   const accent = data.accentColor || null;
   const unitWord = data.unitLabel === 'lbs' ? 'POUNDS' : 'KILOGRAMS';
-  const bestSetStr = data.bestSet
-    ? `${data.bestSet.exerciseName.split(/[\s(]/)[0]} ${formatNumber(data.bestSet.weight)} \u00D7 ${data.bestSet.reps}`
+  const bestSetName = data.bestSet
+    ? data.bestSet.exerciseName.replace(/\s*\(.*\)/, '')
+    : null;
+  const bestSetWeight = data.bestSet
+    ? `${formatNumber(data.bestSet.weight)} \u00D7 ${data.bestSet.reps}`
     : null;
   const densityStr = data.density > 0 ? `${formatNumber(data.density)}` : null;
   const intensityStr = data.avgIntensity > 0 ? `${data.avgIntensity} / 100` : null;
@@ -29,10 +32,10 @@ export const MagazineCard = React.forwardRef<View, Props>(({ data }, ref) => {
     ? `${data.durationMinutes} min`
     : `${Math.floor(data.durationMinutes / 60)}h ${data.durationMinutes % 60}m`;
 
-  const stats: { label: string; value: string }[] = [];
+  const stats: { label: string; value: string; subLabel?: string }[] = [];
   if (densityStr) stats.push({ label: `${data.unitLabel.toUpperCase()}/MIN`, value: densityStr });
   if (intensityStr) stats.push({ label: 'EFFORT SCORE', value: intensityStr });
-  if (bestSetStr) stats.push({ label: 'BEST SET', value: bestSetStr });
+  if (bestSetName) stats.push({ label: 'BEST SET', value: bestSetWeight!, subLabel: bestSetName });
   stats.push({ label: 'DURATION', value: durationStr });
 
   return (
@@ -44,8 +47,7 @@ export const MagazineCard = React.forwardRef<View, Props>(({ data }, ref) => {
         borderRadius: 20,
         padding: 28,
         width: 320,
-        aspectRatio: 4 / 5,
-        justifyContent: 'space-between',
+        gap: 20,
       }}
     >
       {/* Header */}
@@ -94,14 +96,25 @@ export const MagazineCard = React.forwardRef<View, Props>(({ data }, ref) => {
         {stats.map((stat, i) => (
           <View key={stat.label}>
             {i > 0 && <View style={{ height: 1, backgroundColor: '#E0E0E0' }} />}
-            <View style={{
-              flexDirection: 'row',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              paddingVertical: 10,
-            }}>
-              <Text style={{ ...FONT.statLabel, color: '#999999' }}>{stat.label}</Text>
-              <Text style={{ ...FONT.statValue, color: '#000000', fontVariant: ['tabular-nums'] }}>{stat.value}</Text>
+            <View style={{ paddingVertical: 10 }}>
+              <View style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}>
+                <Text style={{ ...FONT.statLabel, color: '#999999', flexShrink: 0 }}>{stat.label}</Text>
+                <Text
+                  style={{ ...FONT.statValue, color: '#000000', fontVariant: ['tabular-nums'], flexShrink: 1, textAlign: 'right' }}
+                  numberOfLines={1}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.7}
+                >{stat.value}</Text>
+              </View>
+              {stat.subLabel && (
+                <Text style={{ fontSize: 11, fontWeight: '500', color: '#999999', textAlign: 'right', marginTop: 2 }} numberOfLines={1}>
+                  {stat.subLabel}
+                </Text>
+              )}
             </View>
           </View>
         ))}

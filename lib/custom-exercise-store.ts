@@ -14,6 +14,7 @@ interface CustomExerciseStore {
   loaded: boolean;
   load: () => Promise<void>;
   create: (name: string, muscleGroup: string, equipment?: string) => Promise<CustomExercise | null>;
+  update: (id: string, fields: { name?: string; muscleGroup?: string; equipment?: string }) => Promise<void>;
   remove: (id: string) => Promise<void>;
 }
 
@@ -73,6 +74,23 @@ export const useCustomExerciseStore = create<CustomExerciseStore>()((set, get) =
       return newEx;
     } catch {
       return null;
+    }
+  },
+
+  update: async (id, fields) => {
+    try {
+      const dbFields: Record<string, string | null> = {};
+      if (fields.name !== undefined) dbFields.name = fields.name.trim();
+      if (fields.muscleGroup !== undefined) dbFields.muscle_group = fields.muscleGroup;
+      if (fields.equipment !== undefined) dbFields.equipment = fields.equipment?.trim() || null;
+      await supabase.from('custom_exercises').update(dbFields).eq('id', id);
+      set((state) => ({
+        exercises: state.exercises.map((e) =>
+          e.id === id ? { ...e, ...fields.name !== undefined ? { name: fields.name.trim() } : {}, ...fields.muscleGroup !== undefined ? { muscleGroup: fields.muscleGroup } : {}, ...fields.equipment !== undefined ? { equipment: fields.equipment?.trim() || null } : {} } : e
+        ),
+      }));
+    } catch {
+      // silent
     }
   },
 
