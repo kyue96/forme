@@ -157,7 +157,7 @@ export function ProfileDrawer() {
     } catch {}
   };
 
-  const pickAvatar = async () => {
+  const uploadAvatarImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert('Permission needed', 'Please allow photo access to upload an avatar.');
@@ -190,6 +190,28 @@ export function ProfileDrawer() {
     } finally {
       setAvatarUploading(false);
     }
+  };
+
+  const removeAvatar = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
+      await supabase.from('profiles').update({ avatar_url: null }).eq('id', user.id);
+      updateAvatar('');
+    } catch {
+      Alert.alert('Error', 'Could not remove photo.');
+    }
+  };
+
+  const pickAvatar = () => {
+    const options: { text: string; onPress?: () => void; style?: 'cancel' | 'destructive' }[] = [
+      { text: 'Choose Photo', onPress: uploadAvatarImage },
+    ];
+    if (avatarUrl) {
+      options.push({ text: 'Remove Photo', onPress: removeAvatar, style: 'destructive' });
+    }
+    options.push({ text: 'Cancel', style: 'cancel' });
+    Alert.alert('Profile Photo', undefined, options);
   };
 
   const saveName = async () => {

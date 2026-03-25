@@ -300,17 +300,6 @@ export default function PostWorkoutScreen() {
             </View>
           </View>
 
-          {/* Streak Ring */}
-          {streak > 0 && (
-            <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginTop: 12, flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <StreakRing streak={streak} maxStreak={maxStreak} size="mini" color={avatarColor || '#F59E0B'} />
-              <View>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>{streak}-day streak</Text>
-                <Text style={{ fontSize: 11, color: theme.textSecondary }}>Keep it going!</Text>
-              </View>
-            </View>
-          )}
-
           {/* Volume Trend Chart */}
           {historicalVolumes.length > 1 && (
             <View style={{ backgroundColor: theme.surface, borderRadius: 16, padding: 16, marginTop: 12 }}>

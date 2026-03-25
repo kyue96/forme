@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -88,7 +88,13 @@ export default function MealsScreen() {
     } catch {}
   }, []);
 
-  useFocusEffect(useCallback(() => { loadMeals(); loadMealDays(); }, [loadMeals, loadMealDays]));
+  const lastFetchRef = useRef(0);
+  useFocusEffect(useCallback(() => {
+    const now = Date.now();
+    if (now - lastFetchRef.current < 30000) return;
+    lastFetchRef.current = now;
+    loadMeals(); loadMealDays();
+  }, [loadMeals, loadMealDays]));
 
 
   const addMeal = async () => {

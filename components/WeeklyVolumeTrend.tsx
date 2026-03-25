@@ -247,17 +247,6 @@ export default function WeeklyVolumeTrend({ userId, accentColor, onInteractionSt
 
       {/* Chart area */}
       <View style={{ flexDirection: 'row' }}>
-        {/* Y-axis */}
-        <View style={{ width: 36, marginRight: 6 }}>
-          <View style={{ height: BAR_MAX_HEIGHT, justifyContent: 'space-between' }}>
-            {yAxisTicks.map((tick, i) => (
-              <Text key={i} style={{ fontSize: 9, color: theme.textSecondary, textAlign: 'right', lineHeight: 11 }}>
-                {tick >= 1000 ? `${Math.round(tick / 1000)}k` : tick}
-              </Text>
-            ))}
-          </View>
-        </View>
-
         {/* Bars with PanResponder */}
         <View
           style={{ flex: 1, position: 'relative', height: BAR_MAX_HEIGHT }}
@@ -268,17 +257,6 @@ export default function WeeklyVolumeTrend({ userId, accentColor, onInteractionSt
           }}
           {...panResponder.panHandlers}
         >
-          {/* Grid lines */}
-          {yAxisTicks.map((tick, i) => {
-            const yPos = scaleMax > 0 ? ((scaleMax - tick) / scaleMax) * BAR_MAX_HEIGHT : 0;
-            return (
-              <View key={`grid-${i}`} style={{
-                position: 'absolute', top: yPos, left: 0, right: 0,
-                height: 1, backgroundColor: theme.border, opacity: 0.3,
-              }} />
-            );
-          })}
-
           {/* Paired bars — last week + this week side by side per focus */}
           <View style={{ flexDirection: 'row', justifyContent: 'space-evenly', alignItems: 'flex-end', height: BAR_MAX_HEIGHT, zIndex: 1 }}>
             {pairs.map((pair, i) => {
@@ -333,18 +311,9 @@ export default function WeeklyVolumeTrend({ userId, accentColor, onInteractionSt
       </View>
 
       {/* X-axis labels + % change */}
-      <View style={{ flexDirection: 'row', marginTop: 6, marginLeft: 42 }}>
+      <View style={{ flexDirection: 'row', marginTop: 6 }}>
         {pairs.map((pair, i) => (
           <View key={pair.label + i} style={{ flex: 1, alignItems: 'center' }}>
-            {pair.pct !== null && (
-              <Text style={{
-                fontSize: 8, fontWeight: '700',
-                color: pair.pct >= 0 ? '#22C55E' : '#EF4444',
-                marginBottom: 1,
-              }}>
-                {pair.pct >= 0 ? '+' : ''}{pair.pct}%
-              </Text>
-            )}
             <Text style={{
               fontSize: 9,
               fontWeight: i === selectedIdx ? '700' : '500',
@@ -352,6 +321,15 @@ export default function WeeklyVolumeTrend({ userId, accentColor, onInteractionSt
             }} numberOfLines={1}>
               {pair.label}
             </Text>
+            {pair.pct !== null && (
+              <Text style={{
+                fontSize: 8, fontWeight: '700',
+                color: pair.pct >= 0 ? '#22C55E' : '#EF4444',
+                marginTop: 1,
+              }}>
+                {pair.pct >= 0 ? '+' : ''}{pair.pct}%
+              </Text>
+            )}
           </View>
         ))}
       </View>

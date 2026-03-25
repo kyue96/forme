@@ -1417,7 +1417,6 @@ export default function WorkoutScreen() {
                           </Text>
                         )}
                       </View>
-                      {/* Notes icon — only when expanded */}
                       {isExpanded && (
                         <Pressable
                           onPress={() => {
@@ -1434,9 +1433,8 @@ export default function WorkoutScreen() {
                           />
                         </Pressable>
                       )}
-                      {/* Info icon - hide for custom exercises (no data) */}
-                      {!customExercises.some((ce) => ce.name.toLowerCase() === logged.name.toLowerCase()) && (
-                        <ExerciseThumbnail exerciseName={logged.name} theme={theme} />
+                      {isExpanded && (
+                        <ExerciseThumbnail exerciseName={logged.name} sets={String(logged.sets.length)} reps={exercise?.reps ?? ''} theme={theme} />
                       )}
                       {/* Delete icon */}
                       {isExpanded && loggedExercises.length > 1 && (

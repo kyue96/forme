@@ -65,12 +65,12 @@ export function StrengthRadar({ data, size = 280, accentColor = '#F59E0B', theme
 
   const cx = size / 2;
   const cy = size / 2;
-  const radius = size * 0.33;
+  const radius = size * 0.30;
   const n = data.length;
   const rings = 4;
 
   // Dynamic label radius — more room when there are many axes
-  const labelRadius = radius + (n > 7 ? 28 : 24);
+  const labelRadius = radius + (n > 7 ? 36 : 32);
 
   const getPoint = (index: number, dist: number): [number, number] => {
     const angle = (Math.PI * 2 * index) / n - Math.PI / 2;
@@ -152,10 +152,10 @@ export function StrengthRadar({ data, size = 280, accentColor = '#F59E0B', theme
           <Polygon
             points={dataPolygonPoints}
             fill={accentColor}
-            fillOpacity={0.15}
+            fillOpacity={0.25}
             stroke={accentColor}
-            strokeWidth={1.5}
-            strokeOpacity={0.8}
+            strokeWidth={2}
+            strokeOpacity={0.9}
           />
 
           {/* Data dots */}

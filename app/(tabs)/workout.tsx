@@ -29,7 +29,8 @@ import { MuscleGroupPills } from '@/components/MuscleGroupPills';
 import { LoggedExercise, WorkoutDay, Exercise } from '@/lib/types';
 import { animateLayout, stripParens } from '@/lib/utils';
 import { getExerciseCategories, getExerciseCategory } from '@/lib/exercise-utils';
-import { useCustomExerciseStore } from '@/lib/custom-exercise-store';
+import { useCustomExerciseStore, CustomExercise } from '@/lib/custom-exercise-store';
+import { CustomExerciseSheet } from '@/components/CustomExerciseSheet';
 import { EXERCISE_DATABASE, BODYWEIGHT_KEYWORDS } from '@/lib/exercise-data';
 
 /**
@@ -106,6 +107,95 @@ function formatDayDate(dayName: string, refDate?: Date | null): string {
   return dayDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 }
 
+/* ─── Pre-made workout templates ─── */
+const WORKOUT_TEMPLATES: { name: string; icon: string; exercises: { name: string; sets: number; reps: string }[] }[] = [
+  {
+    name: 'Chest & Triceps',
+    icon: 'fitness-outline',
+    exercises: [
+      { name: 'Flat Barbell Bench Press', sets: 4, reps: '8-10' },
+      { name: 'Incline Dumbbell Press', sets: 3, reps: '10-12' },
+      { name: 'Cable Flyes', sets: 3, reps: '12-15' },
+      { name: 'Dips', sets: 3, reps: '8-12' },
+      { name: 'Tricep Pushdowns', sets: 3, reps: '12-15' },
+      { name: 'Overhead Tricep Extension', sets: 3, reps: '10-12' },
+    ],
+  },
+  {
+    name: 'Back & Biceps',
+    icon: 'fitness-outline',
+    exercises: [
+      { name: 'Deadlifts', sets: 4, reps: '5-6' },
+      { name: 'Barbell Rows', sets: 4, reps: '8-10' },
+      { name: 'Lat Pulldowns', sets: 3, reps: '10-12' },
+      { name: 'Seated Cable Rows', sets: 3, reps: '10-12' },
+      { name: 'Barbell Curls', sets: 3, reps: '10-12' },
+      { name: 'Hammer Curls', sets: 3, reps: '10-12' },
+    ],
+  },
+  {
+    name: 'Shoulders & Traps',
+    icon: 'fitness-outline',
+    exercises: [
+      { name: 'Overhead Press', sets: 4, reps: '8-10' },
+      { name: 'Dumbbell Lateral Raises', sets: 4, reps: '12-15' },
+      { name: 'Rear Delt Flyes', sets: 3, reps: '12-15' },
+      { name: 'Face Pulls', sets: 3, reps: '15-20' },
+      { name: 'Barbell Shrugs', sets: 4, reps: '10-12' },
+      { name: 'Dumbbell Front Raises', sets: 3, reps: '10-12' },
+    ],
+  },
+  {
+    name: 'Legs',
+    icon: 'fitness-outline',
+    exercises: [
+      { name: 'Barbell Squats', sets: 4, reps: '6-8' },
+      { name: 'Romanian Deadlifts', sets: 3, reps: '8-10' },
+      { name: 'Leg Press', sets: 3, reps: '10-12' },
+      { name: 'Walking Lunges', sets: 3, reps: '12 each' },
+      { name: 'Leg Curls', sets: 3, reps: '10-12' },
+      { name: 'Calf Raises', sets: 4, reps: '15-20' },
+    ],
+  },
+  {
+    name: 'Push Day',
+    icon: 'arrow-up-outline',
+    exercises: [
+      { name: 'Flat Barbell Bench Press', sets: 4, reps: '6-8' },
+      { name: 'Overhead Press', sets: 3, reps: '8-10' },
+      { name: 'Incline Dumbbell Press', sets: 3, reps: '10-12' },
+      { name: 'Dumbbell Lateral Raises', sets: 3, reps: '12-15' },
+      { name: 'Tricep Pushdowns', sets: 3, reps: '12-15' },
+      { name: 'Overhead Tricep Extension', sets: 3, reps: '10-12' },
+    ],
+  },
+  {
+    name: 'Pull Day',
+    icon: 'arrow-down-outline',
+    exercises: [
+      { name: 'Barbell Rows', sets: 4, reps: '6-8' },
+      { name: 'Lat Pulldowns', sets: 3, reps: '10-12' },
+      { name: 'Seated Cable Rows', sets: 3, reps: '10-12' },
+      { name: 'Face Pulls', sets: 3, reps: '15-20' },
+      { name: 'Barbell Curls', sets: 3, reps: '10-12' },
+      { name: 'Hammer Curls', sets: 3, reps: '10-12' },
+    ],
+  },
+  {
+    name: 'Full Body',
+    icon: 'body-outline',
+    exercises: [
+      { name: 'Barbell Squats', sets: 3, reps: '8-10' },
+      { name: 'Flat Barbell Bench Press', sets: 3, reps: '8-10' },
+      { name: 'Barbell Rows', sets: 3, reps: '8-10' },
+      { name: 'Overhead Press', sets: 3, reps: '8-10' },
+      { name: 'Romanian Deadlifts', sets: 3, reps: '10-12' },
+      { name: 'Barbell Curls', sets: 2, reps: '10-12' },
+      { name: 'Tricep Pushdowns', sets: 2, reps: '12-15' },
+    ],
+  },
+];
+
 export default function WorkoutScreen() {
   const router = useRouter();
   const { plan, loading, refetch, setPlan } = usePlan();
@@ -132,12 +222,14 @@ export default function WorkoutScreen() {
   const [savedRoutinesLoading, setSavedRoutinesLoading] = useState(false);
   const [expandedRoutineId, setExpandedRoutineId] = useState<string | null>(null);
   const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
+  const [expandedTemplateIdx, setExpandedTemplateIdx] = useState<number | null>(null);
   const [editingRoutineName, setEditingRoutineName] = useState('');
   const customExercises = useCustomExerciseStore(s => s.exercises);
   const customExercisesLoaded = useCustomExerciseStore(s => s.loaded);
   const loadCustomExercises = useCustomExerciseStore(s => s.load);
   const removeCustomExercise = useCustomExerciseStore(s => s.remove);
   const updateCustomExercise = useCustomExerciseStore(s => s.update);
+  const [editingCustomExercise, setEditingCustomExercise] = useState<CustomExercise | null>(null);
 
   // History calendar state
   const now = new Date();
@@ -276,7 +368,11 @@ export default function WorkoutScreen() {
   }, [viewMode, loadSavedRoutines]);
 
   // Also reload saved routines on screen focus when in saved mode
+  const lastSavedFetchRef = useRef(0);
   useFocusEffect(useCallback(() => {
+    const now = Date.now();
+    if (now - lastSavedFetchRef.current < 30000) return;
+    lastSavedFetchRef.current = now;
     if (viewMode === 'saved') loadSavedRoutines();
   }, [viewMode, loadSavedRoutines]));
 
@@ -356,11 +452,27 @@ export default function WorkoutScreen() {
     } catch {}
   }, []);
 
-  useFocusEffect(useCallback(() => { loadAllData(); }, [loadAllData]));
+  const lastFetchRef = useRef(0);
+  useFocusEffect(useCallback(() => {
+    const now = Date.now();
+    if (now - lastFetchRef.current < 30000) return;
+    lastFetchRef.current = now;
+    loadAllData();
+  }, [loadAllData]));
 
-  // Compute next workout day — first unlogged workout in the plan this week
+  // Compute next workout day — first unlogged workout from today onward
   const jsDow = new Date().getDay();
-  const nextPlanIdx = plan?.weeklyPlan.findIndex(d => !weekLoggedDays.has(d.dayName.toLowerCase())) ?? -1;
+  const nextPlanIdx = (() => {
+    if (!plan) return -1;
+    // First: find the first unlogged day that is today or in the future
+    const todayOrFuture = plan.weeklyPlan.findIndex(d => {
+      const dIdx = DAY_NAMES_FULL.findIndex(n => n.toLowerCase() === d.dayName.toLowerCase());
+      return dIdx >= jsDow && !weekLoggedDays.has(d.dayName.toLowerCase());
+    });
+    if (todayOrFuture >= 0) return todayOrFuture;
+    // Fallback: first unlogged day at all (missed day)
+    return plan.weeklyPlan.findIndex(d => !weekLoggedDays.has(d.dayName.toLowerCase()));
+  })();
 
   // Auto-expand the next workout card
   const autoExpandedRef = useRef(false);
@@ -557,35 +669,34 @@ export default function WorkoutScreen() {
         }}>
           <Pressable
             onPress={() => { animateLayout(); setExpandedDay(isOpen ? null : day.dayName); }}
-            style={{
-              flex: 1, flexDirection: 'row', alignItems: 'center',
-              justifyContent: 'space-between', paddingLeft: 14, paddingRight: 14, paddingVertical: 12,
-            }}
+            style={{ paddingLeft: 14, paddingRight: 14, paddingVertical: 12 }}
           >
-            <View style={{ flex: 1 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: isNext ? '#FFFFFF' : theme.text }} numberOfLines={1}>
-                  {stripParens(day.focus)}
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+              <View style={{ flex: 1, marginRight: 8 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Text allowFontScaling style={{ fontSize: 15, fontWeight: '700', color: isNext ? '#FFFFFF' : theme.text }} numberOfLines={1}>
+                    {stripParens(day.focus)}
+                  </Text>
+                  {isNext && (
+                    <View style={{
+                      backgroundColor: '#000000CC',
+                      paddingHorizontal: 6, paddingVertical: 2,
+                      borderRadius: 4,
+                    }}>
+                      <Text style={{ fontSize: 9, fontWeight: '800', color: '#FFFFFF', letterSpacing: 0.5 }}>
+                        UPCOMING
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <Text allowFontScaling style={{ fontSize: 12, color: isNext ? '#FFFFFFCC' : theme.textSecondary, marginTop: 2 }}>
+                  {day.exercises.length} exercises · ~{estMin} min
                 </Text>
-                {isNext && (
-                  <View style={{
-                    backgroundColor: '#000000CC',
-                    paddingHorizontal: 6, paddingVertical: 2,
-                    borderRadius: 4,
-                  }}>
-                    <Text style={{ fontSize: 9, fontWeight: '800', color: '#FFFFFF', letterSpacing: 0.5 }}>
-                      UPCOMING
-                    </Text>
-                  </View>
-                )}
               </View>
-              <Text allowFontScaling style={{ fontSize: 12, color: isNext ? '#FFFFFFCC' : theme.textSecondary, marginTop: 2 }}>
-                {day.exercises.length} exercises · ~{estMin} min
-              </Text>
+              <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={16} color={isNext ? '#FFFFFFCC' : theme.chrome} style={{ marginTop: 3 }} />
             </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <View style={{ marginTop: 8 }}>
               <MuscleGroupPills categories={getExerciseCategories(day.exercises)} size="small" />
-              <Ionicons name={isOpen ? 'chevron-up' : 'chevron-down'} size={16} color={isNext ? '#FFFFFFCC' : theme.chrome} />
             </View>
           </Pressable>
 
@@ -594,8 +705,12 @@ export default function WorkoutScreen() {
             <View style={{ paddingHorizontal: 14, paddingBottom: 14 }}>
               <View style={{ height: 1, backgroundColor: isNext ? '#FFFFFF30' : theme.border, marginBottom: 10 }} />
               {day.exercises.map((ex: Exercise, j: number) => (
-                <View
+                <Pressable
                   key={j}
+                  onPress={() => router.push({
+                    pathname: '/exercise-demo' as any,
+                    params: { exerciseName: ex.name, sets: String(ex.sets), reps: String(ex.reps) },
+                  })}
                   style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 8 }}
                 >
                   <View style={{ width: 5, height: 5, borderRadius: 2.5, backgroundColor: isNext ? '#FFFFFF80' : theme.chrome, marginRight: 8 }} />
@@ -605,7 +720,8 @@ export default function WorkoutScreen() {
                       {ex.sets} sets · {ex.reps} reps
                     </Text>
                   </View>
-                </View>
+                  <Ionicons name="information-circle-outline" size={16} color={isNext ? '#FFFFFF60' : theme.chrome} />
+                </Pressable>
               ))}
 
               <Pressable
@@ -664,41 +780,12 @@ export default function WorkoutScreen() {
 
       {/* Header with title + tab pills */}
       <View style={{ paddingHorizontal: 24, paddingTop: 8, paddingBottom: 12 }}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
-          <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text }}>
-            {viewMode === 'plan' ? 'My Workout Plan' : viewMode === 'saved' ? 'Saved Workouts' : 'Recent Workouts'}
-          </Text>
-          {viewMode === 'plan' && (
-            <Pressable
-              onPress={() => {
-                if (editMode) {
-                  setExpandedDay(null);
-                  if (editOrder) {
-                    reorderDays(editOrder);
-                  }
-                  animateLayout();
-                  setEditOrder(null);
-                  setEditMode(false);
-                } else {
-                  setEditOrder([...(plan?.weeklyPlan ?? [])]);
-                  setExpandedDay(null);
-                  animateLayout();
-                  setEditMode(true);
-                }
-              }}
-              hitSlop={8}
-            >
-              {editMode ? (
-                <Text style={{ fontSize: 14, fontWeight: '600', color: focusCardColor }}>Done</Text>
-              ) : (
-                <Ionicons name="pencil-outline" size={18} color={theme.chrome} />
-              )}
-            </Pressable>
-          )}
-        </View>
+        <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: theme.text, marginBottom: 10 }}>
+          {viewMode === 'plan' ? 'My Workout Plan' : viewMode === 'saved' ? 'Saved Workouts' : 'Recent Workouts'}
+        </Text>
 
-        {/* Tab pills */}
-        <View style={{ flexDirection: 'row', gap: 8 }}>
+        {/* Tab pills + edit pencil */}
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
           {([
             { key: 'plan' as const, label: 'My Plan', icon: 'barbell-outline' as const },
             { key: 'saved' as const, label: 'Saved', icon: 'bookmark-outline' as const },
@@ -749,6 +836,35 @@ export default function WorkoutScreen() {
               </Pressable>
             );
           })}
+          {/* Edit pencil — inline with tabs */}
+          {viewMode === 'plan' && (
+            <Pressable
+              onPress={() => {
+                if (editMode) {
+                  setExpandedDay(null);
+                  if (editOrder) {
+                    reorderDays(editOrder);
+                  }
+                  animateLayout();
+                  setEditOrder(null);
+                  setEditMode(false);
+                } else {
+                  setEditOrder([...(plan?.weeklyPlan ?? [])]);
+                  setExpandedDay(null);
+                  animateLayout();
+                  setEditMode(true);
+                }
+              }}
+              hitSlop={8}
+              style={{ marginLeft: 'auto', paddingHorizontal: 4 }}
+            >
+              {editMode ? (
+                <Text style={{ fontSize: 14, fontWeight: '600', color: focusCardColor }}>Done</Text>
+              ) : (
+                <Ionicons name="pencil-outline" size={18} color={theme.chrome} />
+              )}
+            </Pressable>
+          )}
         </View>
       </View>
 
@@ -1001,21 +1117,74 @@ export default function WorkoutScreen() {
           contentContainerStyle={{ paddingHorizontal: 24, paddingBottom: 32 }}
           showsVerticalScrollIndicator={false}
         >
+          {/* ─── Pre-made Templates ─── */}
+          <View style={{ marginBottom: 16 }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.textSecondary, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 10 }}>
+              Templates
+            </Text>
+            <View style={{ gap: 8 }}>
+              {WORKOUT_TEMPLATES.map((tpl, idx) => {
+                const isExpanded = expandedTemplateIdx === idx;
+                return (
+                  <View key={tpl.name} style={{ backgroundColor: theme.surface, borderRadius: 14, borderWidth: 1, borderColor: theme.border, overflow: 'hidden' }}>
+                    <Pressable
+                      onPress={() => { animateLayout(); setExpandedTemplateIdx(isExpanded ? null : idx); }}
+                      style={{ flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12 }}
+                    >
+                      <View style={{ width: 34, height: 34, borderRadius: 10, backgroundColor: `${focusCardColor}15`, alignItems: 'center', justifyContent: 'center', marginRight: 12 }}>
+                        <Ionicons name={tpl.icon as any} size={18} color={focusCardColor} />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 15, fontWeight: '700', color: theme.text }}>{tpl.name}</Text>
+                        <Text style={{ fontSize: 12, color: theme.textSecondary, marginTop: 1 }}>{tpl.exercises.length} exercises</Text>
+                      </View>
+                      <Ionicons name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color={theme.chrome} />
+                    </Pressable>
+                    {isExpanded && (
+                      <View style={{ paddingHorizontal: 14, paddingBottom: 12 }}>
+                        <View style={{ borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 10, marginBottom: 10 }}>
+                          {tpl.exercises.map((ex, i) => (
+                            <View key={i} style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 5 }}>
+                              <Text style={{ fontSize: 13, color: theme.textSecondary, width: 20, textAlign: 'right', marginRight: 10 }}>{i + 1}</Text>
+                              <Text style={{ flex: 1, fontSize: 13, color: theme.text, fontWeight: '500' }}>{ex.name}</Text>
+                              <Text style={{ fontSize: 12, color: theme.textSecondary }}>{ex.sets} × {ex.reps}</Text>
+                            </View>
+                          ))}
+                        </View>
+                        <Pressable
+                          onPress={() => router.push({
+                            pathname: '/workout/quick',
+                            params: { templateExercises: JSON.stringify(tpl.exercises), templateName: tpl.name },
+                          })}
+                          style={{ backgroundColor: focusCardColor, paddingVertical: 10, borderRadius: 10, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 6 }}
+                        >
+                          <Ionicons name="play" size={14} color="#FFFFFF" />
+                          <Text style={{ color: '#FFFFFF', fontWeight: '700', fontSize: 13 }}>Start Workout</Text>
+                        </Pressable>
+                      </View>
+                    )}
+                  </View>
+                );
+              })}
+            </View>
+          </View>
+
+          {/* ─── Saved Routines ─── */}
           {savedRoutinesLoading ? (
             <ActivityIndicator color={theme.chrome} style={{ marginTop: 32 }} />
           ) : savedRoutines.length === 0 ? (
-            <View style={{ alignItems: 'center', paddingTop: 48, paddingHorizontal: 32 }}>
-              <Ionicons name="bookmark-outline" size={48} color={theme.border} />
-              <Text style={{ color: theme.textSecondary, fontSize: 15, fontWeight: '600', marginTop: 16, textAlign: 'center' }}>
+            <View style={{ alignItems: 'center', paddingTop: 24, paddingHorizontal: 32 }}>
+              <Ionicons name="bookmark-outline" size={36} color={theme.border} />
+              <Text style={{ color: theme.textSecondary, fontSize: 14, fontWeight: '600', marginTop: 12, textAlign: 'center' }}>
                 No saved workouts yet
               </Text>
-              <Text style={{ color: theme.textSecondary, fontSize: 13, marginTop: 8, textAlign: 'center', lineHeight: 18 }}>
-                Complete a Quick Workout to save it here. Saved workouts let you repeat your favorite routines.
+              <Text style={{ color: theme.textSecondary, fontSize: 12, marginTop: 6, textAlign: 'center', lineHeight: 18 }}>
+                Complete a Quick Workout to save it here.
               </Text>
               <Pressable
                 onPress={() => router.push('/workout/quick')}
                 style={{
-                  marginTop: 24, paddingHorizontal: 24, paddingVertical: 12,
+                  marginTop: 16, paddingHorizontal: 24, paddingVertical: 12,
                   backgroundColor: focusCardColor, borderRadius: 12,
                 }}
               >
@@ -1024,6 +1193,9 @@ export default function WorkoutScreen() {
             </View>
           ) : (
             <>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.textSecondary, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 10 }}>
+              My Routines
+            </Text>
             {savedRoutines.map((routine) => {
               const exerciseNames = routine.exercises.map((e: any) => e.name);
               const displayExercises = exerciseNames.length <= 3
@@ -1168,17 +1340,7 @@ export default function WorkoutScreen() {
                       </View>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                         <Pressable
-                          onPress={() => {
-                            Alert.prompt(
-                              'Rename Exercise',
-                              'Enter a new name:',
-                              (newName) => {
-                                if (newName?.trim()) updateCustomExercise(ce.id, { name: newName });
-                              },
-                              'plain-text',
-                              ce.name,
-                            );
-                          }}
+                          onPress={() => setEditingCustomExercise(ce)}
                           hitSlop={8}
                         >
                           <Ionicons name="pencil-outline" size={15} color={theme.textSecondary} />
@@ -1451,6 +1613,23 @@ export default function WorkoutScreen() {
       )}
 
       {/* Log detail modal removed - now navigates to /workout/session-view */}
+
+      {/* Edit custom exercise sheet */}
+      <CustomExerciseSheet
+        visible={editingCustomExercise !== null}
+        onClose={() => setEditingCustomExercise(null)}
+        onSave={(name, muscleGroup, equipment) => {
+          if (editingCustomExercise) {
+            updateCustomExercise(editingCustomExercise.id, { name, muscleGroup, equipment });
+          }
+          setEditingCustomExercise(null);
+        }}
+        initialValues={editingCustomExercise ? {
+          name: editingCustomExercise.name,
+          muscleGroup: editingCustomExercise.muscleGroup,
+          equipment: editingCustomExercise.equipment,
+        } : undefined}
+      />
     </SafeAreaView>
     </GestureHandlerRootView>
   );

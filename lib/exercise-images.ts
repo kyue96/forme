@@ -28,7 +28,7 @@ export const EXERCISE_IMAGE_MAP: Record<string, string | null> = {
   'floor press': 'Floor_Press',
   'smith machine bench press': 'Smith_Machine_Bench_Press',
   'smith machine incline press': 'Smith_Machine_Incline_Bench_Press',
-  'plate squeeze press': null,
+  'plate squeeze press': 'Standing_Olympic_Plate_Hand_Squeeze',
   'chest dip': 'Dips_-_Chest_Version',
   'cable chest press': 'Cable_Chest_Press',
   'incline cable fly': 'Incline_Cable_Flye',
@@ -96,7 +96,7 @@ export const EXERCISE_IMAGE_MAP: Record<string, string | null> = {
   'plate front raise': 'Front_Plate_Raise',
   'lu raise': null,
   'seated dumbbell lateral raise': 'Seated_Side_Lateral_Raise',
-  'machine lateral raise': null,
+  'machine lateral raise': 'Cable_Seated_Lateral_Raise',
   'bent over dumbbell lateral raise': 'Bent_Over_Dumbbell_Rear_Delt_Raise_With_Head_On_Bench',
   'bradford press': 'Standing_Bradford_Press',
   'z press': null,
@@ -124,15 +124,15 @@ export const EXERCISE_IMAGE_MAP: Record<string, string | null> = {
   'spider curl': 'Spider_Curl',
   'ez bar curl': 'EZ-Bar_Curl',
   'reverse curl': 'Reverse_Barbell_Curl',
-  'bayesian curl': null,
+  'bayesian curl': 'Standing_One-Arm_Cable_Curl',
   'cable hammer curl': 'Cable_Hammer_Curls_-_Rope_Attachment',
   'zottman curl': 'Zottman_Curl',
-  '21s bicep curl': null,
+  '21s bicep curl': 'Barbell_Curl',
   'cross body hammer curl': 'Cross_Body_Hammer_Curl',
   'drag curl': 'Drag_Curl',
   'machine preacher curl': 'Machine_Preacher_Curls',
   'cable preacher curl': 'Cable_Preacher_Curl',
-  'waiter curl': null,
+  'waiter curl': 'Dumbbell_Bicep_Curl',
   'overhead cable curl': 'Overhead_Cable_Curl',
   'ez bar preacher curl': 'Preacher_Curl',
   'incline hammer curl': 'Incline_Hammer_Curls',
@@ -160,7 +160,7 @@ export const EXERCISE_IMAGE_MAP: Record<string, string | null> = {
   'jm press': 'JM_Press',
   'lying tricep extension': 'Lying_Triceps_Press',
   'french press': 'Lying_Close-Grip_Barbell_Triceps_Extension_Behind_The_Head',
-  'cable tricep kickback': null,
+  'cable tricep kickback': 'Tricep_Dumbbell_Kickback',
   'diamond dip': 'Dips_-_Triceps_Version',
   'single arm tricep pushdown': 'Cable_One_Arm_Tricep_Extension',
   'single arm overhead tricep extension': 'Dumbbell_One-Arm_Triceps_Extension',
@@ -214,15 +214,15 @@ export const EXERCISE_IMAGE_MAP: Record<string, string | null> = {
   'adductor machine': 'Thigh_Adductor',
   'abductor machine': 'Thigh_Abductor',
   'cable hip adduction': 'Cable_Hip_Adduction',
-  'cable hip abduction': null,
+  'cable hip abduction': 'Cable_Hip_Adduction',
   'lateral band walk': 'Monster_Walk',
-  'copenhagen plank': null,
+  'copenhagen plank': 'Plank',
   'narrow stance squat': 'Narrow_Stance_Squats',
   'wide stance squat': 'Wide_Stance_Barbell_Squat',
   'pause squat': 'Barbell_Full_Squat',
-  'safety bar squat': null,
-  'curtsy lunge': null,
-  'deficit lunge': null,
+  'safety bar squat': 'Barbell_Squat',
+  'curtsy lunge': 'Dumbbell_Lunges',
+  'deficit lunge': 'Dumbbell_Lunges',
   'split squat': 'Split_Squats',
   'lateral lunge': 'Barbell_Side_Split_Squat',
   'pendulum squat': null,
@@ -236,7 +236,7 @@ export const EXERCISE_IMAGE_MAP: Record<string, string | null> = {
   'single leg leg press': 'Leg_Press',
   'leg press (high foot)': 'Leg_Press',
   'leg press (low foot)': 'Leg_Press',
-  'machine hip thrust': null,
+  'machine hip thrust': 'Smith_Machine_Hip_Raise',
   'single leg leg extension': 'Single-Leg_Leg_Extension',
   'single leg leg curl': 'Seated_Leg_Curl',
   'standing calf raise': 'Standing_Calf_Raises',
@@ -269,8 +269,8 @@ export const EXERCISE_IMAGE_MAP: Record<string, string | null> = {
   'hollow body hold': null,
   'l-sit': null,
   'windshield wiper': null,
-  'suitcase carry': null,
-  'weighted plank': null,
+  'suitcase carry': 'Farmers_Walk',
+  'weighted plank': 'Plank',
   'weighted crunch': 'Weighted_Crunches',
   'cable pallof press': 'Pallof_Press',
   'landmine rotation': 'Landmine_180s',
@@ -281,7 +281,7 @@ export const EXERCISE_IMAGE_MAP: Record<string, string | null> = {
   'plank shoulder tap': null,
   'body saw': null,
   'stir the pot': null,
-  'copenhagen side plank': null,
+  'copenhagen side plank': 'Side_Bridge',
 
   // ── CARDIO ──
   'incline treadmill walk': 'Walking_Treadmill',
@@ -319,14 +319,14 @@ export const EXERCISE_IMAGE_MAP: Record<string, string | null> = {
   'band row': 'Back_Flyes_-_With_Bands',
   'band squat': 'Squats_-_With_Bands',
   'band chest press': 'Cross_Over_-_With_Bands',
-  'band bicep curl': null,
+  'band bicep curl': 'Close-Grip_EZ-Bar_Curl_with_Band',
   'band tricep extension': 'Band_Skull_Crusher',
-  'band face pull': null,
+  'band face pull': 'Face_Pull',
   'band lateral raise': 'Lateral_Raise_-_With_Bands',
   'band good morning': 'Band_Good_Morning',
-  'band hip thrust': null,
+  'band hip thrust': 'Barbell_Hip_Thrust',
   'band leg curl': 'Seated_Band_Hamstring_Curl',
-  'band deadlift': null,
+  'band deadlift': 'Deadlift_with_Bands',
 
   // ── FULL BODY ──
   'clean and press': 'Clean_and_Press',
@@ -340,7 +340,7 @@ export const EXERCISE_IMAGE_MAP: Record<string, string | null> = {
   'clean': 'Clean',
   'muscle-up': 'Muscle_Up',
   'wall ball': null,
-  'dumbbell snatch': null,
+  'dumbbell snatch': 'One-Arm_Kettlebell_Snatch',
   'kettlebell clean': 'One-Arm_Kettlebell_Clean',
   'kettlebell snatch': 'One-Arm_Kettlebell_Snatch',
   'devil press': null,
@@ -366,11 +366,52 @@ function resolveImageId(name: string): string | null {
     if (EXERCISE_IMAGE_MAP[singular] !== undefined) return EXERCISE_IMAGE_MAP[singular];
   }
 
-  // 3. Partial match - find a key that is contained in the name or vice versa
+  // 3. Strip common prefixes: "dumbbell", "barbell", "cable", "machine", "smith machine",
+  //    "seated", "standing", "single arm", "single leg", "incline", "decline"
+  const prefixes = [
+    'dumbbell ', 'barbell ', 'cable ', 'machine ', 'smith machine ',
+    'seated ', 'standing ', 'single arm ', 'single leg ', 'incline ',
+    'decline ', 'weighted ', 'band ', 'kettlebell ',
+  ];
+  for (const prefix of prefixes) {
+    if (lower.startsWith(prefix)) {
+      const stripped = lower.slice(prefix.length);
+      if (EXERCISE_IMAGE_MAP[stripped] !== undefined && EXERCISE_IMAGE_MAP[stripped] !== null) {
+        return EXERCISE_IMAGE_MAP[stripped];
+      }
+      // Also try the stripped version with a different prefix
+      for (const altPrefix of prefixes) {
+        const altKey = altPrefix + stripped;
+        if (altKey !== lower && EXERCISE_IMAGE_MAP[altKey] !== undefined && EXERCISE_IMAGE_MAP[altKey] !== null) {
+          return EXERCISE_IMAGE_MAP[altKey];
+        }
+      }
+    }
+  }
+
+  // 4. Partial match - find a key that is contained in the name or vice versa
   const keys = Object.keys(EXERCISE_IMAGE_MAP);
   for (const key of keys) {
     if (EXERCISE_IMAGE_MAP[key] === null) continue;
     if (lower.includes(key) || key.includes(lower)) return EXERCISE_IMAGE_MAP[key];
+  }
+
+  // 5. Word overlap scoring — find the best match by shared words
+  const inputWords = lower.split(/[\s-]+/).filter(w => w.length > 2);
+  if (inputWords.length > 0) {
+    let bestMatch: string | null = null;
+    let bestScore = 0;
+    for (const key of keys) {
+      if (EXERCISE_IMAGE_MAP[key] === null) continue;
+      const keyWords = key.split(/[\s-]+/).filter(w => w.length > 2);
+      const overlap = inputWords.filter(w => keyWords.includes(w)).length;
+      const score = overlap / Math.max(inputWords.length, keyWords.length);
+      if (score > bestScore && score >= 0.5) {
+        bestScore = score;
+        bestMatch = EXERCISE_IMAGE_MAP[key];
+      }
+    }
+    if (bestMatch) return bestMatch;
   }
 
   return null;

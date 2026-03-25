@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Image, Text, View } from 'react-native';
 import { useSettings } from '@/lib/settings-context';
 
@@ -25,10 +26,13 @@ interface AvatarInitialProps {
 
 export function AvatarInitial({ name, avatarUrl, avatarColor, size, isTraining }: AvatarInitialProps) {
   const { theme } = useSettings();
+  const [imgError, setImgError] = useState(false);
   const initial = (name || '?').charAt(0).toUpperCase();
   const bgColor = avatarColor || getColorForName(name || 'U');
   const fontSize = Math.round(size * 0.42);
   const borderRadius = size / 2;
+
+  const showImage = !!avatarUrl && !imgError;
 
   return (
     <View style={{
@@ -41,10 +45,11 @@ export function AvatarInitial({ name, avatarUrl, avatarColor, size, isTraining }
         borderColor: '#22C55E',
       } : {}),
     }}>
-      {avatarUrl ? (
+      {showImage ? (
         <Image
           source={{ uri: avatarUrl }}
           style={{ width: size, height: size, borderRadius }}
+          onError={() => setImgError(true)}
         />
       ) : (
         <View style={{

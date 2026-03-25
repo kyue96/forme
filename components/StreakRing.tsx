@@ -1,6 +1,7 @@
 import React from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
+import { Ionicons } from '@expo/vector-icons';
 import { useSettings } from '@/lib/settings-context';
 
 const MILESTONES = [7, 14, 21, 30, 45, 60, 90, 120, 180, 365];
@@ -14,9 +15,11 @@ interface StreakRingProps {
   maxStreak?: number;
   size?: 'large' | 'compact' | 'mini';
   color?: string;
+  onCheckIn?: () => void;
+  checkedIn?: boolean;
 }
 
-export function StreakRing({ streak, maxStreak = 0, size = 'large', color }: StreakRingProps) {
+export function StreakRing({ streak, maxStreak = 0, size = 'large', color, onCheckIn, checkedIn }: StreakRingProps) {
   const { theme } = useSettings();
   const accentColor = color || '#F59E0B';
 
@@ -64,6 +67,28 @@ export function StreakRing({ streak, maxStreak = 0, size = 'large', color }: Str
               : `Best: ${maxStreak > 0 ? maxStreak : streak} days`}
           </Text>
         </View>
+        {onCheckIn && !checkedIn && (
+          <Pressable
+            onPress={onCheckIn}
+            hitSlop={8}
+            style={{
+              width: 32, height: 32, borderRadius: 16,
+              backgroundColor: `${accentColor}18`,
+              alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <Ionicons name="checkmark" size={18} color={accentColor} />
+          </Pressable>
+        )}
+        {checkedIn && (
+          <View style={{
+            width: 32, height: 32, borderRadius: 16,
+            backgroundColor: '#22C55E20',
+            alignItems: 'center', justifyContent: 'center',
+          }}>
+            <Ionicons name="checkmark-circle" size={20} color="#22C55E" />
+          </View>
+        )}
       </View>
     );
   }

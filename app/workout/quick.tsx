@@ -60,7 +60,7 @@ type Phase = 'pick' | 'workout';
 
 export default function QuickWorkoutScreen() {
   const router = useRouter();
-  const { routineId } = useLocalSearchParams<{ routineId?: string }>();
+  const { routineId, templateExercises: templateParam, templateName } = useLocalSearchParams<{ routineId?: string; templateExercises?: string; templateName?: string }>();
   const { weightUnit, warmupEnabled, restTimerEnabled, restTimerSound, restTimerDuration, theme } = useSettings();
 
   const {
@@ -257,6 +257,21 @@ export default function QuickWorkoutScreen() {
       }
     }
   }, [routineId, savedRoutinesLoaded, savedRoutines, phase]);
+
+  // Pre-fill exercises from a template
+  const templateConsumed = useRef(false);
+  useEffect(() => {
+    if (templateParam && !templateConsumed.current && phase === 'pick') {
+      templateConsumed.current = true;
+      try {
+        const exercises = JSON.parse(templateParam) as { name: string; sets: number; reps: string }[];
+        const names = exercises.map(e => e.name);
+        setSelectedNames(names);
+        setWorkoutName(templateName ?? 'Workout');
+        setShowNamePrompt(true);
+      } catch {}
+    }
+  }, [templateParam, templateName, phase]);
 
   useEffect(() => {
     if (phase === 'workout' && loggedExercises.length > 0) {
@@ -1972,7 +1987,6 @@ export default function QuickWorkoutScreen() {
                           </Text>
                         )}
                       </View>
-                      {/* Notes icon — only when expanded */}
                       {isExpanded && (
                         <Pressable
                           onPress={() => {
@@ -1989,9 +2003,8 @@ export default function QuickWorkoutScreen() {
                           />
                         </Pressable>
                       )}
-                      {/* Info icon - hide for custom exercises (no data) */}
-                      {!customExercises.some((ce) => ce.name.toLowerCase() === logged.name.toLowerCase()) && (
-                        <ExerciseThumbnail exerciseName={logged.name} theme={theme} />
+                      {isExpanded && (
+                        <ExerciseThumbnail exerciseName={logged.name} sets={String(logged.sets.length)} theme={theme} />
                       )}
                       {/* Delete icon */}
                       {isExpanded && loggedExercises.length > 1 && (

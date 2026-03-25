@@ -71,6 +71,19 @@ export default function BodyStatsCard({ userId }: BodyStatsCardProps) {
     return () => sub.remove();
   }, [checkToday]);
 
+  // Periodic midnight reset — handles staying on screen past midnight
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const todayStr = getToday();
+      if (lastCheckedDate.current && lastCheckedDate.current !== todayStr) {
+        lastCheckedDate.current = null;
+        setLoggedToday(false);
+        checkToday();
+      }
+    }, 60_000); // check every minute
+    return () => clearInterval(interval);
+  }, [checkToday]);
+
   const handleSave = async () => {
     const val = parseFloat(weightInput);
     if (isNaN(val) || val <= 0) return;
@@ -122,11 +135,10 @@ export default function BodyStatsCard({ userId }: BodyStatsCardProps) {
           <Pressable
             onPress={handleSave}
             disabled={saving}
-            style={{ backgroundColor: '#22C55E', borderRadius: 10, paddingHorizontal: 14, paddingVertical: 8 }}
+            hitSlop={6}
+            style={{ width: 32, height: 32, borderRadius: 16, backgroundColor: '#22C55E', alignItems: 'center', justifyContent: 'center' }}
           >
-            <Text style={{ fontSize: 13, fontWeight: '700', color: '#FFFFFF' }}>
-              {saving ? '...' : 'Save'}
-            </Text>
+            <Ionicons name="checkmark" size={18} color="#FFFFFF" />
           </Pressable>
           <Pressable onPress={() => { setShowInput(false); setWeightInput(''); }}>
             <Ionicons name="close" size={18} color={theme.textSecondary} />

@@ -41,6 +41,7 @@ import FormeCoachCard, { getTodayTip } from '@/components/FormeCoachCard';
 import RecoveryMapCard from '@/components/RecoveryMapCard';
 import TrophyCaseCard from '@/components/TrophyCaseCard';
 import BodyStatsCard from '@/components/BodyStatsCard';
+import { StreakRing } from '@/components/StreakRing';
 import { useAnimatedCounter } from '@/lib/useAnimatedCounter';
 import SparkleOverlay from '@/components/SparkleOverlay';
 import { BreathingGradient } from '@/components/BreathingGradient';
@@ -110,9 +111,11 @@ export default function HomeScreen() {
   const [recentLogs, setRecentLogs] = useState<{ exercises: LoggedExercise[]; completed_at: string }[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [upNextExpanded, setUpNextExpanded] = useState(false);
+  const [todayCardExpanded, setTodayCardExpanded] = useState(false);
   const [sessionPRs, setSessionPRs] = useState<{ exercise_name: string; e1rm: number; weight: number; reps: number; previous_e1rm: number | null }[]>([]);
   // Rest day check-in (for streak continuity)
   const [restDayCheckedIn, setRestDayCheckedIn] = useState(false);
+  const [streakData, setStreakData] = useState({ streak: 0, maxStreak: 0 });
 
   const handleRestDayCheckIn = async () => {
     if (!userId || restDayCheckedIn) return;
@@ -318,12 +321,42 @@ export default function HomeScreen() {
         .order('completed_at', { ascending: false });
       setRecentLogs((recentData as { exercises: LoggedExercise[]; completed_at: string }[]) ?? []);
 
-      // streak computation removed from homescreen
+      // Streak: fetch workout + check-in dates for last 90 days
+      const ninetyDaysAgo = new Date();
+      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+      const [{ data: streakLogs }, { data: streakCheckIns }] = await Promise.all([
+        supabase.from('workout_logs').select('completed_at').eq('user_id', user.id).gte('completed_at', dateKey(ninetyDaysAgo)),
+        supabase.from('activities').select('date').eq('user_id', user.id).eq('type', 'rest_check_in').gte('date', dateKey(ninetyDaysAgo)),
+      ]);
+      const workoutDates = (streakLogs ?? []).map((l: any) => l.completed_at?.split('T')[0]).filter(Boolean);
+      const checkInDates = (streakCheckIns ?? []).map((a: any) => a.date).filter(Boolean);
+      const allStreakDates = [...new Set([...workoutDates, ...checkInDates])];
+      // Compute current + best streak
+      const datesSet = new Set(allStreakDates);
+      let s = 0;
+      const sd = new Date(); sd.setHours(0, 0, 0, 0);
+      if (!datesSet.has(dateKey(sd))) sd.setDate(sd.getDate() - 1);
+      while (datesSet.has(dateKey(sd))) { s++; sd.setDate(sd.getDate() - 1); }
+      const sorted = Array.from(datesSet).sort();
+      let best = 0, run = 1;
+      for (let i = 1; i < sorted.length; i++) {
+        const prev = new Date(sorted[i - 1] + 'T12:00:00');
+        const curr = new Date(sorted[i] + 'T12:00:00');
+        if (Math.round((curr.getTime() - prev.getTime()) / 86400000) === 1) run++;
+        else { best = Math.max(best, run); run = 1; }
+      }
+      setStreakData({ streak: s, maxStreak: Math.max(best, run) });
 
     } catch {}
   }, [activeDate]);
 
-  useFocusEffect(useCallback(() => { loadData(); }, [loadData]));
+  const lastFetchRef = useRef(0);
+  useFocusEffect(useCallback(() => {
+    const now = Date.now();
+    if (now - lastFetchRef.current < 30000) return; // skip if fetched within 30s
+    lastFetchRef.current = now;
+    loadData();
+  }, [loadData]));
 
   // Stale session check - prompt user if active workout is older than 24 hours
   const staleCheckDone = useRef(false);
@@ -527,6 +560,16 @@ export default function HomeScreen() {
         </View>
 
         <View style={{ paddingHorizontal: 24, gap: 12 }}>
+          {/* Streak — always visible at top */}
+          <StreakRing
+            streak={streakData.streak}
+            maxStreak={streakData.maxStreak}
+            size="compact"
+            color={focusCardColor}
+            onCheckIn={!activeWorkoutDay && activeDate === todayStr ? handleRestDayCheckIn : undefined}
+            checkedIn={restDayCheckedIn}
+          />
+
           {!plan ? (
             <View style={{ marginTop: 40, alignItems: 'center' }}>
               <Text allowFontScaling style={{ color: theme.textSecondary, fontSize: 15, textAlign: 'center', marginBottom: 32, lineHeight: 22 }}>
@@ -718,7 +761,7 @@ export default function HomeScreen() {
                   <Ionicons name="bulb" size={16} color="#F59E0B" style={{ marginTop: 2 }} />
                   <View style={{ flex: 1 }}>
                     <Text style={{ fontSize: 11, fontWeight: '700', color: '#F59E0B', letterSpacing: 1, marginBottom: 3 }}>FORME TIP</Text>
-                    <Text style={{ fontSize: 13, color: theme.text, flex: 1, lineHeight: 18 }}>{getTodayTip()}</Text>
+                    <Text style={{ fontSize: 13, color: theme.text, flex: 1, lineHeight: 18 }}>{getTodayTip(true)}</Text>
                   </View>
                 </View>
               </View>
@@ -739,45 +782,16 @@ export default function HomeScreen() {
 
           ) : !activeWorkoutDay ? (
             <View style={{ gap: 12 }}>
-              {/* Rest Day card — with daily tip + streak check-in */}
-              <View style={{ backgroundColor: theme.surface, borderRadius: 16, borderWidth: 1, borderColor: theme.border }}>
+              {/* Rest Day card with Forme Tip */}
+              <View style={{ backgroundColor: theme.surface, borderRadius: 16, borderWidth: 1, borderColor: theme.border, overflow: 'hidden' }}>
                 <View style={{ paddingHorizontal: 16, paddingVertical: 14, flexDirection: 'row', alignItems: 'center' }}>
-                  <Ionicons name="moon" size={28} color={theme.textSecondary} />
-                  <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, marginLeft: 12, flex: 1 }}>Rest Day</Text>
+                  <Ionicons name="leaf-outline" size={22} color="#22C55E" />
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, marginLeft: 10, flex: 1 }}>Recovery Day</Text>
                 </View>
-                <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingHorizontal: 16, paddingBottom: 14 }}>
-                  <Ionicons name="bulb" size={16} color="#F59E0B" style={{ marginTop: 2 }} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '700', color: '#F59E0B', letterSpacing: 1, marginBottom: 3 }}>FORME TIP</Text>
-                    <Text style={{ fontSize: 13, color: theme.text, flex: 1, lineHeight: 18 }}>{getTodayTip()}</Text>
-                  </View>
+                <View style={{ height: 1, backgroundColor: theme.border, marginHorizontal: 16 }} />
+                <View style={{ paddingHorizontal: 16, paddingLeft: 24, paddingVertical: 12 }}>
+                  <Text style={{ fontSize: 13, color: theme.textSecondary, lineHeight: 18 }}>{getTodayTip(true)}</Text>
                 </View>
-                {/* Rest day check-in for streak */}
-                {activeDate === todayStr && (
-                  <View style={{ paddingHorizontal: 16, paddingBottom: 14 }}>
-                    <Pressable
-                      onPress={handleRestDayCheckIn}
-                      disabled={restDayCheckedIn}
-                      style={{
-                        flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-                        backgroundColor: restDayCheckedIn ? `${focusCardColor}15` : `${focusCardColor}20`,
-                        borderRadius: 12, paddingVertical: 10,
-                      }}
-                    >
-                      <Ionicons
-                        name={restDayCheckedIn ? 'checkmark-circle' : 'checkmark-circle-outline'}
-                        size={18}
-                        color={restDayCheckedIn ? '#22C55E' : focusCardColor}
-                      />
-                      <Text style={{
-                        fontSize: 13, fontWeight: '600',
-                        color: restDayCheckedIn ? '#22C55E' : focusCardColor,
-                      }}>
-                        {restDayCheckedIn ? 'Checked In — Streak Saved!' : 'Check In to Keep Your Streak'}
-                      </Text>
-                    </Pressable>
-                  </View>
-                )}
               </View>
 
               {/* Next Workout Preview — compact by default, expandable */}
@@ -909,43 +923,70 @@ export default function HomeScreen() {
                 );
               })() : (
                 <Pressable
-                  onPress={() => {
-                    const idx = plan.weeklyPlan.indexOf(activeWorkoutDay);
-                    router.push(`/workout/${idx}`);
-                  }}
+                  onPress={() => { animateLayout(); setTodayCardExpanded(prev => !prev); }}
                   style={{ borderRadius: 24 }}
                 >
                   <BreathingGradient
                     color={focusCardColor}
                     style={{ borderRadius: 24 }}
                   >
-                    <View style={{ paddingHorizontal: 20, paddingVertical: 24 }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                    <View style={{ paddingHorizontal: 20, paddingVertical: todayCardExpanded ? 24 : 18 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                       <View style={{ flex: 1 }}>
                         {!selectedDate && (
-                          <Text allowFontScaling style={{ fontSize: 12, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 4 }}>
+                          <Text allowFontScaling style={{ fontSize: 11, fontWeight: '600', color: '#FFFFFFCC', textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 3 }}>
                             Today's Workout
                           </Text>
                         )}
-                        <Text allowFontScaling style={{ fontSize: 28, fontWeight: '800', color: '#FFFFFF', lineHeight: 34 }}>
+                        <Text allowFontScaling style={{ fontSize: todayCardExpanded ? 26 : 22, fontWeight: '800', color: '#FFFFFF', lineHeight: todayCardExpanded ? 32 : 28 }}>
                           {stripParens(activeWorkoutDay.focus)}
                         </Text>
                       </View>
-                      <Ionicons name="arrow-forward" size={24} color="#FFFFFF" />
+                      <Ionicons name={todayCardExpanded ? 'chevron-up' : 'chevron-down'} size={20} color="#FFFFFFCC" />
                     </View>
-                    {/* Exercise list preview */}
-                    <View style={{ marginTop: 16, gap: 6 }}>
-                      {activeWorkoutDay.exercises.map((ex, i) => (
-                        <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <Text style={{ fontSize: 14, color: '#FFFFFFCC', fontWeight: '400' }}>
-                            {i + 1}. {ex.name}
-                          </Text>
+                    {/* Compact: muscle pills + exercise count */}
+                    {!todayCardExpanded && (
+                      <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
+                        <MuscleGroupPills categories={getExerciseCategories(activeWorkoutDay.exercises)} size="small" />
+                        <Text style={{ fontSize: 12, color: '#FFFFFF99', fontWeight: '500' }}>
+                          {activeWorkoutDay.exercises.length} exercises
+                        </Text>
+                      </View>
+                    )}
+                    {/* Expanded: full exercise list + start button */}
+                    {todayCardExpanded && (
+                      <>
+                        <View style={{ marginTop: 14, gap: 6 }}>
+                          {activeWorkoutDay.exercises.map((ex, i) => (
+                            <View key={i} style={{ flexDirection: 'row', alignItems: 'center' }}>
+                              <Text style={{ fontSize: 14, color: '#FFFFFFCC', fontWeight: '400' }}>
+                                {i + 1}. {ex.name}
+                              </Text>
+                              <Text style={{ fontSize: 12, color: '#FFFFFF80', marginLeft: 'auto' }}>
+                                {ex.sets} × {ex.reps}
+                              </Text>
+                            </View>
+                          ))}
                         </View>
-                      ))}
-                    </View>
-                    <View style={{ marginTop: 12 }}>
-                      <MuscleGroupPills categories={getExerciseCategories(activeWorkoutDay.exercises)} size="small" />
-                    </View>
+                        <View style={{ marginTop: 12 }}>
+                          <MuscleGroupPills categories={getExerciseCategories(activeWorkoutDay.exercises)} size="small" />
+                        </View>
+                        <Pressable
+                          onPress={() => {
+                            const idx = plan.weeklyPlan.indexOf(activeWorkoutDay);
+                            router.push(`/workout/${idx}`);
+                          }}
+                          style={{
+                            marginTop: 16, paddingVertical: 12, borderRadius: 14,
+                            backgroundColor: '#FFFFFF', alignItems: 'center',
+                          }}
+                        >
+                          <Text style={{ fontSize: 14, fontWeight: '700', color: focusCardColor }}>
+                            Start Workout
+                          </Text>
+                        </Pressable>
+                      </>
+                    )}
                     </View>
                   </BreathingGradient>
                 </Pressable>
@@ -982,10 +1023,10 @@ export default function HomeScreen() {
             </View>
           )}
 
-          {/* Today's activities */}
-          {todayActivities.length > 0 && (
+          {/* Today's activities (hide rest check-ins — shown in rest day card) */}
+          {todayActivities.filter((a) => a.type !== 'rest_check_in').length > 0 && (
             <View>
-              {todayActivities.map((act) => (
+              {todayActivities.filter((a) => a.type !== 'rest_check_in').map((act) => (
                 <View key={act.id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8, paddingHorizontal: 4 }}>
                   <Ionicons name="checkmark-circle" size={16} color="#22C55E" />
                   <Text style={{ fontSize: 13, color: theme.text, flex: 1 }}>

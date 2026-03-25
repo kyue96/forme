@@ -5,16 +5,17 @@ import {
   Pressable,
   ScrollView,
   Text,
+  TextInput,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import Svg, { Line, Polygon } from 'react-native-svg';
 
 import { BadgesTab } from '@/components/BadgesTab';
 import { useBadgeStore } from '@/lib/badge-store';
-import { StreakRing } from '@/components/StreakRing';
 import { VolumeChart, VolumeChartData } from '@/components/VolumeChart';
 import { AppHeader } from '@/components/AppHeader';
 
@@ -192,6 +193,7 @@ function LineChart({
   theme,
   height = 120,
   formatValue,
+  yAxisLabel,
   onInteractionStart,
   onInteractionEnd,
 }: {
@@ -202,11 +204,13 @@ function LineChart({
   theme: any;
   height?: number;
   formatValue?: (v: number) => string;
+  yAxisLabel?: string;
   onInteractionStart?: () => void;
   onInteractionEnd?: () => void;
 }) {
   const [selectedIdx, setSelectedIdx] = useState<number | null>(null);
   const chartLayoutRef = useRef({ x: 0, width: 0 });
+  const [chartWidth, setChartWidth] = useState(0);
 
   if (data.length === 0) return null;
   const minVal = Math.min(...data);
@@ -260,6 +264,12 @@ function LineChart({
     })
   ).current;
 
+  // Convert data to pixel coordinates for SVG
+  const points = data.map((val, i) => ({
+    x: data.length === 1 ? chartWidth / 2 : (i / (data.length - 1)) * chartWidth,
+    y: ((yMax - val) / (yMax - yMin)) * height,
+  }));
+
   const displayVal = selectedIdx !== null ? data[selectedIdx] : null;
 
   return (
@@ -285,8 +295,10 @@ function LineChart({
         <View
           style={{ flex: 1, height, position: 'relative' }}
           onLayout={(e) => {
-            e.target.measureInWindow((x, _y, width) => {
-              chartLayoutRef.current = { x, width };
+            const { width } = e.nativeEvent.layout;
+            setChartWidth(width);
+            e.target.measureInWindow((x, _y, w) => {
+              chartLayoutRef.current = { x, width: w };
             });
           }}
           {...panResponder.panHandlers}
@@ -301,39 +313,38 @@ function LineChart({
               }} />
             );
           })}
-          {/* Gradient area fill under the line */}
-          <LinearGradient
-            colors={[fillColor + '35', fillColor + '08', 'transparent']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 0, y: 1 }}
-            style={{
-              position: 'absolute', bottom: 0, left: 0, right: 0,
-              height: '100%', borderRadius: 4,
-            }}
-          />
-          {/* Connecting lines */}
-          {data.length > 1 && data.slice(0, -1).map((val, i) => {
-            const x1Pct = (i / (data.length - 1)) * 100;
-            const y1Pct = ((yMax - val) / (yMax - yMin)) * 100;
-            const x2Pct = ((i + 1) / (data.length - 1)) * 100;
-            const y2Pct = ((yMax - data[i + 1]) / (yMax - yMin)) * 100;
-            return (
-              <View key={`line-${i}`} style={{
-                position: 'absolute',
-                left: `${x1Pct}%`, top: `${Math.min(y1Pct, y2Pct)}%`,
-                width: `${x2Pct - x1Pct}%`,
-                height: Math.max(Math.abs(y2Pct - y1Pct), 2),
-                zIndex: 1,
-              }}>
-                <View style={{
-                  position: 'absolute', left: 0, right: 0,
-                  top: y2Pct >= y1Pct ? 0 : undefined,
-                  bottom: y2Pct < y1Pct ? 0 : undefined,
-                  height: 2, backgroundColor: lineColor, opacity: 0.7,
-                }} />
-              </View>
-            );
-          })}
+          {/* SVG overlay for lines + fill */}
+          {chartWidth > 0 && points.length >= 2 && (
+            <Svg width={chartWidth} height={height} style={{ position: 'absolute', top: 0, left: 0 }}>
+              {/* Gradient fill under the line */}
+              <Polygon
+                points={`${points[0].x},${height} ${points.map(p => `${p.x},${p.y}`).join(' ')} ${points[points.length - 1].x},${height}`}
+                fill={fillColor}
+                fillOpacity={0.15}
+              />
+              {/* Connecting lines between dots */}
+              {points.slice(0, -1).map((p, i) => (
+                <Line
+                  key={`line-${i}`}
+                  x1={p.x} y1={p.y}
+                  x2={points[i + 1].x} y2={points[i + 1].y}
+                  stroke={lineColor}
+                  strokeWidth={2}
+                  strokeOpacity={0.8}
+                  strokeLinecap="round"
+                />
+              ))}
+            </Svg>
+          )}
+          {/* Single point — show just the gradient fill */}
+          {chartWidth > 0 && points.length === 1 && (
+            <LinearGradient
+              colors={[fillColor + '35', fillColor + '08', 'transparent']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: '100%', borderRadius: 4 }}
+            />
+          )}
           {/* Dots */}
           {data.map((val, i) => {
             const x = data.length === 1 ? 50 : (i / (data.length - 1)) * 100;
@@ -344,7 +355,7 @@ function LineChart({
                 position: 'absolute', left: `${x}%`, top: `${y}%`,
                 width: isSelected ? 10 : dotSize, height: isSelected ? 10 : dotSize,
                 borderRadius: isSelected ? 5 : dotSize / 2,
-                backgroundColor: isSelected ? lineColor : lineColor,
+                backgroundColor: lineColor,
                 borderWidth: isSelected ? 2 : 0,
                 borderColor: '#FFFFFF',
                 marginLeft: isSelected ? -5 : -dotSize / 2,
@@ -367,7 +378,7 @@ function LineChart({
         </View>
       </View>
       {/* X-axis labels */}
-      <View style={{ flexDirection: 'row', marginTop: 6, marginLeft: 40 }}>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 6, marginLeft: 40 }}>
         {labels.map((label, i) => (
           <View key={i} style={{ flex: 1, alignItems: i === 0 ? 'flex-start' : i === labels.length - 1 ? 'flex-end' : 'center' }}>
             <Text style={{
@@ -380,6 +391,12 @@ function LineChart({
           </View>
         ))}
       </View>
+      {/* Y-axis unit label */}
+      {yAxisLabel && (
+        <Text style={{ fontSize: 8, color: theme.textSecondary, textAlign: 'left', marginTop: 2, marginLeft: 8 }}>
+          {yAxisLabel}
+        </Text>
+      )}
     </View>
   );
 }
@@ -420,7 +437,7 @@ function HorizontalBar({
 }
 
 // ─── Card wrapper ───
-function StatCard({ title, theme, children }: { title: string; theme: any; children: React.ReactNode }) {
+function StatCard({ title, theme, children, rightLabel }: { title: string; theme: any; children: React.ReactNode; rightLabel?: React.ReactNode }) {
   return (
     <View style={{
       backgroundColor: theme.surface,
@@ -429,7 +446,10 @@ function StatCard({ title, theme, children }: { title: string; theme: any; child
       borderWidth: 1,
       borderColor: theme.border,
     }}>
-      <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text, marginBottom: 12 }}>{title}</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 12 }}>
+        <Text style={{ fontSize: 14, fontWeight: '700', color: theme.text }}>{title}</Text>
+        {rightLabel ?? null}
+      </View>
       {children}
     </View>
   );
@@ -443,6 +463,8 @@ export default function StatsScreen() {
   const [activeTab, setActiveTab] = useState<'stats' | 'badges'>('stats');
   const [chartScrollLock, setChartScrollLock] = useState(false);
   const [strengthExpanded, setStrengthExpanded] = useState(false);
+  const [editingWeight, setEditingWeight] = useState(false);
+  const [editWeightInput, setEditWeightInput] = useState('');
   const storeUserId = useUserStore((s) => s.userId);
   const userCreatedAt = useUserStore((s) => s.createdAt);
   const [userId, setUserId] = useState<string | null>(storeUserId);
@@ -450,7 +472,6 @@ export default function StatsScreen() {
 
   // Raw cached data
   const [allLogs, setAllLogs] = useState<WorkoutLog[]>([]);
-  const [streakDates, setStreakDates] = useState<string[]>([]);
   const [weightEntries, setWeightEntries] = useState<{ date: string; weight_kg: number }[]>([]);
   const cachedLogCount = useRef<number>(-1);
 
@@ -477,24 +498,16 @@ export default function StatsScreen() {
       }
       cachedLogCount.current = totalCount;
 
-      // Fetch last 60 days of full logs + 90 days of streak dates
+      // Fetch last 60 days of full logs
       const sixtyDaysAgo = new Date();
       sixtyDaysAgo.setDate(sixtyDaysAgo.getDate() - 60);
-      const ninetyDaysAgo = new Date();
-      ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
 
-      const [{ data: logs }, { data: sLogs }, { data: bodyStats }, { data: restCheckIns }] = await Promise.all([
+      const [{ data: logs }, { data: bodyStats }] = await Promise.all([
         supabase
           .from('workout_logs')
           .select('id, day_name, exercises, duration_minutes, completed_at')
           .eq('user_id', uid)
           .gte('completed_at', dateKey(sixtyDaysAgo))
-          .order('completed_at', { ascending: false }),
-        supabase
-          .from('workout_logs')
-          .select('completed_at')
-          .eq('user_id', uid)
-          .gte('completed_at', dateKey(ninetyDaysAgo))
           .order('completed_at', { ascending: false }),
         supabase
           .from('body_stats')
@@ -503,12 +516,6 @@ export default function StatsScreen() {
           .not('weight_kg', 'is', null)
           .order('date', { ascending: true })
           .limit(90),
-        supabase
-          .from('activities')
-          .select('date')
-          .eq('user_id', uid)
-          .eq('type', 'rest_check_in')
-          .gte('date', dateKey(ninetyDaysAgo)),
       ]);
 
       const allWorkoutLogs = (logs ?? []) as WorkoutLog[];
@@ -523,9 +530,6 @@ export default function StatsScreen() {
           .filter((e: any) => e.weight_kg != null)
           .map((e: any) => ({ date: e.date, weight_kg: Number(e.weight_kg) })),
       );
-      const workoutDates = (sLogs ?? []).map((l: any) => l.completed_at?.split('T')[0]).filter(Boolean);
-      const checkInDates = (restCheckIns ?? []).map((a: any) => a.date).filter(Boolean);
-      setStreakDates([...new Set([...workoutDates, ...checkInDates])]);
       setInitialLoad(false);
     } catch {
       setInitialLoad(false);
@@ -533,37 +537,18 @@ export default function StatsScreen() {
   }, [storeUserId]); // only re-create if userId changes
 
   // Fetch on mount (or when storeUserId becomes available). On focus, lightweight re-check.
-  useEffect(() => { loadData(); }, [loadData]);
+  const lastFetchRef = useRef(0);
+  useEffect(() => { lastFetchRef.current = Date.now(); loadData(); }, [loadData]);
   useFocusEffect(useCallback(() => {
-    // Lightweight re-check on tab focus
+    const now = Date.now();
+    if (now - lastFetchRef.current < 30000) return; // skip if fetched within 30s
+    lastFetchRef.current = now;
     if (cachedLogCount.current >= 0) loadData();
   }, [loadData]));
 
   // ═══════════════════════════════════════════════════════════
   // COMPUTED STATS (all memoized from cached allLogs)
   // ═══════════════════════════════════════════════════════════
-
-  // ─── Streak ───
-  const { streak, maxStreak } = useMemo(() => {
-    const datesSet = new Set(streakDates);
-    // Current streak
-    let s = 0;
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    if (!datesSet.has(dateKey(d))) d.setDate(d.getDate() - 1);
-    while (datesSet.has(dateKey(d))) { s++; d.setDate(d.getDate() - 1); }
-
-    // Best streak
-    const sorted = Array.from(datesSet).sort();
-    let best = 0, run = 1;
-    for (let i = 1; i < sorted.length; i++) {
-      const prev = new Date(sorted[i - 1] + 'T12:00:00');
-      const curr = new Date(sorted[i] + 'T12:00:00');
-      if (Math.round((curr.getTime() - prev.getTime()) / 86400000) === 1) run++;
-      else { best = Math.max(best, run); run = 1; }
-    }
-    return { streak: s, maxStreak: Math.max(best, run) };
-  }, [streakDates]);
 
   // ─── 8-Week Volume Trend ───
   const weeklyVolumeTrend = useMemo(() => {
@@ -664,37 +649,6 @@ export default function StatsScreen() {
     });
   }, [allLogs]);
 
-  // ─── Workout Frequency (8 weeks) ───
-  const { frequencyData, avgFrequency } = useMemo(() => {
-    const now = new Date();
-    const thisSunday = getSunday(now);
-    const joinDate = userCreatedAt ? dateKey(new Date(userCreatedAt)) : null;
-    const data: { label: string; count: number }[] = [];
-    let total = 0;
-
-    for (let w = 7; w >= 0; w--) {
-      const weekStart = new Date(thisSunday);
-      weekStart.setDate(weekStart.getDate() - w * 7);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 6); // Saturday
-      const start = dateKey(weekStart);
-      const end = dateKey(weekEnd);
-
-      // Skip weeks before user joined
-      if (joinDate && end < joinDate) continue;
-
-      const count = allLogs.filter(l => {
-        const dk = l.completed_at?.split('T')[0];
-        return dk && dk >= start && dk <= end;
-      }).length;
-
-      data.push({ label: shortDate(weekStart), count });
-      total += count;
-    }
-
-    return { frequencyData: data, avgFrequency: data.length > 0 ? (total / data.length).toFixed(1) : '0' };
-  }, [allLogs, userCreatedAt]);
-
   // ─── Muscle Group Distribution ───
   const muscleDistribution = useMemo(() => {
     const map = new Map<string, number>();
@@ -760,37 +714,134 @@ export default function StatsScreen() {
     return results.sort((a, b) => b.pctChange - a.pctChange);
   }, [allLogs]);
 
-  // ─── Session Duration Trend (8 weeks, only after user joined) ───
-  const durationTrend = useMemo(() => {
-    const now = new Date();
-    const thisSunday = getSunday(now);
-    const joinDate = userCreatedAt ? dateKey(new Date(userCreatedAt)) : null;
-    const weeks: { label: string; avgMin: number }[] = [];
+  // ─── Training Density (lbs or kg per minute, per workout) ───
+  const { densityTrend, avgDensity } = useMemo(() => {
+    // Sort logs by date ascending, take last 12
+    const sorted = [...allLogs]
+      .filter(l => l.completed_at && l.duration_minutes > 0)
+      .sort((a, b) => a.completed_at.localeCompare(b.completed_at))
+      .slice(-12);
 
-    for (let w = 7; w >= 0; w--) {
-      const weekStart = new Date(thisSunday);
-      weekStart.setDate(weekStart.getDate() - w * 7);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 6); // Saturday
-      const start = dateKey(weekStart);
-      const end = dateKey(weekEnd);
+    const points = sorted.map(log => {
+      const vol = logVolume(log);
+      const density = log.duration_minutes > 0 ? Math.round(vol / log.duration_minutes) : 0;
+      const d = new Date(log.completed_at);
+      const label = `${d.getMonth() + 1}/${d.getDate()}`;
+      return { label, density };
+    });
 
-      // Skip weeks entirely before the user joined
-      if (joinDate && end < joinDate) continue;
+    const nonZero = points.filter(p => p.density > 0);
+    const avg = nonZero.length > 0
+      ? Math.round(nonZero.reduce((s, p) => s + p.density, 0) / nonZero.length)
+      : 0;
 
-      const weekLogs = allLogs.filter(l => {
-        const dk = l.completed_at?.split('T')[0];
-        return dk && dk >= start && dk <= end;
-      });
+    return { densityTrend: points, avgDensity: avg };
+  }, [allLogs]);
 
-      const avg = weekLogs.length > 0
-        ? weekLogs.reduce((sum, l) => sum + (l.duration_minutes || 0), 0) / weekLogs.length
-        : 0;
-
-      weeks.push({ label: shortDate(weekStart), avgMin: Math.round(avg) });
+  // ─── Average Intensity (% of e1RM, per workout) ───
+  const { intensityTrend, avgIntensity } = useMemo(() => {
+    // First compute per-exercise best e1RM across all logs (as the "max" reference)
+    const exerciseBest = new Map<string, number>();
+    for (const log of allLogs) {
+      for (const ex of log.exercises as LoggedExercise[]) {
+        const key = ex.name.toLowerCase();
+        for (const s of ex.sets) {
+          if (!s.completed || !s.weight || s.weight <= 0 || s.reps <= 0) continue;
+          const e1rm = s.reps === 1 ? s.weight : s.weight * (36 / (37 - s.reps));
+          if (e1rm > (exerciseBest.get(key) ?? 0)) exerciseBest.set(key, e1rm);
+        }
+      }
     }
-    return weeks;
-  }, [allLogs, userCreatedAt]);
+
+    // Sort logs by date ascending, take last 12
+    const sorted = [...allLogs]
+      .filter(l => l.completed_at)
+      .sort((a, b) => a.completed_at.localeCompare(b.completed_at))
+      .slice(-12);
+
+    const points = sorted.map(log => {
+      let totalPct = 0;
+      let count = 0;
+      for (const ex of log.exercises as LoggedExercise[]) {
+        const best = exerciseBest.get(ex.name.toLowerCase());
+        if (!best || best <= 0) continue;
+        for (const s of ex.sets) {
+          if (!s.completed || !s.weight || s.weight <= 0 || s.reps <= 0) continue;
+          totalPct += (s.weight / best) * 100;
+          count++;
+        }
+      }
+      const d = new Date(log.completed_at);
+      const label = `${d.getMonth() + 1}/${d.getDate()}`;
+      return { label, intensity: count > 0 ? Math.round(totalPct / count) : 0 };
+    });
+
+    const nonZero = points.filter(p => p.intensity > 0);
+    const avg = nonZero.length > 0
+      ? Math.round(nonZero.reduce((s, p) => s + p.intensity, 0) / nonZero.length)
+      : 0;
+
+    return { intensityTrend: points, avgIntensity: avg };
+  }, [allLogs]);
+
+  // ─── Progressive Overload Score (weekly avg weight per exercise, % change) ───
+  const overloadData = useMemo(() => {
+    const now = new Date();
+    const twoWeeksAgo = new Date(now.getTime() - 14 * 86400000);
+    const fourWeeksAgo = new Date(now.getTime() - 28 * 86400000);
+    const twoWeeksStr = dateKey(twoWeeksAgo);
+    const fourWeeksStr = dateKey(fourWeeksAgo);
+
+    // Per-exercise average weight: recent (0-2 wks) vs prior (2-4 wks)
+    const recentAvg = new Map<string, { total: number; count: number }>();
+    const priorAvg = new Map<string, { total: number; count: number }>();
+
+    for (const log of allLogs) {
+      const dk = log.completed_at?.split('T')[0] ?? '';
+      const isRecent = dk >= twoWeeksStr;
+      const isPrior = dk >= fourWeeksStr && dk < twoWeeksStr;
+      if (!isRecent && !isPrior) continue;
+
+      for (const ex of log.exercises as LoggedExercise[]) {
+        const key = ex.name;
+        for (const s of ex.sets) {
+          if (!s.completed || !s.weight || s.weight <= 0) continue;
+          const map = isRecent ? recentAvg : priorAvg;
+          const entry = map.get(key) ?? { total: 0, count: 0 };
+          entry.total += s.weight;
+          entry.count += 1;
+          map.set(key, entry);
+        }
+      }
+    }
+
+    // Build results for exercises in both periods
+    const results: { exercise: string; recentAvg: number; priorAvg: number; pctChange: number }[] = [];
+    for (const [name, recent] of recentAvg.entries()) {
+      const prior = priorAvg.get(name);
+      if (!prior || prior.count === 0) continue;
+      const rAvg = recent.total / recent.count;
+      const pAvg = prior.total / prior.count;
+      if (pAvg <= 0) continue;
+      const pctChange = ((rAvg - pAvg) / pAvg) * 100;
+      results.push({
+        exercise: name,
+        recentAvg: Math.round(rAvg),
+        priorAvg: Math.round(pAvg),
+        pctChange: Math.round(pctChange * 10) / 10,
+      });
+    }
+
+    // Sort by absolute change descending
+    results.sort((a, b) => Math.abs(b.pctChange) - Math.abs(a.pctChange));
+
+    // Overall score: average of all % changes
+    const overallScore = results.length > 0
+      ? Math.round(results.reduce((s, r) => s + r.pctChange, 0) / results.length * 10) / 10
+      : null;
+
+    return { exercises: results.slice(0, 8), overallScore };
+  }, [allLogs]);
 
   // ─── Weight Trend (from body_stats) ───
   const weightTrend = useMemo(() => {
@@ -819,6 +870,36 @@ export default function StatsScreen() {
     const change = data.length >= 2 ? Math.round((current - first) * 10) / 10 : null;
     return { data, labels, current, change };
   }, [weightEntries, weightUnit]);
+
+  // ─── Edit latest weight entry ───
+  const handleEditWeight = () => {
+    if (weightEntries.length === 0) return;
+    const latest = weightEntries[weightEntries.length - 1];
+    const display = weightUnit === 'lbs'
+      ? (latest.weight_kg * 2.205).toFixed(1)
+      : latest.weight_kg.toFixed(1);
+    setEditWeightInput(display);
+    setEditingWeight(true);
+  };
+
+  const handleSaveEditWeight = async () => {
+    const val = parseFloat(editWeightInput);
+    if (isNaN(val) || val <= 0 || !userId) return;
+    const kg = weightUnit === 'lbs' ? val / 2.205 : val;
+    const latest = weightEntries[weightEntries.length - 1];
+    if (!latest) return;
+    await supabase
+      .from('body_stats')
+      .update({ weight_kg: Math.round(kg * 100) / 100 })
+      .eq('user_id', userId)
+      .eq('date', latest.date);
+    // Update local state
+    setWeightEntries(prev =>
+      prev.map(e => e.date === latest.date ? { ...e, weight_kg: Math.round(kg * 100) / 100 } : e)
+    );
+    setEditingWeight(false);
+    setEditWeightInput('');
+  };
 
   // ─── Muscle distribution colors (vibrant) ───
   const muscleColors = [
@@ -865,35 +946,20 @@ export default function StatsScreen() {
           {activeTab === 'stats' ? (
             <View style={{ gap: 12 }}>
 
-              {/* ─── Streak ─── */}
-              <StreakRing streak={streak} maxStreak={maxStreak} size="compact" color={focusCardColor} />
-
               {/* ─── 3-Week Daily Volume ─── */}
               {volumeChartData.length > 0 && (
-                <StatCard title="Volume Trend" theme={theme}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12, marginTop: -4 }}>
-                    <Text style={{ fontSize: 10, color: theme.textSecondary }}>
-                      daily volume · 3 weeks
+                <StatCard title="Volume Trend" theme={theme} rightLabel={
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, fontVariant: ['tabular-nums'] }}>
+                      {formatNumber(weekVolume)} <Text style={{ fontSize: 10, fontWeight: '500', color: theme.textSecondary }}>{unitLabel}</Text>
                     </Text>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text, fontVariant: ['tabular-nums'] }}>
-                        {formatNumber(weekVolume)} <Text style={{ fontSize: 11, fontWeight: '500', color: theme.textSecondary }}>{unitLabel}</Text>
+                    {volDelta != null && (
+                      <Text style={{ fontSize: 10, fontWeight: '600', color: volDelta >= 0 ? '#22C55E' : '#EF4444', marginTop: 1 }}>
+                        {volDelta >= 0 ? '+' : ''}{Math.round(volDelta)}% vs last week
                       </Text>
-                      <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 1 }}>
-                        total volume this week
-                      </Text>
-                      {volDelta != null && (
-                        <Text style={{
-                          fontSize: 11,
-                          fontWeight: '600',
-                          color: volDelta >= 0 ? '#22C55E' : '#EF4444',
-                          marginTop: 2,
-                        }}>
-                          {volDelta >= 0 ? '+' : ''}{Math.round(volDelta)}% vs last week
-                        </Text>
-                      )}
-                    </View>
+                    )}
                   </View>
+                }>
                   <VolumeChart
                     data={volumeChartData}
                     theme={theme}
@@ -910,7 +976,6 @@ export default function StatsScreen() {
               {muscleDistribution.length > 0 && (() => {
                 const radarData = groupForRadar(muscleDistribution);
                 const totalVol = muscleDistribution.reduce((s, m) => s + m.volume, 0);
-                const maxPct = Math.max(...muscleDistribution.map(m => totalVol > 0 ? (m.volume / totalVol) * 100 : 0), 1);
                 return radarData.length >= 3 ? (
                   <StatCard title="Strength Profile" theme={theme}>
                     <Text style={{ fontSize: 10, color: theme.textSecondary, marginBottom: 4, marginTop: -4 }}>
@@ -943,33 +1008,41 @@ export default function StatsScreen() {
                         color={theme.textSecondary}
                       />
                     </Pressable>
-                    {/* Expanded horizontal bar breakdown */}
-                    {strengthExpanded && (
-                      <View style={{ marginTop: 8 }}>
-                        {muscleDistribution.filter(m => m.volume > 0).map((m, i) => {
-                          const pct = totalVol > 0 ? Math.round((m.volume / totalVol) * 100) : 0;
-                          const barWidth = maxPct > 0 ? Math.max((pct / maxPct) * 100, 3) : 3;
-                          return (
-                            <View key={m.category} style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                              <Text style={{ fontSize: 12, fontWeight: '600', color: theme.text, width: 80 }} numberOfLines={1}>
-                                {m.category}
-                              </Text>
-                              <View style={{ flex: 1, height: 8, borderRadius: 4, backgroundColor: theme.border, overflow: 'hidden', marginHorizontal: 10 }}>
-                                <View style={{
-                                  height: 8,
-                                  width: `${barWidth}%`,
-                                  borderRadius: 4,
+                    {/* Expanded stacked bar breakdown */}
+                    {strengthExpanded && (() => {
+                      const nonZero = muscleDistribution.filter(m => m.volume > 0);
+                      return (
+                        <View style={{ marginTop: 8 }}>
+                          {/* Stacked bar */}
+                          <View style={{ flexDirection: 'row', height: 14, borderRadius: 7, overflow: 'hidden', marginBottom: 12 }}>
+                            {nonZero.map((m, i) => {
+                              const pct = totalVol > 0 ? (m.volume / totalVol) * 100 : 0;
+                              return (
+                                <View key={m.category} style={{
+                                  width: `${Math.max(pct, 1)}%`,
+                                  height: 14,
                                   backgroundColor: muscleColors[i % muscleColors.length],
                                 }} />
-                              </View>
-                              <Text style={{ fontSize: 11, fontWeight: '500', color: theme.textSecondary, width: 32, textAlign: 'right', fontVariant: ['tabular-nums'] }}>
-                                {pct}%
-                              </Text>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    )}
+                              );
+                            })}
+                          </View>
+                          {/* Legend */}
+                          <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                            {nonZero.map((m, i) => {
+                              const pct = totalVol > 0 ? Math.round((m.volume / totalVol) * 100) : 0;
+                              return (
+                                <View key={m.category} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                  <View style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: muscleColors[i % muscleColors.length] }} />
+                                  <Text style={{ fontSize: 10, fontWeight: '500', color: theme.textSecondary }}>
+                                    {m.category} {pct}%
+                                  </Text>
+                                </View>
+                              );
+                            })}
+                          </View>
+                        </View>
+                      );
+                    })()}
                   </StatCard>
                 ) : null;
               })()}
@@ -1001,83 +1074,154 @@ export default function StatsScreen() {
                 </StatCard>
               )}
 
-              {/* ─── Workout Frequency (8 weeks) ─── */}
-              <StatCard title="Workout Frequency" theme={theme}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, marginTop: -4 }}>
-                  <Text style={{ fontSize: 10, color: theme.textSecondary }}>
-                    workouts per week
+              {/* ─── Training Density (8 weeks) ─── */}
+              {densityTrend.some(w => w.density > 0) && (
+                <StatCard title="Training Density" theme={theme} rightLabel={
+                  <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, fontVariant: ['tabular-nums'] }}>
+                    {avgDensity}<Text style={{ fontSize: 10, fontWeight: '500', color: theme.textSecondary }}> {unitLabel}/min</Text>
                   </Text>
-                  <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text }}>
-                    {avgFrequency}<Text style={{ fontSize: 11, fontWeight: '500', color: theme.textSecondary }}> avg/wk</Text>
-                  </Text>
-                </View>
-                <BarChart
-                  data={frequencyData.map(w => w.count)}
-                  labels={frequencyData.map(w => w.label)}
-                  barColor="#3B82F6"
-                  theme={theme}
-                  height={80}
-                  onInteractionStart={() => setChartScrollLock(true)}
-                  onInteractionEnd={() => setChartScrollLock(false)}
-                  formatValue={(v) => `${Math.round(v)} workouts`}
-                />
-              </StatCard>
+                }>
+                  <BarChart
+                    data={densityTrend.map(w => w.density)}
+                    labels={densityTrend.map(w => w.label)}
+                    barColor="#F97316"
+                    theme={theme}
+                    height={80}
+                    onInteractionStart={() => setChartScrollLock(true)}
+                    onInteractionEnd={() => setChartScrollLock(false)}
+                    formatValue={(v) => `${Math.round(v)} ${unitLabel}/min`}
+                  />
+                </StatCard>
+              )}
 
-              {/* ─── Session Duration Trend (8 weeks) ─── */}
-              <StatCard title="Avg Session Duration" theme={theme}>
-                {(() => {
-                  const nonZero = durationTrend.filter(w => w.avgMin > 0);
-                  const overallAvg = nonZero.length > 0
-                    ? Math.round(nonZero.reduce((s, w) => s + w.avgMin, 0) / nonZero.length)
-                    : 0;
-                  return (
-                    <>
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 12, marginTop: -4 }}>
-                        <Text style={{ fontSize: 10, color: theme.textSecondary }}>
-                          minutes per session
-                        </Text>
-                        <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text }}>
-                          {overallAvg}<Text style={{ fontSize: 11, fontWeight: '500', color: theme.textSecondary }}> min</Text>
-                        </Text>
-                      </View>
-                      <BarChart
-                        data={durationTrend.map(w => w.avgMin)}
-                        labels={durationTrend.map(w => w.label)}
-                        barColor="#14B8A6"
-                        theme={theme}
-                        height={80}
-                        onInteractionStart={() => setChartScrollLock(true)}
-                        onInteractionEnd={() => setChartScrollLock(false)}
-                        formatValue={(v) => `${Math.round(v)} min`}
+              {/* ─── Average Intensity (8 weeks) ─── */}
+              {intensityTrend.some(w => w.intensity > 0) && (
+                <StatCard title="Avg Intensity" theme={theme} rightLabel={
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, fontVariant: ['tabular-nums'] }}>
+                      {avgIntensity}<Text style={{ fontSize: 10, fontWeight: '500', color: theme.textSecondary }}>%</Text>
+                    </Text>
+                    <Text style={{ fontSize: 10, color: avgIntensity >= 80 ? '#EF4444' : avgIntensity >= 60 ? '#F59E0B' : '#22C55E', fontWeight: '600', marginTop: 1 }}>
+                      {avgIntensity >= 80 ? 'Heavy' : avgIntensity >= 60 ? 'Moderate' : 'Light'}
+                    </Text>
+                  </View>
+                }>
+                  <BarChart
+                    data={intensityTrend.map(w => w.intensity)}
+                    labels={intensityTrend.map(w => w.label)}
+                    barColor="#8B5CF6"
+                    theme={theme}
+                    height={80}
+                    onInteractionStart={() => setChartScrollLock(true)}
+                    onInteractionEnd={() => setChartScrollLock(false)}
+                    formatValue={(v) => `${Math.round(v)}% of 1RM`}
+                  />
+                </StatCard>
+              )}
+
+              {/* ─── Progressive Overload Score ─── */}
+              {overloadData.exercises.length > 0 && (
+                <StatCard title="Progressive Overload" theme={theme} rightLabel={
+                  overloadData.overallScore !== null ? (
+                    <View style={{
+                      flexDirection: 'row', alignItems: 'center', gap: 4,
+                      backgroundColor: (overloadData.overallScore >= 0 ? '#22C55E' : '#EF4444') + '15',
+                      paddingHorizontal: 8, paddingVertical: 3, borderRadius: 8,
+                    }}>
+                      <Ionicons
+                        name={overloadData.overallScore >= 0 ? 'trending-up' : 'trending-down'}
+                        size={14}
+                        color={overloadData.overallScore >= 0 ? '#22C55E' : '#EF4444'}
                       />
-                    </>
-                  );
-                })()}
-              </StatCard>
+                      <Text style={{
+                        fontSize: 13, fontWeight: '800',
+                        color: overloadData.overallScore >= 0 ? '#22C55E' : '#EF4444',
+                        fontVariant: ['tabular-nums'],
+                      }}>
+                        {overloadData.overallScore > 0 ? '+' : ''}{overloadData.overallScore}%
+                      </Text>
+                    </View>
+                  ) : undefined
+                }>
+                  {overloadData.exercises.map((ex, i) => {
+                    const isPositive = ex.pctChange > 0;
+                    const isNegative = ex.pctChange < 0;
+                    const color = isPositive ? '#22C55E' : isNegative ? '#EF4444' : theme.textSecondary;
+                    return (
+                      <View key={ex.exercise} style={{
+                        flexDirection: 'row', alignItems: 'center', paddingVertical: 8,
+                        borderBottomWidth: i < overloadData.exercises.length - 1 ? 1 : 0,
+                        borderBottomColor: theme.border,
+                      }}>
+                        <View style={{ flex: 1, marginRight: 8 }}>
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: theme.text }} numberOfLines={1}>
+                            {ex.exercise}
+                          </Text>
+                          <Text style={{ fontSize: 10, color: theme.textSecondary, marginTop: 1 }}>
+                            {ex.priorAvg} → {ex.recentAvg} {unitLabel}
+                          </Text>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Ionicons
+                            name={isPositive ? 'arrow-up' : isNegative ? 'arrow-down' : 'remove'}
+                            size={12}
+                            color={color}
+                          />
+                          <Text style={{ fontSize: 13, fontWeight: '700', color, fontVariant: ['tabular-nums'], minWidth: 48, textAlign: 'right' }}>
+                            {ex.pctChange > 0 ? '+' : ''}{ex.pctChange}%
+                          </Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </StatCard>
+              )}
 
               {/* ─── Weight Trend ─── */}
               {weightTrend.data.length >= 1 && (
-                <StatCard title="Weigh-In Trend" theme={theme}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16, marginTop: -4 }}>
-                    <Text style={{ fontSize: 10, color: theme.textSecondary }}>
-                      last {weightTrend.data.length} entries ({unitLabel})
-                    </Text>
-                    <View style={{ alignItems: 'flex-end' }}>
-                      <Text style={{ fontSize: 18, fontWeight: '800', color: theme.text, fontVariant: ['tabular-nums'] }}>
+                <StatCard title="Weigh-In Trend" theme={theme} rightLabel={
+                  editingWeight ? (
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <TextInput
+                        style={{
+                          backgroundColor: theme.background, borderRadius: 8,
+                          borderWidth: 1, borderColor: theme.border,
+                          paddingHorizontal: 8, paddingVertical: 2,
+                          fontSize: 14, fontWeight: '700', color: theme.text,
+                          minWidth: 60, textAlign: 'right', fontVariant: ['tabular-nums'],
+                        }}
+                        keyboardType="decimal-pad"
+                        value={editWeightInput}
+                        onChangeText={setEditWeightInput}
+                        autoFocus
+                        selectTextOnFocus
+                      />
+                      <Pressable
+                        onPress={handleSaveEditWeight}
+                        hitSlop={6}
+                        style={{ width: 22, height: 22, borderRadius: 11, backgroundColor: '#22C55E', alignItems: 'center', justifyContent: 'center' }}
+                      >
+                        <Ionicons name="checkmark" size={13} color="#FFFFFF" />
+                      </Pressable>
+                      <Pressable onPress={() => { setEditingWeight(false); setEditWeightInput(''); }} hitSlop={6}>
+                        <Ionicons name="close" size={16} color={theme.textSecondary} />
+                      </Pressable>
+                    </View>
+                  ) : (
+                    <Pressable onPress={handleEditWeight} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: theme.text, fontVariant: ['tabular-nums'] }}>
                         {weightTrend.current}
-                        <Text style={{ fontSize: 11, fontWeight: '500', color: theme.textSecondary }}> {unitLabel}</Text>
+                        <Text style={{ fontSize: 10, fontWeight: '500', color: theme.textSecondary }}> {unitLabel}</Text>
                       </Text>
                       {weightTrend.change !== null && (
-                        <Text style={{
-                          fontSize: 11,
-                          fontWeight: '600',
-                          color: weightTrend.change <= 0 ? '#22C55E' : '#EF4444',
-                        }}>
-                          {weightTrend.change > 0 ? '+' : ''}{weightTrend.change} {unitLabel}
+                        <Text style={{ fontSize: 10, fontWeight: '600', color: weightTrend.change <= 0 ? '#22C55E' : '#EF4444' }}>
+                          {weightTrend.change > 0 ? '+' : ''}{weightTrend.change}
                         </Text>
                       )}
-                    </View>
-                  </View>
+                      <Ionicons name="pencil" size={12} color={theme.textSecondary} />
+                    </Pressable>
+                  )
+                }>
                   <LineChart
                     data={weightTrend.data}
                     labels={weightTrend.labels}
@@ -1086,6 +1230,7 @@ export default function StatsScreen() {
                     theme={theme}
                     height={100}
                     formatValue={(v) => `${Math.round(v)}`}
+
                     onInteractionStart={() => setChartScrollLock(true)}
                     onInteractionEnd={() => setChartScrollLock(false)}
                   />
